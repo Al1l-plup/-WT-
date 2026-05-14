@@ -58,6 +58,7 @@ export const api = {
   spots: {
     list: (model_id) => get(model_id ? `/spots?model_id=${model_id}` : '/spots'),
     create: (data) => post('/spots', data),
+    gunInfo: (spot_id) => get(`/spots/${spot_id}/gun-info`),
   },
   maintenance: {
     list: () => get('/maintenance'),
