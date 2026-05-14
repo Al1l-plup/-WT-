@@ -19,6 +19,7 @@ export default function WorkersPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
 
+  const [search, setSearch] = useState('');
   const [deactivateTarget, setDeactivateTarget] = useState(null);
   const [endDate, setEndDate] = useState('');
   const [deactivating, setDeactivating] = useState(false);
@@ -69,16 +70,27 @@ export default function WorkersPage() {
         </button>
       </div>
 
+      <div className="search-bar">
+        <input className="search-input" type="text" placeholder="Поиск по ФИО, должности, email..."
+          value={search} onChange={e => setSearch(e.target.value)} />
+      </div>
+
       <div className="table-card">
-        {loading ? (
-          <div className="loading">Загрузка...</div>
-        ) : workers.length === 0 ? (
-          <div className="empty-state">Нет данных</div>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>ФИО</th>
+        {(() => {
+          const q = search.toLowerCase();
+          const filtered = workers.filter(w => !q ||
+            `${w.surname} ${w.name}`.toLowerCase().includes(q) ||
+            w.position?.toLowerCase().includes(q) ||
+            w.email?.toLowerCase().includes(q));
+          return loading ? (
+            <div className="loading">Загрузка...</div>
+          ) : filtered.length === 0 ? (
+            <div className="empty-state">{search ? 'Ничего не найдено' : 'Нет данных'}</div>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>ФИО</th>
                 <th>Должность</th>
                 <th>Email</th>
                 <th>Дата начала</th>
@@ -86,35 +98,33 @@ export default function WorkersPage() {
                 <th></th>
               </tr>
             </thead>
-            <tbody>
-              {workers.map((w) => (
-                <tr key={w.UniqueID}>
-                  <td>{w.surname} {w.name}</td>
-                  <td>{w.position}</td>
-                  <td>{w.email}</td>
-                  <td>{w.start_date ? w.start_date.slice(0, 10) : '-'}</td>
-                  <td>
-                    {isActive(w) ? (
-                      <span className="badge badge-green">Активен</span>
-                    ) : (
-                      <span className="badge badge-red">Уволен</span>
-                    )}
-                  </td>
-                  <td>
-                    {isActive(w) && (
-                      <button
-                        className="btn btn-danger btn-sm"
-                        onClick={() => setDeactivateTarget(w)}
-                      >
-                        Деактивировать
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+              <tbody>
+                {filtered.map((w) => (
+                  <tr key={w.UniqueID}>
+                    <td>{w.surname} {w.name}</td>
+                    <td>{w.position}</td>
+                    <td>{w.email}</td>
+                    <td>{w.start_date ? w.start_date.slice(0, 10) : '-'}</td>
+                    <td>
+                      {isActive(w) ? (
+                        <span className="badge badge-green">Активен</span>
+                      ) : (
+                        <span className="badge badge-red">Уволен</span>
+                      )}
+                    </td>
+                    <td>
+                      {isActive(w) && (
+                        <button className="btn btn-danger btn-sm" onClick={() => setDeactivateTarget(w)}>
+                          Деактивировать
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          );
+        })()}
       </div>
 
       {showModal && (

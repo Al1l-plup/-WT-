@@ -9,6 +9,7 @@ export default function GunsPage() {
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState('');
 
   const load = () => {
     setLoading(true);
@@ -45,11 +46,16 @@ export default function GunsPage() {
         </button>
       </div>
 
+      <div className="search-bar">
+        <input className="search-input" type="text" placeholder="Поиск по номеру или модели..."
+          value={search} onChange={e => setSearch(e.target.value)} />
+      </div>
+
       <div className="table-card">
         {loading ? (
           <div className="loading">Загрузка...</div>
-        ) : guns.length === 0 ? (
-          <div className="empty-state">Нет данных</div>
+        ) : guns.filter(g => !search || String(g.g_num).includes(search) || g.model.toLowerCase().includes(search.toLowerCase())).length === 0 ? (
+          <div className="empty-state">{search ? 'Ничего не найдено' : 'Нет данных'}</div>
         ) : (
           <table>
             <thead>
@@ -60,7 +66,7 @@ export default function GunsPage() {
               </tr>
             </thead>
             <tbody>
-              {guns.map((g) => (
+              {guns.filter(g => !search || String(g.g_num).includes(search) || g.model.toLowerCase().includes(search.toLowerCase())).map((g) => (
                 <tr key={g.UniqueID}>
                   <td>{g.UniqueID}</td>
                   <td>{g.g_num}</td>

@@ -1,12 +1,60 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 
+function SpotPicker({ spots, value, onChange }) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+
+  const filtered = query.trim().length > 0
+    ? spots.filter(s => String(s.spot_number).includes(query)).slice(0, 30)
+    : [];
+
+  const selected = value ? spots.find(s => s.UniqueID === Number(value)) : null;
+  const displayValue = open ? query : (selected ? `№${selected.spot_number} — ${selected.model_name}` : '');
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <input
+        className="form-input"
+        type="text"
+        placeholder="Введите номер точки..."
+        value={displayValue}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onChange={e => { setQuery(e.target.value); onChange(''); }}
+      />
+      {open && filtered.length > 0 && (
+        <div className="spot-dropdown">
+          {filtered.map(s => (
+            <div
+              key={s.UniqueID}
+              className="spot-option"
+              onMouseDown={() => {
+                onChange(String(s.UniqueID));
+                setQuery(`№${s.spot_number} — ${s.model_name}`);
+                setOpen(false);
+              }}
+            >
+              №{s.spot_number} — {s.model_name} ({s.model_code})
+            </div>
+          ))}
+        </div>
+      )}
+      {open && query.trim().length === 0 && (
+        <div className="spot-dropdown">
+          <div className="spot-hint">Начните вводить номер точки...</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const EMPTY_FORM = {
   problem_code: '',
   root_cause: '',
   solution: '',
   df_date: '',
-  worker_id: '',
+  worker_name: '',
   spot_id: '',
   gun_id: '',
 };
@@ -20,6 +68,8 @@ export default function DefectsPage() {
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
 
   const load = () => {
     setLoading(true);
@@ -31,7 +81,7 @@ export default function DefectsPage() {
     ])
       .then(([d, w, s, g]) => {
         setDefects(d);
-        setWorkers(w.filter((wk) => wk.is_active === 1 || wk.is_active === true));
+        setWorkers(w.filter(wk => wk.is_active === 1 || wk.is_active === true));
         setSpots(s);
         setGuns(g);
       })
@@ -43,46 +93,65 @@ export default function DefectsPage() {
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    setError('');
+    if (!form.spot_id) { setError('Выберите точку сварки'); return; }
     setSaving(true);
-    const payload = {
+    api.defects.create({
       problem_code: form.problem_code,
       root_cause: form.root_cause,
       solution: form.solution,
       df_date: form.df_date,
-      worker_id: Number(form.worker_id),
+      worker_name: Number(form.worker_name),
       spot_id: Number(form.spot_id),
       gun_id: Number(form.gun_id),
-    };
-    api.defects.create(payload)
+    })
       .then(() => { setShowModal(false); setForm(EMPTY_FORM); load(); })
-      .catch(console.error)
+      .catch(err => setError(err.message))
       .finally(() => setSaving(false));
   };
 
   const handleDelete = (id) => {
     if (!window.confirm('Удалить запись о дефекте?')) return;
-    api.defects.delete(id)
-      .then(load)
-      .catch(console.error);
+    api.defects.delete(id).then(load).catch(console.error);
   };
+
+  const q = search.toLowerCase();
+  const filtered = defects.filter(d =>
+    !q ||
+    d.problem_code?.toLowerCase().includes(q) ||
+    d.root_cause?.toLowerCase().includes(q) ||
+    d.worker_full_name?.toLowerCase().includes(q) ||
+    String(d.spot_number).includes(q) ||
+    String(d.g_num).includes(q)
+  );
 
   return (
     <div>
       <div className="page-header">
-        <div className="page-header-left">
+        <div>
           <h1 className="page-title">Дефекты</h1>
           <span className="page-subtitle">Записи о дефектах сварки</span>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+        <button className="btn btn-primary" onClick={() => { setError(''); setShowModal(true); }}>
           + Добавить
         </button>
+      </div>
+
+      <div className="search-bar">
+        <input
+          className="search-input"
+          type="text"
+          placeholder="Поиск по коду, причине, работнику, точке, пистолету..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
       </div>
 
       <div className="table-card">
         {loading ? (
           <div className="loading">Загрузка...</div>
-        ) : defects.length === 0 ? (
-          <div className="empty-state">Нет записей</div>
+        ) : filtered.length === 0 ? (
+          <div className="empty-state">{search ? 'Ничего не найдено' : 'Нет записей'}</div>
         ) : (
           <table>
             <thead>
@@ -98,24 +167,17 @@ export default function DefectsPage() {
               </tr>
             </thead>
             <tbody>
-              {defects.map((d) => (
+              {filtered.map(d => (
                 <tr key={d.UniqueID}>
-                  <td>{d.problem_code}</td>
-                  <td style={{ maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {d.root_cause}
-                  </td>
-                  <td style={{ maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {d.solution}
-                  </td>
-                  <td>{d.df_date ? d.df_date.slice(0, 10) : '-'}</td>
+                  <td><span className="badge badge-red">{d.problem_code}</span></td>
+                  <td className="td-truncate">{d.root_cause}</td>
+                  <td className="td-truncate">{d.solution}</td>
+                  <td>{d.df_date ? d.df_date.slice(0, 10) : '—'}</td>
                   <td>{d.worker_full_name || d.worker_name}</td>
                   <td>{d.spot_number}</td>
                   <td>{d.g_num}</td>
                   <td>
-                    <button
-                      className="btn btn-danger btn-sm"
-                      onClick={() => handleDelete(d.UniqueID)}
-                    >
+                    <button className="btn btn-danger btn-sm" onClick={() => handleDelete(d.UniqueID)}>
                       Удалить
                     </button>
                   </td>
@@ -127,58 +189,52 @@ export default function DefectsPage() {
       </div>
 
       {showModal && (
-        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowModal(false); }}>
+        <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setShowModal(false); }}>
           <div className="modal">
             <div className="modal-title">Добавить дефект</div>
+            {error && <div className="form-error">{error}</div>}
             <form onSubmit={handleSubmit}>
               <div className="form-group">
                 <label className="form-label">Код проблемы</label>
-                <input className="form-input" type="text" required value={form.problem_code}
-                  onChange={(e) => setForm({ ...form, problem_code: e.target.value })} />
+                <input className="form-input" type="text" required maxLength={3} value={form.problem_code}
+                  onChange={e => setForm({ ...form, problem_code: e.target.value })} />
               </div>
               <div className="form-group">
                 <label className="form-label">Первопричина</label>
                 <textarea className="form-textarea" required value={form.root_cause}
-                  onChange={(e) => setForm({ ...form, root_cause: e.target.value })} />
+                  onChange={e => setForm({ ...form, root_cause: e.target.value })} />
               </div>
               <div className="form-group">
                 <label className="form-label">Решение</label>
                 <textarea className="form-textarea" required value={form.solution}
-                  onChange={(e) => setForm({ ...form, solution: e.target.value })} />
+                  onChange={e => setForm({ ...form, solution: e.target.value })} />
               </div>
               <div className="form-group">
                 <label className="form-label">Дата</label>
                 <input className="form-input" type="date" required value={form.df_date}
-                  onChange={(e) => setForm({ ...form, df_date: e.target.value })} />
+                  onChange={e => setForm({ ...form, df_date: e.target.value })} />
               </div>
               <div className="form-group">
                 <label className="form-label">Работник</label>
-                <select className="form-select" required value={form.worker_id}
-                  onChange={(e) => setForm({ ...form, worker_id: e.target.value })}>
+                <select className="form-select" required value={form.worker_name}
+                  onChange={e => setForm({ ...form, worker_name: e.target.value })}>
                   <option value="">— выбрать —</option>
-                  {workers.map((w) => (
+                  {workers.map(w => (
                     <option key={w.UniqueID} value={w.UniqueID}>{w.surname} {w.name}</option>
                   ))}
                 </select>
               </div>
               <div className="form-group">
                 <label className="form-label">Точка сварки</label>
-                <select className="form-select" required value={form.spot_id}
-                  onChange={(e) => setForm({ ...form, spot_id: e.target.value })}>
-                  <option value="">— выбрать —</option>
-                  {spots.map((s) => (
-                    <option key={s.UniqueID} value={s.UniqueID}>
-                      №{s.spot_number} — {s.model_name} ({s.model_code})
-                    </option>
-                  ))}
-                </select>
+                <SpotPicker spots={spots} value={form.spot_id}
+                  onChange={v => setForm({ ...form, spot_id: v })} />
               </div>
               <div className="form-group">
                 <label className="form-label">Пистолет</label>
                 <select className="form-select" required value={form.gun_id}
-                  onChange={(e) => setForm({ ...form, gun_id: e.target.value })}>
+                  onChange={e => setForm({ ...form, gun_id: e.target.value })}>
                   <option value="">— выбрать —</option>
-                  {guns.map((g) => (
+                  {guns.map(g => (
                     <option key={g.UniqueID} value={g.UniqueID}>№{g.g_num} — {g.model}</option>
                   ))}
                 </select>
