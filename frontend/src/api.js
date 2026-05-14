@@ -34,7 +34,7 @@ async function patch(path, body) {
 
 export const api = {
   guns: {
-    list: () => get('/guns'),
+    list: (brand_id) => get(brand_id ? `/guns?brand_id=${brand_id}` : '/guns'),
     create: (data) => post('/guns', data),
   },
   workers: {
@@ -58,7 +58,7 @@ export const api = {
   spots: {
     list: (model_id) => get(model_id ? `/spots?model_id=${model_id}` : '/spots'),
     create: (data) => post('/spots', data),
-    gunInfo: (spot_id) => get(`/spots/${spot_id}/gun-info`),
+    brandInfo: (spot_id) => get(`/spots/${spot_id}/brand-info`),
   },
   maintenance: {
     list: () => get('/maintenance'),

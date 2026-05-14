@@ -640,3 +640,11 @@
   font-size: 14px;
   color: #166534;
 }
+
+.form-label-hint {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #2563eb;
+  font-size: 11px;
+}
