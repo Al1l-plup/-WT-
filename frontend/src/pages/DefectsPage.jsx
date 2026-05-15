@@ -9,8 +9,13 @@ function SpotPicker({ spots, value, onChange }) {
     ? spots.filter(s => String(s.spot_number).includes(query.trim())).slice(0, 30)
     : [];
 
+  const modelLabel = (s) => {
+    const type = (s.type && s.type !== 'single') ? ` ${s.type}` : '';
+    return `№${s.spot_number} — ${s.model_name}${type}`;
+  };
+
   const selected = value ? spots.find(s => s.UniqueID === Number(value)) : null;
-  const displayValue = open ? query : (selected ? `№${selected.spot_number} — ${selected.model_name}` : '');
+  const displayValue = open ? query : (selected ? modelLabel(selected) : '');
 
   return (
     <div style={{ position: 'relative' }}>
@@ -31,8 +36,8 @@ function SpotPicker({ spots, value, onChange }) {
               ? <div className="spot-hint">Ничего не найдено</div>
               : filtered.map(s => (
                 <div key={s.UniqueID} className="spot-option"
-                  onMouseDown={() => { onChange(s); setQuery(`№${s.spot_number} — ${s.model_name}`); setOpen(false); }}>
-                  №{s.spot_number} — {s.model_name} ({s.model_code})
+                  onMouseDown={() => { onChange(s); setQuery(modelLabel(s)); setOpen(false); }}>
+                  {modelLabel(s)} ({s.model_code})
                 </div>
               ))
           }
@@ -45,8 +50,13 @@ function SpotPicker({ spots, value, onChange }) {
 function SpotInfoCard({ spotInfo }) {
   if (!spotInfo) return null;
   const brandColor = { Chery: 'badge-blue', GWM: 'badge-yellow', Changan: 'badge-green' }[spotInfo.brand] || 'badge-gray';
-  const hasParams = spotInfo.pressure || spotInfo.weld_2;
-  const isDualPulse = spotInfo.weld_1 > 0; // GWM — двухимпульсная сварка
+  const hasParams = spotInfo.pressure;
+  // weld_1>0 и weld_2>0 — двухимпульсная (Jolion)
+  // weld_1>0 и weld_2=0 — одноимпульсная, но данные в колонке 1 (Tank 300)
+  // weld_1=0 — обычная одноимпульсная (Chery, Changan), данные в колонке 2
+  const isDualPulse = spotInfo.weld_1 > 0 && spotInfo.weld_2 > 0;
+  const isSingleInCol1 = spotInfo.weld_1 > 0 && !spotInfo.weld_2;
+  const modelType = (spotInfo.model_type && spotInfo.model_type !== 'single') ? ` ${spotInfo.model_type}` : '';
   return (
     <div className="gun-info-card" style={{ borderColor: '#a7f3d0', background: '#f0fdf4' }}>
       <div className="gun-info-title" style={{ color: '#166534' }}>
@@ -59,7 +69,7 @@ function SpotInfoCard({ spotInfo }) {
         </div>
         <div className="gun-info-item">
           <span className="gun-info-label">Модель авто</span>
-          <span className="gun-info-value">{spotInfo.model_name} ({spotInfo.model_code})</span>
+          <span className="gun-info-value">{spotInfo.model_name}{modelType} ({spotInfo.model_code})</span>
         </div>
         <div className="gun-info-item">
           <span className="gun-info-label">Участок</span>
@@ -83,7 +93,12 @@ function SpotInfoCard({ spotInfo }) {
               <span className="gun-info-label">Ток импульс 2 / Режим</span>
               <span className="gun-info-value">{spotInfo.heat_2} А &nbsp;<span className="badge badge-gray">{spotInfo.weld_2} мс</span> &nbsp;<span className="badge badge-blue">{spotInfo.mode}</span></span>
             </div>
-          </> : (
+          </> : isSingleInCol1 ? (
+            <div className="gun-info-item">
+              <span className="gun-info-label">Ток / Режим</span>
+              <span className="gun-info-value">{spotInfo.heat_1} А &nbsp;<span className="badge badge-gray">{spotInfo.weld_1} мс</span> &nbsp;<span className="badge badge-blue">{spotInfo.mode}</span></span>
+            </div>
+          ) : (
             <div className="gun-info-item">
               <span className="gun-info-label">Ток / Режим</span>
               <span className="gun-info-value">{spotInfo.heat_2} А &nbsp;<span className="badge badge-gray">{spotInfo.weld_2} мс</span> &nbsp;<span className="badge badge-blue">{spotInfo.mode}</span></span>

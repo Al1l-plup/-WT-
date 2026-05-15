@@ -33,6 +33,7 @@ router.get('/:id/gun-info', (req, res) => {
       m.UniqueID    AS model_id,
       m.model_name,
       m.model_code,
+      m.type        AS model_type,
       b.UniqueID    AS brand_id,
       b.brand,
       g.UniqueID    AS gun_id,
