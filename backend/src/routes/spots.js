@@ -43,7 +43,7 @@ router.get('/:id/gun-info', (req, res) => {
       t.type        AS trans_type,
       s.UniqueID    AS station_id,
       s.station_name,
-      p.pressure, p.weld_2, p.heat_2, p.turn_R, p.mode
+      p.pressure, p.weld_1, p.heat_1, p.cool_1, p.weld_2, p.heat_2, p.turn_R, p.mode
     FROM spot sp
     JOIN model m ON sp.model_id = m.UniqueID
     JOIN brand b ON m.brand_id  = b.UniqueID

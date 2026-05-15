@@ -46,6 +46,7 @@ function SpotInfoCard({ spotInfo }) {
   if (!spotInfo) return null;
   const brandColor = { Chery: 'badge-blue', GWM: 'badge-yellow', Changan: 'badge-green' }[spotInfo.brand] || 'badge-gray';
   const hasParams = spotInfo.pressure || spotInfo.weld_2;
+  const isDualPulse = spotInfo.weld_1 > 0; // GWM — двухимпульсная сварка
   return (
     <div className="gun-info-card" style={{ borderColor: '#a7f3d0', background: '#f0fdf4' }}>
       <div className="gun-info-title" style={{ color: '#166534' }}>
@@ -64,6 +65,8 @@ function SpotInfoCard({ spotInfo }) {
           <span className="gun-info-label">Участок</span>
           <span className="gun-info-value">
             <span className={`badge ${brandColor}`}>{spotInfo.brand}</span>
+            &nbsp;
+            <span className="badge badge-gray">{isDualPulse ? '2 импульса' : '1 импульс'}</span>
           </span>
         </div>
         {hasParams && <>
@@ -71,10 +74,21 @@ function SpotInfoCard({ spotInfo }) {
             <span className="gun-info-label">Давление</span>
             <span className="gun-info-value">{spotInfo.pressure} даН</span>
           </div>
-          <div className="gun-info-item">
-            <span className="gun-info-label">Ток / Режим</span>
-            <span className="gun-info-value">{spotInfo.heat_2} А &nbsp;<span className="badge badge-blue">{spotInfo.mode}</span></span>
-          </div>
+          {isDualPulse ? <>
+            <div className="gun-info-item">
+              <span className="gun-info-label">Ток импульс 1</span>
+              <span className="gun-info-value">{spotInfo.heat_1} А &nbsp;<span className="badge badge-gray">{spotInfo.weld_1} мс</span></span>
+            </div>
+            <div className="gun-info-item">
+              <span className="gun-info-label">Ток импульс 2 / Режим</span>
+              <span className="gun-info-value">{spotInfo.heat_2} А &nbsp;<span className="badge badge-gray">{spotInfo.weld_2} мс</span> &nbsp;<span className="badge badge-blue">{spotInfo.mode}</span></span>
+            </div>
+          </> : (
+            <div className="gun-info-item">
+              <span className="gun-info-label">Ток / Режим</span>
+              <span className="gun-info-value">{spotInfo.heat_2} А &nbsp;<span className="badge badge-gray">{spotInfo.weld_2} мс</span> &nbsp;<span className="badge badge-blue">{spotInfo.mode}</span></span>
+            </div>
+          )}
           <div className="gun-info-item">
             <span className="gun-info-label">Электрод (turn_R)</span>
             <span className="gun-info-value">{spotInfo.turn_R} мм</span>
