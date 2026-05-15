@@ -302,7 +302,7 @@ export default function DefectsPage() {
               <thead>
                 <tr>
                   <th>Код</th><th>Причина</th><th>Решение</th>
-                  <th>Дата</th><th>Работник</th><th>Точка №</th><th>Пистолет</th><th></th>
+                  <th>Дата</th><th>Работник</th><th>Участок</th><th>Точка №</th><th>Пистолет</th><th></th>
                 </tr>
               </thead>
               <tbody>
@@ -313,6 +313,12 @@ export default function DefectsPage() {
                     <td className="td-truncate">{d.solution}</td>
                     <td>{d.df_date ? d.df_date.slice(0, 10) : '—'}</td>
                     <td>{d.worker_full_name || d.worker_name}</td>
+                    <td>
+                      <span className={`badge ${{ Chery: 'badge-blue', GWM: 'badge-yellow', Changan: 'badge-green' }[d.brand] || 'badge-gray'}`}>
+                        {d.brand}
+                      </span>
+                      {d.model_type && <span className="badge badge-gray" style={{marginLeft:4}}>{d.model_type}</span>}
+                    </td>
                     <td>{d.spot_number}</td>
                     <td>{d.g_num}</td>
                     <td>

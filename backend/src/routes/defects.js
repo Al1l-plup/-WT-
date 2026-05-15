@@ -7,11 +7,16 @@ router.get('/', (req, res) => {
     SELECT d.*,
       w.surname || ' ' || w.name AS worker_full_name,
       sp.spot_number,
-      g.g_num
+      g.g_num,
+      b.brand,
+      m.model_name,
+      CASE WHEN m.type != 'single' THEN m.type ELSE '' END AS model_type
     FROM defects d
     JOIN worker w ON d.worker_name = w.UniqueID
     JOIN spot sp ON d.spot_id = sp.UniqueID
     JOIN gun g ON d.gun_id = g.UniqueID
+    JOIN model m ON sp.model_id = m.UniqueID
+    JOIN brand b ON m.brand_id = b.UniqueID
   `).all();
   res.json(rows);
 });
