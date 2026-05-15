@@ -1,4 +1,4 @@
-const BASE = 'http://localhost:3001/api';
+const BASE = import.meta.env.PROD ? '/api' : 'http://localhost:3001/api';
 
 async function get(path) {
   const res = await fetch(`${BASE}${path}`);
@@ -58,6 +58,7 @@ export const api = {
   spots: {
     list: (model_id) => get(model_id ? `/spots?model_id=${model_id}` : '/spots'),
     create: (data) => post('/spots', data),
+    gunInfo: (spot_id) => get(`/spots/${spot_id}/gun-info`),
     brandInfo: (spot_id) => get(`/spots/${spot_id}/brand-info`),
   },
   maintenance: {

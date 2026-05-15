@@ -45,9 +45,12 @@ function SpotPicker({ spots, value, onChange }) {
 function SpotInfoCard({ spotInfo }) {
   if (!spotInfo) return null;
   const brandColor = { Chery: 'badge-blue', GWM: 'badge-yellow', Changan: 'badge-green' }[spotInfo.brand] || 'badge-gray';
+  const hasParams = spotInfo.pressure || spotInfo.weld_2;
   return (
     <div className="gun-info-card" style={{ borderColor: '#a7f3d0', background: '#f0fdf4' }}>
-      <div className="gun-info-title" style={{ color: '#166534' }}>Точка найдена</div>
+      <div className="gun-info-title" style={{ color: '#166534' }}>
+        {spotInfo.gun_id ? 'Точка и пистолет определены автоматически' : 'Точка найдена'}
+      </div>
       <div className="gun-info-grid">
         <div className="gun-info-item">
           <span className="gun-info-label">Номер точки</span>
@@ -63,6 +66,20 @@ function SpotInfoCard({ spotInfo }) {
             <span className={`badge ${brandColor}`}>{spotInfo.brand}</span>
           </span>
         </div>
+        {hasParams && <>
+          <div className="gun-info-item">
+            <span className="gun-info-label">Давление</span>
+            <span className="gun-info-value">{spotInfo.pressure} даН</span>
+          </div>
+          <div className="gun-info-item">
+            <span className="gun-info-label">Ток / Режим</span>
+            <span className="gun-info-value">{spotInfo.heat_2} А &nbsp;<span className="badge badge-blue">{spotInfo.mode}</span></span>
+          </div>
+          <div className="gun-info-item">
+            <span className="gun-info-label">Электрод (turn_R)</span>
+            <span className="gun-info-value">{spotInfo.turn_R} мм</span>
+          </div>
+        </>}
       </div>
     </div>
   );
@@ -157,11 +174,22 @@ export default function DefectsPage() {
     setForm(f => ({ ...f, spot_id: String(spot.UniqueID), gun_id: '' }));
     setSelectedGun(null);
 
-    // загружаем бренд точки и фильтруем пистолеты
-    api.spots.brandInfo(spot.UniqueID).then(info => {
+    // сначала пробуем точный поиск через welding_setup
+    api.spots.gunInfo(spot.UniqueID).then(info => {
       setSpotInfo(info);
-      // фильтруем пистолеты по бренду
-      api.guns.list(info.brand_id).then(guns => setFilteredGuns(guns));
+      if (info.gun_id) {
+        // пистолет найден точно — автозаполняем
+        setForm(f => ({ ...f, spot_id: String(spot.UniqueID), gun_id: String(info.gun_id) }));
+        setSelectedGun({
+          UniqueID: info.gun_id, g_num: info.g_num, model: info.gun_model,
+          transID: info.transID, trans_type: info.trans_type,
+          station_name: info.station_name, brand: info.brand,
+        });
+        setFilteredGuns(allGuns);
+      } else {
+        // welding_setup пустой для этой точки — фильтруем по бренду
+        api.guns.list(info.brand_id).then(guns => setFilteredGuns(guns));
+      }
     }).catch(() => {
       setSpotInfo(null);
       setFilteredGuns(allGuns);

@@ -61,6 +61,9 @@
 | heat_2 | INTEGER | NOT NULL |
 | hold | INTEGER | NOT NULL |
 | turn_R | DECIMAL(3,1) | NOT NULL |
+| mode | VARCHAR | - (режим: A, B, ...) |
+
+**Data:** 547 записей
 
 ---
 
@@ -220,6 +223,9 @@ trans ──< gun_transformer_sssignment >── gun
 ---
 
 ## Key Notes
-- `is_active` pattern used for soft-deactivation across: worker, transformer_station_assignment, gun_transformer_sssignment, welding_setup
+- `is_active` pattern used for soft-deactivation across: worker, transformer_station_assignment, gun_transformer_assignment, welding_setup
 - Transferring a spot = deactivate old welding_setup + create new one with different gun_id
 - Database is SQLite (file-based, no server needed)
+- **welding_setup**: 13 796 записей — точная связь spot→gun→parameters заполнена (14.05.2026)
+- **parameters**: 547 записей с полем mode (A/B/...)
+- Таблица в БД: gun_transformer_assignment (2 буквы s, не 3)
