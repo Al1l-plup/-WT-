@@ -648,3 +648,117 @@
   color: #2563eb;
   font-size: 11px;
 }
+
+/* ========================
+   MOBILE HEADER (скрыт на десктопе)
+   ======================== */
+.mobile-header {
+  display: none;
+}
+
+.hamburger {
+  display: none;
+}
+
+/* ========================
+   MOBILE RESPONSIVE
+   ======================== */
+@media (max-width: 768px) {
+  .mobile-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 56px;
+    background: #0f172a;
+    z-index: 200;
+    padding: 0 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
+
+  .hamburger {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 6px;
+    line-height: 1;
+    border-radius: 6px;
+    transition: background 0.15s;
+  }
+
+  .hamburger:hover {
+    background: rgba(255,255,255,0.1);
+  }
+
+  .mobile-title {
+    color: #fff;
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+  }
+
+  /* Сайдбар — скрыт, выезжает по тапу */
+  .sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    z-index: 300;
+  }
+
+  .sidebar.sidebar-open {
+    transform: translateX(0);
+  }
+
+  /* Затемнение за сайдбаром */
+  .sidebar-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 250;
+  }
+
+  /* Контент — без отступа слева, с отступом сверху под шапку */
+  .content {
+    margin-left: 0;
+    padding: 72px 14px 24px;
+  }
+
+  /* Заголовок страницы — в столбик на узком экране */
+  .page-header {
+    flex-direction: column;
+    gap: 12px;
+    align-items: flex-start;
+  }
+
+  /* Таблицы — горизонтальный скролл */
+  .table-card {
+    overflow-x: auto;
+  }
+
+  /* Форма из 3 колонок → 1 колонка */
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+
+  /* Статистика — 2 колонки */
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  /* Поиск — на всю ширину */
+  .search-input {
+    max-width: 100%;
+  }
+
+  /* Модальное окно — почти на весь экран */
+  .modal {
+    padding: 20px 16px;
+  }
+}

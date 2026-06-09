@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ТО — WeldTeam MES</title>
+  <script src="/static/theme.js"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <a class="nav-brand" href="/">WeldTeam <span>/ цех BS</span></a>
+  <div class="nav-links">
+    <a class="nav-link" href="/">Главная</a>
+    <a class="nav-link active" href="/maintenance">ТО</a>
+    <a class="nav-link" href="/defects">Дефекты</a>
+    <a class="nav-link" href="/analytics">Аналитика</a>
+    <a class="nav-link" href="/workers">Сотрудники</a>
+    <a class="nav-link" href="/explorer">Обзор</a>
+    <button class="btn-theme" id="themeToggle">☀</button>
+  </div>
+</nav>
+
+<div class="page">
+
+  <!-- ══════════════════════════════════════════
+       РЕЖИМ 1: АНАЛИТИКА (по умолчанию)
+  ══════════════════════════════════════════ -->
+  <div id="analyticsView">
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:1.25rem">
+      <div class="page-head" style="margin-bottom:0">
+        <h1>Техническое обслуживание</h1>
+        <p>Аналитика и история · Поиск по клещам</p>
+      </div>
+      <button class="btn btn-primary" id="goEntryBtn">Ввести ТО →</button>
+    </div>
+
+    <!-- ── ДОСКА ЕЖЕДНЕВНЫХ ЗАДАЧ ── -->
+    <div style="margin-bottom:1.5rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem">
+        <div>
+          <span style="font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">Ежедневный план ТО</span>
+          <span class="text-muted text-sm" id="planDateLabel" style="margin-left:.5rem"></span>
+        </div>
+        <button class="btn btn-ghost btn-sm" id="assignBtn">+ Назначить</button>
+      </div>
+
+      <!-- Панель назначения (скрыта) -->
+      <div id="assignPanel" class="card hidden" style="margin-bottom:.75rem">
+        <div class="card-title accent">Назначить клещи на ТО</div>
+        <div class="g2">
+          <div class="fgroup">
+            <label class="lbl">Бренд</label>
+            <select id="planBrandSelect">
+              <option value="">— все бренды —</option>
+            </select>
+          </div>
+          <div class="fgroup">
+            <label class="lbl">Дата задачи</label>
+            <input type="date" id="planTaskDate">
+          </div>
+        </div>
+        <div class="fgroup">
+          <label class="lbl">Назначает</label>
+          <select id="planCreatorSelect"><option value="">Выберите сотрудника...</option></select>
+        </div>
+        <div id="scheduleList" style="margin:.75rem 0;max-height:320px;overflow-y:auto">
+          <div class="text-muted text-sm">Выберите бренд для просмотра плана на этот месяц...</div>
+        </div>
+        <div id="assignAlert" class="hidden"></div>
+        <div style="display:flex;gap:.5rem;margin-top:.5rem">
+          <button class="btn btn-ghost" id="cancelAssignBtn">Отмена</button>
+          <button class="btn btn-primary" id="confirmAssignBtn">Назначить выбранное</button>
+        </div>
+      </div>
+
+      <!-- Таблица задач -->
+      <div class="card">
+        <div class="tbl-wrap">
+          <table class="tbl tbl-mobile">
+            <thead>
+              <tr><th>Пистолет [тип]</th><th>Бренд</th><th>Станция</th><th>Тип ТО</th><th>Статус</th><th>Исполнитель</th><th></th></tr>
+            </thead>
+            <tbody id="dailyTasksBody">
+              <tr class="empty-row"><td colspan="6">Нет задач на сегодня</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Счётчики -->
+    <div class="g2" style="margin-bottom:1rem">
+      <div class="stat">
+        <div class="stat-val accent" id="a-total">—</div>
+        <div class="stat-lbl">Всего записей ТО</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val" id="a-month">—</div>
+        <div class="stat-lbl">Записей в этом месяце</div>
+      </div>
+    </div>
+
+    <!-- By brand + by month -->
+    <div class="g2" style="margin-bottom:1rem">
+      <div class="card">
+        <div class="card-title">ТО по линиям / брендам</div>
+        <div class="brand-bars" id="brandBars">
+          <div class="text-muted text-sm">Загрузка...</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">По месяцам (последние 6)</div>
+        <div class="month-list" id="monthList">
+          <div class="text-muted text-sm">Загрузка...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Последние записи ТО -->
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-title">Последние записи ТО</div>
+      <div class="tbl-wrap">
+        <table class="tbl tbl-mobile">
+          <thead><tr><th>Дата</th><th>Линия</th><th>Пистолет</th><th>Ср. ток (А)</th><th>Ср. давление (daN)</th><th>Сотрудник</th></tr></thead>
+          <tbody id="recentMaintTable"><tr class="empty-row"><td colspan="6">Нет данных</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Прогресс выполнения плана ТО -->
+    <div class="card" style="margin-bottom:1rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+        <div class="card-title" style="margin:0">Прогресс выполнения плана ТО</div>
+        <div style="display:flex;align-items:center;gap:.5rem">
+          <select id="progressMonthSel" style="font-size:13px;padding:.25rem .5rem;background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--fg)"></select>
+          <button class="btn btn-ghost btn-sm" id="refreshProgressBtn">↻</button>
+        </div>
+      </div>
+      <div id="progressContent">
+        <div class="text-muted text-sm">Загрузка...</div>
+      </div>
+    </div>
+
+    <!-- Поиск истории клещей -->
+    <div class="card">
+      <div class="card-title">История клещей — поиск по номеру</div>
+      <div class="search-row" style="margin-bottom:.75rem">
+        <div class="fgroup" style="margin:0;flex:1">
+          <input type="number" id="histGunNum" placeholder="Номер пистолета (g_num), напр. 12" min="1">
+        </div>
+        <button class="btn btn-ghost" id="histSearchBtn">Найти историю</button>
+      </div>
+      <div id="histSearchAlert" class="hidden"></div>
+
+      <div id="histResult" class="hidden">
+        <div class="g3 mt-2">
+          <div class="card" style="padding:.75rem">
+            <div class="card-title success" style="margin-bottom:.5rem">Записи ТО</div>
+            <div class="tbl-wrap">
+              <table class="tbl">
+                <thead><tr><th>Дата</th><th>Ток (ср.)</th><th>Сотрудник</th></tr></thead>
+                <tbody id="h_maint"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card" style="padding:.75rem">
+            <div class="card-title danger" style="margin-bottom:.5rem">Дефекты клещей</div>
+            <div class="tbl-wrap">
+              <table class="tbl">
+                <thead><tr><th>Дата</th><th>Точка</th><th>Код</th></tr></thead>
+                <tbody id="h_defects"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card" style="padding:.75rem">
+            <div class="card-title warn" style="margin-bottom:.5rem">Архив уставок</div>
+            <div class="tbl-wrap">
+              <table class="tbl">
+                <thead><tr><th>Дата</th><th>Реж.</th><th>Ток 1</th><th>Ток 2</th><th>Комментарий</th></tr></thead>
+                <tbody id="h_params"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       РЕЖИМ 2: ВВОД ТО (скрыт по умолчанию)
+  ══════════════════════════════════════════ -->
+  <div id="entryView" class="hidden">
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:1.25rem">
+      <div class="page-head" style="margin-bottom:0">
+        <h1>Ввод замеров ТО</h1>
+        <p>Выберите клещи и заполните замеры</p>
+      </div>
+      <button class="btn btn-ghost" id="goAnalyticsBtn">← Назад</button>
+    </div>
+
+    <!-- Баннер подтверждения (показывается при запуске из плана) -->
+    <div id="taskConfirmBanner" class="card hidden" style="margin-bottom:1rem;border-left:3px solid var(--accent);padding:.75rem 1rem">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">ТО по задаче из плана</div>
+          <div style="font-size:16px;font-weight:700;margin-top:.2rem" id="taskGunInfo">...</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" id="backToPlanBtn">← К плану</button>
+      </div>
+    </div>
+
+    <div class="g-left">
+      <!-- LEFT: выбор клещей (скрывается в режиме задачи) -->
+      <div id="gunSelectionCard">
+        <div class="card">
+          <div class="card-title">Выбор клещей — по линии</div>
+          <div class="fgroup">
+            <label class="lbl">Бренд</label>
+            <select id="brandSelect"><option value="">Выберите бренд...</option></select>
+          </div>
+          <div class="fgroup">
+            <label class="lbl">Станция / Пост</label>
+            <select id="stationSelect" disabled><option value="">— сначала бренд —</option></select>
+          </div>
+          <div class="fgroup">
+            <label class="lbl">Сварочные клещи</label>
+            <select id="gunSelect" disabled><option value="">— сначала станция —</option></select>
+          </div>
+
+          <div class="sep">или ввести вручную</div>
+
+          <div class="fgroup">
+            <label class="lbl">Номер пистолета (g_num)</label>
+            <div class="search-row">
+              <input type="number" id="gunNumInput" placeholder="Например: 12" min="1" style="flex:1">
+              <button class="btn btn-ghost btn-sm" id="gunNumSearch">Найти</button>
+            </div>
+          </div>
+          <div id="gunNumAlert" class="hidden"></div>
+        </div>
+      </div>
+      </div><!-- /gunSelectionCard -->
+
+      <!-- RIGHT: параметры + форма -->
+      <div>
+        <div class="card card-dark hidden" id="paramCard">
+          <div class="card-title warn">Уставки техпроцесса</div>
+          <div class="fgroup">
+            <label class="lbl">Режим</label>
+            <select id="paramSelect"></select>
+          </div>
+          <div class="params-grid">
+            <div class="pbox"><div class="pl">Давление (daN)</div><div class="pv" id="pv-pres">—</div></div>
+            <div class="pbox blue"><div class="pl">К.Трансф.</div><div class="pv" id="pv-turnr">—</div></div>
+            <div class="pbox"><div class="pl">Время св.1</div><div class="pv dim" id="pv-w1">—</div></div>
+            <div class="pbox red"><div class="pl">Ток 1 (A)</div><div class="pv" id="pv-h1">—</div></div>
+            <div class="pbox"><div class="pl">Время св.2</div><div class="pv dim" id="pv-w2">—</div></div>
+            <div class="pbox red"><div class="pl">Ток 2 (A)</div><div class="pv" id="pv-h2">—</div></div>
+          </div>
+
+          <details>
+            <summary>Дополнительные параметры циклограммы</summary>
+            <div class="collapse-body">
+              <div class="inputs-row-2 mt-1">
+                <div class="fgroup"><label class="lbl">Сжатие</label><input type="number" id="p_squeeze_time"></div>
+                <div class="fgroup"><label class="lbl">Нарастание</label><input type="number" id="p_up_slope_time"></div>
+                <div class="fgroup"><label class="lbl">Охлаждение</label><input type="number" id="p_cool_1"></div>
+                <div class="fgroup"><label class="lbl">Удержание</label><input type="number" id="p_hold"></div>
+              </div>
+            </div>
+          </details>
+
+          <div class="mt-2">
+            <div class="inputs-row-2">
+              <div class="fgroup"><label class="lbl">Давление</label><input type="number" id="p_pressure"></div>
+              <div class="fgroup"><label class="lbl">К.Трансф.</label><input type="number" step="0.1" id="p_turn_R"></div>
+              <div class="fgroup"><label class="lbl">Ток 1</label><input type="number" id="p_heat_1"></div>
+              <div class="fgroup"><label class="lbl">Ток 2</label><input type="number" id="p_heat_2"></div>
+            </div>
+            <div class="fgroup mt-1">
+              <label class="lbl">Комментарий к изменению</label>
+              <textarea id="paramComment" rows="2" placeholder="Например: после ТО снизили ток на 50 А..."></textarea>
+            </div>
+            <button class="btn btn-warn btn-full mt-1" id="updateParamBtn">⚠ Обновить уставки техпроцесса</button>
+            <div id="paramAlert" class="hidden mt-alert"></div>
+          </div>
+        </div>
+
+        <div class="card hidden mt-2" id="maintenanceCard">
+          <div class="card-title success">Регистрация замеров ТО</div>
+          <form id="maintenanceForm">
+            <div class="fgroup">
+              <label class="lbl">Исполнитель ТО</label>
+              <select id="workerSelect" required><option value="">Выберите сотрудника...</option></select>
+            </div>
+            <div class="fgroup">
+              <label class="lbl">Фактический ток сварки (А) — 3 замера</label>
+              <div class="inputs-row">
+                <input type="number" id="first_weld"  placeholder="Замер 1" required>
+                <input type="number" id="second_weld" placeholder="Замер 2" required>
+                <input type="number" id="third_weld"  placeholder="Замер 3" required>
+              </div>
+            </div>
+            <div class="fgroup">
+              <label class="lbl">Фактическое усилие сжатия (daN) — 3 замера</label>
+              <div class="inputs-row">
+                <input type="number" id="first_pressure"  placeholder="Замер 1" required>
+                <input type="number" id="second_pressure" placeholder="Замер 2" required>
+                <input type="number" id="third_pressure"  placeholder="Замер 3" required>
+              </div>
+            </div>
+            <div id="toAlert" class="hidden mt-alert"></div>
+            <button type="submit" class="btn btn-success btn-full mt-2">Зафиксировать результаты ТО</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- История выбранных клещей (появляется после выбора) -->
+    <div id="historySection" class="hidden mt-3">
+      <div style="margin-bottom:.75rem"><span style="font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">История выбранных клещей</span></div>
+      <div class="g3">
+        <div class="card">
+          <div class="card-title success">Последние ТО</div>
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead><tr><th>Дата</th><th>Ср. ток (А)</th><th>Сотрудник</th></tr></thead>
+              <tbody id="t_maint"><tr class="empty-row"><td colspan="3">Нет записей</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title danger">Дефекты клещей</div>
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead><tr><th>Дата</th><th>Точка</th><th>Код</th><th>Решение</th></tr></thead>
+              <tbody id="t_defects"><tr class="empty-row"><td colspan="4">Нет дефектов</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title warn">Архив уставок</div>
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead><tr><th>Дата</th><th>Реж.</th><th>Давл.</th><th>К.Тр.</th><th>Ток 1</th><th>Ток 2</th><th>Комментарий</th></tr></thead>
+              <tbody id="t_params"><tr class="empty-row"><td colspan="7">Нет истории</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /page -->
+
+<script>
+// ─── ПЕРЕКЛЮЧЕНИЕ РЕЖИМОВ ───────────────────
+document.getElementById('goEntryBtn').addEventListener('click', () => {
+  document.getElementById('analyticsView').classList.add('hidden');
+  document.getElementById('entryView').classList.remove('hidden');
+  if (brandSelect.options.length < 2) loadBrands();
+});
+document.getElementById('goAnalyticsBtn').addEventListener('click', () => {
+  document.getElementById('entryView').classList.add('hidden');
+  document.getElementById('analyticsView').classList.remove('hidden');
+  hideTaskConfirmBanner();
+  currentTaskId = null;
+  loadDailyTasks();
+});
+
+// ─── ПЛАНИРОВАНИЕ ТО ──────────────────────────
+let planTaskWorkers = [];
+let currentTaskId = null;
+let taskDataMap = {};
+const todayISO = new Date().toISOString().split('T')[0];
+
+document.getElementById('planTaskDate').value = todayISO;
+document.getElementById('planDateLabel').textContent = `— ${new Date().toLocaleDateString('ru-RU', {day:'numeric',month:'long'})}`;
+
+function loadDailyTasks(d) {
+  const qDate = d || document.getElementById('planTaskDate').value || todayISO;
+  fetch(`/api/maintenance/daily?date=${qDate}`)
+    .then(r => r.json())
+    .then(data => {
+      planTaskWorkers = data.workers;
+      taskDataMap = {};
+      data.tasks.forEach(t => { taskDataMap[t.id] = t; });
+      renderDailyTasks(data.tasks);
+    })
+    .catch(() => {
+      document.getElementById('dailyTasksBody').innerHTML =
+        '<tr class="empty-row"><td colspan="6">Ошибка загрузки плана</td></tr>';
+    });
+}
+loadDailyTasks();
+
+function renderDailyTasks(tasks) {
+  const tbody = document.getElementById('dailyTasksBody');
+  if (!tasks.length) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="6">Нет задач на сегодня</td></tr>';
+    return;
+  }
+  tbody.innerHTML = tasks.map(t => {
+    const badge = t.status === 'done'    ? '<span class="badge bs">Выполнено</span>'
+                : t.status === 'in_work' ? '<span class="badge bw">В работе</span>'
+                :                          '<span class="badge bm">Ожидает</span>';
+    const worker = t.worker_surname ? `${t.worker_surname} ${t.worker_name}` : '—';
+    let acts = '';
+    if (t.status === 'pending') {
+      acts = `<button class="btn btn-primary btn-sm" onclick="takeAndStart(${t.id})">Взять в работу</button>
+              <button class="btn btn-ghost btn-sm" onclick="cancelTask(${t.id})" title="Отменить">✕</button>`;
+    } else if (t.status === 'in_work') {
+      acts = `<button class="btn btn-primary btn-sm" onclick="takeAndStart(${t.id})">Продолжить →</button>`;
+    }
+    return `<tr>
+      <td data-label="Пистолет" class="fw-bold">№${String(t.g_num).padStart(3,'0')} <span class="text-muted text-sm">[${t.gun_model}]</span></td>
+      <td data-label="Бренд"><span class="badge ba">${t.brand}</span></td>
+      <td data-label="Станция" class="text-sm text-muted">${t.station_name||'—'}</td>
+      <td data-label="Тип" class="text-sm text-muted">${t.plan_type}</td>
+      <td data-label="Статус">${badge}</td>
+      <td data-label="Кто" class="text-sm">${worker}</td>
+      <td data-label="">${acts}</td>
+    </tr>`;
+  }).join('');
+}
+
+// Взять в работу + сразу к замерам (без промежуточного подтверждения)
+window.takeAndStart = function(taskId) {
+  const t = taskDataMap[taskId];
+  if (!t) return;
+  // Mark in_work (fire-and-forget, worker will be set on TO save)
+  fetch(`/api/maintenance/daily/${taskId}/take`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({worker_id: null})
+  });
+  // Go directly to entry
+  currentTaskId = taskId;
+  showTaskConfirmBanner(t);
+  document.getElementById('analyticsView').classList.add('hidden');
+  document.getElementById('entryView').classList.remove('hidden');
+  if (brandSelect.options.length < 2) loadBrands();
+  resetTo('top');
+  loadGun(t.gun_id);
+};
+
+function showTaskConfirmBanner(t) {
+  document.getElementById('taskGunInfo').textContent =
+    `Пистолет №${String(t.g_num).padStart(3,'0')} [${t.gun_model}] — ${t.brand}`;
+  document.getElementById('taskConfirmBanner').classList.remove('hidden');
+  document.getElementById('gunSelectionCard').classList.add('hidden');
+}
+
+function hideTaskConfirmBanner() {
+  document.getElementById('taskConfirmBanner').classList.add('hidden');
+  document.getElementById('gunSelectionCard').classList.remove('hidden');
+}
+
+document.getElementById('backToPlanBtn').addEventListener('click', () => {
+  document.getElementById('goAnalyticsBtn').click();
+});
+
+// Кнопка "Назначить"
+document.getElementById('assignBtn').addEventListener('click', () => {
+  document.getElementById('assignPanel').classList.remove('hidden');
+  document.getElementById('assignPanel').scrollIntoView({behavior:'smooth'});
+  const sel = document.getElementById('planBrandSelect');
+  if (sel.options.length < 2) {
+    fetch('/api/brands').then(r => r.json()).then(brands => {
+      brands.forEach(b => sel.add(new Option(b.brand, b.UniqueID)));
+    });
+  }
+  const csel = document.getElementById('planCreatorSelect');
+  if (csel.options.length < 2) {
+    fetch('/api/workers').then(r => r.json()).then(ws => {
+      ws.filter(w => w.is_active).forEach(w => csel.add(new Option(`${w.surname} ${w.name}`, w.UniqueID)));
+    });
+  }
+});
+document.getElementById('cancelAssignBtn').addEventListener('click', () => {
+  document.getElementById('assignPanel').classList.add('hidden');
+});
+
+function reloadScheduleList() {
+  const brandId = document.getElementById('planBrandSelect').value;
+  const dateVal = document.getElementById('planTaskDate').value || todayISO;
+  const month   = parseInt(dateVal.split('-')[1]);
+  const url     = `/api/maintenance/schedule?month=${month}${brandId ? '&brand_id='+brandId : ''}`;
+  fetch(url).then(r => r.json()).then(renderScheduleList);
+}
+document.getElementById('planBrandSelect').addEventListener('change', reloadScheduleList);
+document.getElementById('planTaskDate').addEventListener('change', () => {
+  reloadScheduleList();
+  // Update date label
+  const d = new Date(document.getElementById('planTaskDate').value + 'T00:00:00');
+  document.getElementById('planDateLabel').textContent =
+    `— ${d.toLocaleDateString('ru-RU', {day:'numeric', month:'long'})}`;
+});
+
+function renderScheduleList(items) {
+  const div = document.getElementById('scheduleList');
+  if (!items.length) {
+    div.innerHTML = '<div class="text-muted text-sm">Нет плановых работ в этом месяце для выбранного бренда</div>';
+    return;
+  }
+  let html = '';
+  let lastStation = null;
+  items.forEach(it => {
+    if (it.station_name !== lastStation) {
+      lastStation = it.station_name;
+      html += `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding:.45rem 0 .2rem;margin-top:.3rem;border-bottom:1px solid var(--border)">${it.station_name}</div>`;
+    }
+    const assigned = it.task_id && it.task_status && it.task_status !== 'cancelled';
+    const lbl = assigned ? `<span class="badge bs" style="font-size:11px">${it.task_status}</span>` : '';
+    html += `<label style="display:flex;align-items:center;gap:.6rem;padding:.3rem 0 .3rem .75rem;cursor:pointer">
+      <input type="checkbox" class="plan-check" value="${it.gun_id}" ${assigned ? 'disabled checked' : ''}>
+      <span style="flex:1;font-size:13px">№${String(it.g_num).padStart(3,'0')} <span class="text-muted">[${it.model}]</span></span>
+      <span class="text-sm text-muted">${it.plan_type || ''}</span>
+      ${lbl}
+    </label>`;
+  });
+  div.innerHTML = html + `<div style="margin-top:.5rem;font-size:12px;color:var(--muted)">${items.length} клещей по плану</div>`;
+}
+
+document.getElementById('confirmAssignBtn').addEventListener('click', () => {
+  const checked = [...document.querySelectorAll('.plan-check:checked:not(:disabled)')];
+  if (!checked.length) {
+    showAlert(document.getElementById('assignAlert'), 'warn', 'Выберите хотя бы один пистолет');
+    return;
+  }
+  const taskDate  = document.getElementById('planTaskDate').value || todayISO;
+  const createdBy = document.getElementById('planCreatorSelect').value;
+  const gun_ids   = checked.map(c => parseInt(c.value));
+  fetch('/api/maintenance/daily', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({gun_ids, date: taskDate, created_by_worker_id: createdBy || null})
+  }).then(r => r.json()).then(res => {
+    if (res.status === 'success') {
+      document.getElementById('assignPanel').classList.add('hidden');
+      loadDailyTasks(taskDate);
+    } else {
+      showAlert(document.getElementById('assignAlert'), 'danger', res.message);
+    }
+  });
+});
+
+// Отмена задачи
+window.cancelTask = function(taskId) {
+  fetch(`/api/maintenance/daily/${taskId}`, {method:'DELETE'})
+    .then(() => loadDailyTasks());
+};
+
+// ─── АНАЛИТИКА ─────────────────────────────
+function loadAnalytics() {
+  fetch('/api/maintenance/analytics').then(r => r.json()).then(data => {
+    document.getElementById('a-total').textContent = data.total;
+    document.getElementById('a-month').textContent = data.this_month;
+
+    const maxBrand = Math.max(1, ...data.by_brand.map(b => b.cnt));
+    document.getElementById('brandBars').innerHTML = data.by_brand.length
+      ? data.by_brand.map(b => `
+          <div class="brand-bar">
+            <span class="brand-bar-name">${b.brand}</span>
+            <div class="brand-bar-track"><div class="brand-bar-fill" style="width:${Math.round(b.cnt/maxBrand*100)}%"></div></div>
+            <span class="brand-bar-count">${b.cnt}</span>
+          </div>`).join('')
+      : '<div class="text-muted text-sm">Нет данных</div>';
+
+    document.getElementById('monthList').innerHTML = data.by_month.length
+      ? data.by_month.map(m => `
+          <div class="month-row">
+            <span>${m.month}</span>
+            <span class="fw-bold text-accent">${m.cnt}</span>
+          </div>`).join('')
+      : '<div class="text-muted text-sm">Нет данных</div>';
+
+    const tbody = document.getElementById('recentMaintTable');
+    tbody.innerHTML = data.recent.length
+      ? data.recent.map(r => `<tr>
+          <td data-label="Дата">${r.to_date}</td>
+          <td data-label="Линия"><span class="badge bm">${r.brand}</span></td>
+          <td data-label="Пистолет">№${String(r.g_num).padStart(3,'0')} <span class="text-muted text-sm">[${r.gun_model}]</span></td>
+          <td data-label="Ток" class="fw-bold text-accent">${r.avg_weld} А</td>
+          <td data-label="Давление">${Math.round(r.avg_pres_N / 10)} daN</td>
+          <td data-label="Сотрудник">${r.worker_surname}</td>
+        </tr>`).join('')
+      : '<tr class="empty-row"><td colspan="6">Нет записей ТО</td></tr>';
+  });
+}
+loadAnalytics();
+
+// ─── ПОИСК ИСТОРИИ КЛЕЩЕЙ (в аналитике) ────
+document.getElementById('histSearchBtn').addEventListener('click', doHistSearch);
+document.getElementById('histGunNum').addEventListener('keydown', e => { if (e.key === 'Enter') doHistSearch(); });
+
+function doHistSearch() {
+  const num = document.getElementById('histGunNum').value.trim();
+  const alertEl = document.getElementById('histSearchAlert');
+  if (!num) { showAlert(alertEl, 'warn', 'Введите номер пистолета'); return; }
+  fetch(`/api/guns/by_number/${num}`).then(r => r.json()).then(res => {
+    if (res.status === 'empty') { showAlert(alertEl, 'danger', res.message); return; }
+    alertEl.className = 'hidden';
+    renderHistResult(res.gun.UniqueID);
+  });
+}
+
+function renderHistResult(gunId) {
+  fetch(`/api/gun/${gunId}/history`).then(r => r.json()).then(data => {
+    document.getElementById('h_maint').innerHTML = data.maintenance.length
+      ? data.maintenance.map(m => `<tr>
+          <td>${m.to_date}</td>
+          <td class="fw-bold">${Math.round((m.first_weld+m.second_weld+m.third_weld)/3)} А</td>
+          <td>${m.surname||'—'}</td>
+        </tr>`).join('')
+      : '<tr class="empty-row"><td colspan="3">Нет</td></tr>';
+
+    document.getElementById('h_defects').innerHTML = data.defects.length
+      ? data.defects.map(d => `<tr>
+          <td>${d.df_date}</td>
+          <td>№${d.spot_number||'—'}</td>
+          <td><span class="badge bd">${d.problem_code}</span></td>
+        </tr>`).join('')
+      : '<tr class="empty-row"><td colspan="3">Нет</td></tr>';
+
+    document.getElementById('h_params').innerHTML = data.params.length
+      ? data.params.map(p => `<tr>
+          <td>${p.start_date} ${p.is_active?'<span class="badge bs">акт</span>':''}</td>
+          <td>${p.mode||'—'}</td>
+          <td class="text-danger">${p.heat_1}</td>
+          <td class="text-danger">${p.heat_2}</td>
+          <td class="text-muted text-sm">${p.comments||'—'}</td>
+        </tr>`).join('')
+      : '<tr class="empty-row"><td colspan="5">Нет</td></tr>';
+
+    document.getElementById('histResult').classList.remove('hidden');
+  });
+}
+
+// ─── ВВОД ТО: логика ─────────────────────────
+let currentParams = [], currentGunId = null;
+
+function loadBrands() {
+  fetch('/api/brands').then(r => r.json()).then(data => {
+    data.forEach(b => brandSelect.add(new Option(b.brand, b.UniqueID)));
+  });
+}
+
+brandSelect.addEventListener('change', () => {
+  resetTo('brand');
+  if (!brandSelect.value) return;
+  fetch(`/api/stations/${brandSelect.value}`).then(r => r.json()).then(data => {
+    data.forEach(s => stationSelect.add(new Option(s.station_name, s.UniqueID)));
+    stationSelect.disabled = false;
+  });
+});
+
+stationSelect.addEventListener('change', () => {
+  resetTo('station');
+  if (!stationSelect.value) return;
+  fetch(`/api/guns/${stationSelect.value}`).then(r => r.json()).then(data => {
+    data.forEach(g => gunSelect.add(new Option(`Пистолет №${g.g_num} [${g.model}]`, g.UniqueID)));
+    gunSelect.disabled = false;
+  });
+});
+
+gunSelect.addEventListener('change', () => {
+  if (!gunSelect.value) { hideForms(); return; }
+  loadGun(gunSelect.value);
+});
+
+gunNumSearch.addEventListener('click', searchByGunNum);
+gunNumInput.addEventListener('keydown', e => { if (e.key === 'Enter') searchByGunNum(); });
+
+function searchByGunNum() {
+  const num = document.getElementById('gunNumInput').value.trim();
+  const alertEl = document.getElementById('gunNumAlert');
+  if (!num) { showAlert(alertEl, 'warn', 'Введите номер пистолета'); return; }
+  fetch(`/api/guns/by_number/${num}`).then(r => r.json()).then(res => {
+    if (res.status === 'empty') {
+      const padded = String(num).padStart(3, '0');
+      alertEl.className = 'alert alert-warn';
+      alertEl.innerHTML = `G.${padded} не найден в БД. &nbsp;`
+        + `<button class="btn btn-ghost btn-sm" onclick="createAndLoadGun(${num})">Создать G.${padded} и продолжить</button>`;
+      return;
+    }
+    alertEl.className = 'hidden';
+    resetTo('top');
+    applyGunData(res.gun.UniqueID, res.parameters, res.workers);
+  }).catch(() => showAlert(alertEl, 'danger', 'Ошибка запроса'));
+}
+
+window.createAndLoadGun = function(gnum) {
+  const alertEl = document.getElementById('gunNumAlert');
+  fetch('/api/guns/get_or_create', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({g_num: parseInt(gnum)})
+  }).then(r => r.json()).then(res => {
+    if (res.status === 'error') { showAlert(alertEl, 'danger', res.message); return; }
+    alertEl.className = 'alert alert-warn';
+    alertEl.textContent = `G.${String(gnum).padStart(3,'0')} — ручной ввод (уставки не заданы, валидация отключена)`;
+    resetTo('top');
+    // No params, but load workers and open the form
+    fetch('/api/workers').then(r => r.json()).then(workers => {
+      applyGunData(res.gun.UniqueID, [], workers.filter(w => w.is_active));
+    });
+  });
+};
+
+function loadGun(gunId) {
+  fetch(`/api/parameters/${gunId}`).then(r => r.json()).then(data => {
+    applyGunData(gunId, data.parameters, data.workers);
+  });
+}
+
+function applyGunData(gunId, params, workers) {
+  currentGunId = gunId; currentParams = params;
+  paramSelect.innerHTML = '';
+  if (params.length) {
+    params.forEach(p => paramSelect.add(new Option(`Режим ${p.mode || p.UniqueID}`, p.UniqueID)));
+    document.getElementById('paramCard').classList.remove('hidden');
+    updateParamDisplay();
+  } else {
+    // Manual gun — no params, hide param card, keep maintenance form
+    document.getElementById('paramCard').classList.add('hidden');
+  }
+  workerSelect.innerHTML = '<option value="">Выберите сотрудника...</option>';
+  workers.forEach(w => workerSelect.add(new Option(`${w.surname} ${w.name}`, w.UniqueID)));
+  document.getElementById('maintenanceCard').classList.remove('hidden');
+  refreshHistory(gunId);
+}
+
+paramSelect.addEventListener('change', updateParamDisplay);
+
+function updateParamDisplay() {
+  const p = currentParams.find(x => x.UniqueID == paramSelect.value);
+  if (!p) return;
+  document.getElementById('pv-pres').textContent   = Math.round(p.pressure / 10);
+  document.getElementById('pv-turnr').textContent  = p.turn_R;
+  document.getElementById('pv-w1').textContent     = p.weld_1;
+  document.getElementById('pv-h1').textContent     = p.heat_1;
+  document.getElementById('pv-w2').textContent     = p.weld_2;
+  document.getElementById('pv-h2').textContent     = p.heat_2;
+  document.getElementById('p_pressure').value      = Math.round(p.pressure / 10);
+  document.getElementById('p_turn_R').value        = p.turn_R;
+  document.getElementById('p_heat_1').value        = p.heat_1;
+  document.getElementById('p_heat_2').value        = p.heat_2;
+  document.getElementById('p_squeeze_time').value  = p.squeeze_time;
+  document.getElementById('p_up_slope_time').value = p.up_slope_time;
+  document.getElementById('p_cool_1').value        = p.cool_1;
+  document.getElementById('p_hold').value          = p.hold;
+}
+
+updateParamBtn.addEventListener('click', () => {
+  const pAlert = document.getElementById('paramAlert');
+  const p = currentParams.find(x => x.UniqueID == paramSelect.value);
+  const payload = {
+    gun_id: currentGunId, parameter_id: paramSelect.value,
+    param_pressure:      document.getElementById('p_pressure').value,
+    param_turn_R:        document.getElementById('p_turn_R').value,
+    param_weld_1:        p?.weld_1,
+    param_heat_1:        document.getElementById('p_heat_1').value,
+    param_weld_2:        p?.weld_2,
+    param_heat_2:        document.getElementById('p_heat_2').value,
+    param_squeeze_time:  document.getElementById('p_squeeze_time').value,
+    param_up_slope_time: document.getElementById('p_up_slope_time').value,
+    param_cool_1:        document.getElementById('p_cool_1').value,
+    param_hold:          document.getElementById('p_hold').value,
+    param_comment:       document.getElementById('paramComment').value,
+  };
+  fetch('/api/parameters/update', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) })
+    .then(r => r.json()).then(res => {
+      showAlert(pAlert, res.status === 'success' ? 'success' : 'danger', res.message);
+      if (res.status === 'success') setTimeout(() => loadGun(currentGunId), 1000);
+    });
+});
+
+maintenanceForm.addEventListener('submit', e => {
+  e.preventDefault();
+  const alertEl = document.getElementById('toAlert');
+  const payload = {
+    gun_id: currentGunId,
+    parameter_id:    paramSelect.value,
+    worker_id:       document.getElementById('workerSelect').value,
+    first_weld:      document.getElementById('first_weld').value,
+    second_weld:     document.getElementById('second_weld').value,
+    third_weld:      document.getElementById('third_weld').value,
+    first_pressure:  document.getElementById('first_pressure').value,
+    second_pressure: document.getElementById('second_pressure').value,
+    third_pressure:  document.getElementById('third_pressure').value,
+    task_id:         currentTaskId || null,
+  };
+  fetch('/api/maintenance', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) })
+    .then(r => r.json().then(d => ({ ok: r.ok, body: d })))
+    .then(res => {
+      if (res.ok) {
+        alertEl.className = 'alert alert-success';
+        alertEl.innerHTML = res.body.message +
+          (currentTaskId
+            ? ' <button class="btn btn-ghost btn-sm" style="margin-left:.5rem" id="backAfterSave">← К плану</button>'
+            : '');
+        if (currentTaskId) {
+          currentTaskId = null;
+          document.getElementById('backAfterSave')?.addEventListener('click', () => {
+            document.getElementById('goAnalyticsBtn').click();
+          });
+        }
+        ['first_weld','second_weld','third_weld','first_pressure','second_pressure','third_pressure']
+          .forEach(id => document.getElementById(id).value = '');
+        refreshHistory(currentGunId);
+        loadAnalytics();
+      } else {
+        showAlert(alertEl, res.body.status === 'validation_error' ? 'warn' : 'danger', res.body.message);
+      }
+    });
+});
+
+function refreshHistory(gunId) {
+  fetch(`/api/gun/${gunId}/history`).then(r => r.json()).then(data => {
+    document.getElementById('t_maint').innerHTML = data.maintenance.length
+      ? data.maintenance.map(m => `<tr>
+          <td>${m.to_date}</td>
+          <td class="fw-bold">${Math.round((m.first_weld+m.second_weld+m.third_weld)/3)} А</td>
+          <td>${m.surname||'—'}</td>
+        </tr>`).join('')
+      : '<tr class="empty-row"><td colspan="3">Нет записей</td></tr>';
+    document.getElementById('t_defects').innerHTML = data.defects.length
+      ? data.defects.map(d => `<tr>
+          <td>${d.df_date}</td><td>№${d.spot_number||'—'}</td>
+          <td><span class="badge bd">${d.problem_code}</span></td>
+          <td class="text-sm text-muted">${d.solution||'—'}</td>
+        </tr>`).join('')
+      : '<tr class="empty-row"><td colspan="4">Нет дефектов</td></tr>';
+    document.getElementById('t_params').innerHTML = data.params.length
+      ? data.params.map(p => `<tr>
+          <td data-label="Дата">${p.start_date} ${p.is_active?'<span class="badge bs">акт</span>':''}</td>
+          <td data-label="Реж.">${p.mode||'—'}</td>
+          <td data-label="Давл.">${Math.round(p.pressure/10)} daN</td>
+          <td data-label="К.Тр." class="text-accent">${p.turn_R}</td>
+          <td data-label="Ток 1" class="text-danger">${p.heat_1}</td>
+          <td data-label="Ток 2" class="text-danger">${p.heat_2}</td>
+          <td data-label="Комментарий" class="text-muted text-sm">${p.comments||'—'}</td>
+        </tr>`).join('')
+      : '<tr class="empty-row"><td colspan="7">Нет истории</td></tr>';
+    document.getElementById('historySection').classList.remove('hidden');
+  });
+}
+
+function hideForms() {
+  document.getElementById('paramCard').classList.add('hidden');
+  document.getElementById('maintenanceCard').classList.add('hidden');
+  document.getElementById('historySection').classList.add('hidden');
+  currentGunId = null; currentParams = [];
+}
+
+function resetTo(level) {
+  if (level === 'top') { brandSelect.value = ''; resetDD(stationSelect, '— сначала бренд —'); }
+  if (level === 'top' || level === 'brand') resetDD(gunSelect, '— сначала станция —');
+  hideForms();
+}
+function resetDD(el, text) { el.innerHTML = `<option value="">${text}</option>`; el.disabled = true; }
+function showAlert(el, type, msg) { el.className = `alert alert-${type}`; el.textContent = msg; }
+
+// ─── ПРОГРЕСС ПЛАНА ТО ──────────────────────────────
+const MONTH_NAMES = ['','Январь','Февраль','Март','Апрель','Май','Июнь',
+                     'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+
+(function initProgressSelector() {
+  const sel = document.getElementById('progressMonthSel');
+  const now = new Date();
+  for (let i = 0; i < 4; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const y = d.getFullYear(), m = d.getMonth() + 1;
+    const opt = new Option(`${MONTH_NAMES[m]} ${y}`, `${y}-${m}`);
+    sel.add(opt);
+  }
+})();
+
+function loadProgress() {
+  const [year, month] = document.getElementById('progressMonthSel').value.split('-');
+  fetch(`/api/maintenance/progress?month=${month}&year=${year}`)
+    .then(r => r.json()).then(renderProgress);
+}
+loadProgress();
+
+document.getElementById('progressMonthSel').addEventListener('change', loadProgress);
+document.getElementById('refreshProgressBtn').addEventListener('click', loadProgress);
+
+function renderProgress(data) {
+  const div = document.getElementById('progressContent');
+  if (!data.brands || !data.brands.length) {
+    div.innerHTML = '<div class="text-muted text-sm">Нет данных по плану для выбранного месяца</div>';
+    return;
+  }
+  const summaryPct = data.total_planned ? Math.round(data.total_done / data.total_planned * 100) : 0;
+  let html = `<div style="display:flex;gap:1.5rem;margin-bottom:.75rem;flex-wrap:wrap">
+    <div class="stat" style="min-width:0"><div class="stat-val accent">${data.total_planned}</div><div class="stat-lbl">По плану</div></div>
+    <div class="stat" style="min-width:0"><div class="stat-val bs" style="color:var(--success,#3fb950)">${data.total_done}</div><div class="stat-lbl">Выполнено</div></div>
+    <div class="stat" style="min-width:0"><div class="stat-val warn">${data.total_remaining}</div><div class="stat-lbl">Осталось</div></div>
+    <div class="stat" style="min-width:0"><div class="stat-val">${summaryPct}%</div><div class="stat-lbl">Готовность</div></div>
+  </div>`;
+  data.brands.forEach(b => {
+    const pct = b.total ? Math.round(b.done / b.total * 100) : 0;
+    const color = pct === 100 ? 'var(--success,#3fb950)' : pct > 50 ? 'var(--warn,#e3b341)' : 'var(--accent,#58a6ff)';
+    html += `<div class="brand-bar" style="margin-bottom:.5rem">
+      <span class="brand-bar-name" style="min-width:80px">${b.brand}</span>
+      <div class="brand-bar-track" style="flex:1">
+        <div class="brand-bar-fill" style="width:${pct}%;background:${color}"></div>
+      </div>
+      <span class="brand-bar-count" style="min-width:100px;text-align:right;font-size:12px">
+        ${b.done} / ${b.total}
+        ${b.remaining > 0
+          ? `<span class="text-muted"> — осталось ${b.remaining}</span>`
+          : ' <span style="color:var(--success,#3fb950)">✓</span>'}
+      </span>
+    </div>`;
+  });
+  div.innerHTML = html;
+}
+</script>
+</body>
+</html>

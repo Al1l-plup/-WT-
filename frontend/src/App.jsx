@@ -22,6 +22,12 @@ const PAGES = [
 
 function App() {
   const [page, setPage] = useState('dashboard');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const navigate = (id) => {
+    setPage(id);
+    setSidebarOpen(false);
+  };
 
   const renderPage = () => {
     switch (page) {
@@ -39,7 +45,18 @@ function App() {
 
   return (
     <div className="layout">
-      <aside className="sidebar">
+      <header className="mobile-header">
+        <button className="hamburger" onClick={() => setSidebarOpen(o => !o)} aria-label="Меню">
+          {sidebarOpen ? '✕' : '☰'}
+        </button>
+        <span className="mobile-title">WeldTeam</span>
+      </header>
+
+      {sidebarOpen && (
+        <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />
+      )}
+
+      <aside className={`sidebar${sidebarOpen ? ' sidebar-open' : ''}`}>
         <div className="sidebar-logo">
           <div className="logo-text">WeldTeam</div>
           <div className="logo-sub">Управление производством</div>
@@ -49,7 +66,7 @@ function App() {
             <button
               key={p.id}
               className={`nav-item${page === p.id ? ' active' : ''}`}
-              onClick={() => setPage(p.id)}
+              onClick={() => navigate(p.id)}
             >
               <i className="nav-icon">{p.icon}</i>
               {p.label}
@@ -58,6 +75,7 @@ function App() {
         </nav>
         <div className="sidebar-footer">Chery · GWM · Changan</div>
       </aside>
+
       <main className="content">
         {renderPage()}
       </main>

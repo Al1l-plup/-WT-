@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Сотрудники — WeldTeam MES</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/theme.js"></script>
+</head>
+<body>
+
+<nav class="nav">
+  <a class="nav-brand" href="/">WeldTeam <span>/ цех BS</span></a>
+  <div class="nav-links">
+    <a class="nav-link" href="/">Главная</a>
+    <a class="nav-link" href="/maintenance">ТО</a>
+    <a class="nav-link" href="/defects">Дефекты</a>
+    <a class="nav-link" href="/analytics">Аналитика</a>
+    <a class="nav-link active" href="/workers">Сотрудники</a>
+    <a class="nav-link" href="/explorer">Обзор</a>
+    <button class="btn-theme" id="themeToggle">☀</button>
+  </div>
+</nav>
+
+<div class="page">
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:1.25rem">
+    <div class="page-head" style="margin-bottom:0">
+      <h1>Управление сотрудниками</h1>
+      <p>ОТК · WeldTeam · Производство</p>
+    </div>
+    <button class="btn btn-primary" id="addBtn">+ Добавить</button>
+  </div>
+
+  <!-- ── ФОРМА ДОБАВЛЕНИЯ/РЕДАКТИРОВАНИЯ ── -->
+  <div id="formCard" class="card hidden" style="margin-bottom:1rem">
+    <div class="card-title accent" id="formCardTitle">Новый сотрудник</div>
+    <div class="g2">
+      <div class="fgroup"><label class="lbl">Фамилия *</label><input type="text" id="f_surname" placeholder="Иванов"></div>
+      <div class="fgroup"><label class="lbl">Имя *</label><input type="text" id="f_name" placeholder="Иван"></div>
+      <div class="fgroup"><label class="lbl">Отчество</label><input type="text" id="f_father" placeholder="Иванович"></div>
+      <div class="fgroup"><label class="lbl">Должность</label><input type="text" id="f_position" placeholder="Инженер"></div>
+    </div>
+    <div class="fgroup" style="margin-top:.5rem">
+      <label class="lbl">Отдел *</label>
+      <div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-top:.25rem">
+        <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:13px">
+          <input type="radio" name="f_dept" value="ОТК"> ОТК</label>
+        <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:13px">
+          <input type="radio" name="f_dept" value="WeldTeam" checked> WeldTeam</label>
+        <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:13px">
+          <input type="radio" name="f_dept" value="Производство"> Производство</label>
+      </div>
+    </div>
+    <div id="formAlert" class="hidden mt-alert"></div>
+    <div style="display:flex;gap:.5rem;margin-top:.75rem">
+      <button class="btn btn-ghost" id="cancelFormBtn">Отмена</button>
+      <button class="btn btn-primary" id="saveFormBtn">Сохранить</button>
+    </div>
+  </div>
+
+  <!-- ── ФИЛЬТР ПО ОТДЕЛАМ ── -->
+  <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.75rem">
+    <button class="view-btn active" data-dept="">Все</button>
+    <button class="view-btn" data-dept="ОТК">ОТК</button>
+    <button class="view-btn" data-dept="WeldTeam">WeldTeam</button>
+    <button class="view-btn" data-dept="Производство">Производство</button>
+  </div>
+
+  <!-- ── ТАБЛИЦА ── -->
+  <div class="card">
+    <div class="tbl-wrap">
+      <table class="tbl tbl-mobile">
+        <thead>
+          <tr>
+            <th>Фамилия</th><th>Имя</th><th>Отчество</th>
+            <th>Должность</th><th>Отдел</th><th>Статус</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="workersBody">
+          <tr class="empty-row"><td colspan="7">Загрузка...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+let allWorkers = [];
+let filterDept = '';
+let editId = null;
+
+function loadWorkers() {
+  fetch('/api/workers').then(r => r.json()).then(data => {
+    allWorkers = data;
+    renderTable();
+  });
+}
+loadWorkers();
+
+// Фильтр
+document.querySelectorAll('[data-dept]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-dept]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    filterDept = btn.dataset.dept;
+    renderTable();
+  });
+});
+
+function renderTable() {
+  const rows = filterDept ? allWorkers.filter(w => w.department === filterDept) : allWorkers;
+  const tbody = document.getElementById('workersBody');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="7">Нет сотрудников</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(w => {
+    const active = w.is_active;
+    const deptColor = w.department === 'ОТК' ? 'ba' : w.department === 'Производство' ? 'bw' : 'bs';
+    return `<tr style="${active ? '' : 'opacity:.45'}">
+      <td data-label="Фамилия" class="fw-bold">${w.surname}</td>
+      <td data-label="Имя">${w.name}</td>
+      <td data-label="Отчество" class="text-muted text-sm">${w.father_name || '—'}</td>
+      <td data-label="Должность" class="text-sm">${w.position || '—'}</td>
+      <td data-label="Отдел"><span class="badge ${deptColor}">${w.department || '—'}</span></td>
+      <td data-label="Статус">${active ? '<span class="badge bs">Активен</span>' : '<span class="badge bm">Неактивен</span>'}</td>
+      <td data-label="">
+        <button class="btn btn-ghost btn-sm" onclick="startEdit(${w.UniqueID})">✏</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleActive(${w.UniqueID}, ${active ? 0 : 1})">${active ? 'Деакт.' : 'Активир.'}</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// Добавление
+document.getElementById('addBtn').addEventListener('click', () => {
+  editId = null;
+  clearForm();
+  document.getElementById('formCardTitle').textContent = 'Новый сотрудник';
+  document.getElementById('formCard').classList.remove('hidden');
+  document.getElementById('formCard').scrollIntoView({behavior:'smooth'});
+});
+document.getElementById('cancelFormBtn').addEventListener('click', () => {
+  document.getElementById('formCard').classList.add('hidden');
+  editId = null;
+});
+
+window.startEdit = function(id) {
+  const w = allWorkers.find(x => x.UniqueID === id);
+  if (!w) return;
+  editId = id;
+  document.getElementById('f_surname').value = w.surname;
+  document.getElementById('f_name').value    = w.name;
+  document.getElementById('f_father').value  = w.father_name || '';
+  document.getElementById('f_position').value = w.position || '';
+  const radio = document.querySelector(`input[name=f_dept][value="${w.department}"]`);
+  if (radio) radio.checked = true;
+  document.getElementById('formCardTitle').textContent = `Редактировать: ${w.surname} ${w.name}`;
+  document.getElementById('formCard').classList.remove('hidden');
+  document.getElementById('formCard').scrollIntoView({behavior:'smooth'});
+};
+
+document.getElementById('saveFormBtn').addEventListener('click', () => {
+  const alertEl = document.getElementById('formAlert');
+  const surname  = document.getElementById('f_surname').value.trim();
+  const name     = document.getElementById('f_name').value.trim();
+  const dept     = document.querySelector('input[name=f_dept]:checked')?.value || '';
+  if (!surname || !name || !dept) { showAlert(alertEl, 'warn', 'Заполните обязательные поля'); return; }
+  const body = {
+    surname, name,
+    father_name: document.getElementById('f_father').value.trim(),
+    position:    document.getElementById('f_position').value.trim(),
+    department:  dept
+  };
+  const url    = editId ? `/api/workers/${editId}` : '/api/workers';
+  const method = editId ? 'PUT' : 'POST';
+  fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) })
+    .then(r => r.json()).then(res => {
+      if (res.status === 'success') {
+        document.getElementById('formCard').classList.add('hidden');
+        editId = null; clearForm(); loadWorkers();
+      } else showAlert(alertEl, 'danger', res.message);
+    });
+});
+
+window.toggleActive = function(id, val) {
+  fetch(`/api/workers/${id}`, {
+    method: 'PUT', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ is_active: val })
+  }).then(r => r.json()).then(() => loadWorkers());
+};
+
+function clearForm() {
+  ['f_surname','f_name','f_father','f_position'].forEach(id => document.getElementById(id).value = '');
+  document.querySelector('input[name=f_dept][value="WeldTeam"]').checked = true;
+  document.getElementById('formAlert').className = 'hidden';
+}
+function showAlert(el, type, msg) { el.className = `alert alert-${type}`; el.textContent = msg; }
+</script>
+</body>
+</html>

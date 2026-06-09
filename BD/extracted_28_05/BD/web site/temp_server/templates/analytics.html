@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Аналитика дефектов — WeldTeam MES</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/theme.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+<nav class="nav">
+  <a class="nav-brand" href="/">WeldTeam <span>/ цех BS</span></a>
+  <div class="nav-links">
+    <a class="nav-link" href="/">Главная</a>
+    <a class="nav-link" href="/maintenance">ТО</a>
+    <a class="nav-link" href="/defects">Дефекты</a>
+    <a class="nav-link active" href="/analytics">Аналитика</a>
+    <a class="nav-link" href="/workers">Сотрудники</a>
+    <a class="nav-link" href="/explorer">Обзор</a>
+    <button class="btn-theme" id="themeToggle">☀</button>
+  </div>
+</nav>
+
+<div class="page">
+  <div class="page-head">
+    <h1>Аналитика дефектов</h1>
+    <p>Фильтрация по периоду, бренду и станции</p>
+  </div>
+
+  <!-- ── ФИЛЬТРЫ ── -->
+  <div class="card" style="margin-bottom:1rem">
+    <div class="card-title">Параметры выборки</div>
+
+    <!-- Пресеты периода -->
+    <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.75rem">
+      <button class="view-btn active" data-period="month">Этот месяц</button>
+      <button class="view-btn" data-period="3m">3 месяца</button>
+      <button class="view-btn" data-period="6m">6 месяцев</button>
+      <button class="view-btn" data-period="year">Год</button>
+      <button class="view-btn" data-period="custom">Свой период</button>
+    </div>
+
+    <div id="customDates" class="hidden" style="margin-bottom:.75rem">
+      <div class="inputs-row-2">
+        <div class="fgroup" style="margin:0"><label class="lbl">Дата с</label><input type="date" id="dateFrom"></div>
+        <div class="fgroup" style="margin:0"><label class="lbl">Дата по</label><input type="date" id="dateTo"></div>
+      </div>
+    </div>
+
+    <div class="g2" style="gap:.75rem;margin-bottom:.75rem">
+      <div class="fgroup" style="margin:0">
+        <label class="lbl">Модель авто</label>
+        <select id="filterModel"><option value="">Все модели</option></select>
+      </div>
+      <div class="fgroup" style="margin:0">
+        <label class="lbl">Станция</label>
+        <select id="filterStation" disabled><option value="">Все станции</option></select>
+      </div>
+    </div>
+
+    <button class="btn btn-primary" id="applyBtn">Применить</button>
+  </div>
+
+  <!-- ── ИТОГО ── -->
+  <div class="g3" style="margin-bottom:1rem" id="statsRow">
+    <div class="stat"><div class="stat-val danger" id="statTotal">—</div><div class="stat-lbl">Всего дефектов</div></div>
+    <div class="stat"><div class="stat-val accent" id="statTopCode">—</div><div class="stat-lbl">Самый частый код</div></div>
+    <div class="stat"><div class="stat-val warn" id="statPeriod">—</div><div class="stat-lbl">Период</div></div>
+  </div>
+
+  <!-- ── ДИАГРАММА + ЛЕГЕНДА ── -->
+  <div class="card" style="margin-bottom:1rem">
+    <div class="card-title">Разбивка по кодам дефектов</div>
+    <div class="chart-wrap" id="chartWrap">
+      <canvas id="pieChart" class="chart-canvas"></canvas>
+      <div class="chart-legend" id="legend">
+        <div class="text-muted text-sm">Нет данных</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── ПО СТАНЦИЯМ ── -->
+  <div class="card">
+    <div class="card-title">По станциям</div>
+    <div class="tbl-wrap">
+      <table class="tbl tbl-mobile">
+        <thead><tr><th>Бренд</th><th>Станция</th><th>Код</th><th>Кол-во</th><th>Расшифровка</th></tr></thead>
+        <tbody id="stationTable"><tr class="empty-row"><td colspan="5">Нет данных</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const COLORS = ['#f85149','#fd8e73','#d29922','#e3b341','#3fb950','#58a6ff','#79c0ff','#bc8cff','#39c5cf','#ffa198','#7ee787'];
+let pieChart = null;
+let activePeriod = 'month';
+
+// Пресеты периода
+document.querySelectorAll('[data-period]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-period]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activePeriod = btn.dataset.period;
+    document.getElementById('customDates').classList.toggle('hidden', activePeriod !== 'custom');
+  });
+});
+
+// Модели авто + станции
+let analyticsModels = [];
+fetch('/api/models').then(r => r.json()).then(data => {
+  analyticsModels = data;
+  data.forEach(m => filterModel.add(new Option(m.display_name, m.UniqueID)));
+});
+filterModel.addEventListener('change', () => {
+  filterStation.innerHTML = '<option value="">Все станции</option>';
+  filterStation.disabled = !filterModel.value;
+  if (!filterModel.value) return;
+  const modelObj = analyticsModels.find(m => String(m.UniqueID) === filterModel.value);
+  if (!modelObj) return;
+  fetch(`/api/stations?brand_id=${modelObj.brand_id}`).then(r => r.json()).then(data => {
+    data.forEach(s => filterStation.add(new Option(s.station_name, s.UniqueID)));
+    filterStation.disabled = false;
+  });
+});
+
+document.getElementById('applyBtn').addEventListener('click', applyFilters);
+
+function getDateRange() {
+  const now = new Date();
+  if (activePeriod === 'custom') {
+    return { from: document.getElementById('dateFrom').value, to: document.getElementById('dateTo').value };
+  }
+  const to = now.toISOString().split('T')[0];
+  const from = new Date(now);
+  if (activePeriod === 'month')  from.setDate(1);
+  if (activePeriod === '3m')     from.setMonth(from.getMonth() - 3);
+  if (activePeriod === '6m')     from.setMonth(from.getMonth() - 6);
+  if (activePeriod === 'year')   from.setFullYear(from.getFullYear() - 1);
+  return { from: from.toISOString().split('T')[0], to };
+}
+
+function applyFilters() {
+  const { from, to } = getDateRange();
+  const model   = filterModel.value;
+  const station = filterStation.value;
+  let url = `/api/analytics/defects?date_from=${from}&date_to=${to}`;
+  if (model)   url += `&model_id=${model}`;
+  if (station) url += `&station_id=${station}`;
+
+  fetch(url).then(r => r.json()).then(render);
+}
+
+function render(data) {
+  document.getElementById('statTotal').textContent = data.total;
+  document.getElementById('statTopCode').textContent = data.by_code.length ? data.by_code[0].code : '—';
+  document.getElementById('statPeriod').textContent = `${data.date_from} — ${data.date_to}`;
+
+  // Build code→name map for station table
+  const codeNames = {};
+  data.by_code.forEach(item => { codeNames[item.code] = item.name; });
+
+  const labels = [], counts = [], colors = [];
+  const legend = document.getElementById('legend');
+
+  if (!data.by_code.length) {
+    legend.innerHTML = '<div class="text-muted text-sm">Нет дефектов за период</div>';
+    if (pieChart) { pieChart.destroy(); pieChart = null; }
+  } else {
+    legend.innerHTML = data.by_code.map((item, i) => {
+      labels.push(item.code); counts.push(item.count); colors.push(COLORS[i % COLORS.length]);
+      return `<div class="legend-item" style="border-left:3px solid ${COLORS[i % COLORS.length]}">
+        <span class="legend-code" style="color:${COLORS[i%COLORS.length]}">${item.code}</span>
+        <span class="legend-name">${item.name}</span>
+        <span class="legend-cnt" style="color:${COLORS[i%COLORS.length]}">${item.count}</span>
+      </div>`;
+    }).join('');
+
+    const ctx = document.getElementById('pieChart').getContext('2d');
+    if (pieChart) pieChart.destroy();
+    pieChart = new Chart(ctx, {
+      type: 'doughnut',
+      data: { labels, datasets: [{ data: counts, backgroundColor: colors, borderColor: '#0d1117', borderWidth: 2 }] },
+      options: {
+        responsive: false, cutout: '55%',
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${c.label}: ${c.parsed}` } } }
+      }
+    });
+  }
+
+  // Таблица по станциям
+  const tbody = document.getElementById('stationTable');
+  if (!data.by_station.length) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="5">Нет данных</td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.by_station.map(r => `<tr>
+    <td data-label="Бренд"><span class="badge bm">${r.brand}</span></td>
+    <td data-label="Станция" class="text-sm">${r.station}</td>
+    <td data-label="Код"><span class="badge bd">${r.code}</span></td>
+    <td data-label="Кол-во" class="fw-bold">${r.cnt}</td>
+    <td data-label="Дефект" class="text-sm text-muted">${codeNames[r.code] || r.code}</td>
+  </tr>`).join('');
+}
+
+// Загрузить при открытии
+applyFilters();
+</script>
+</body>
+</html>

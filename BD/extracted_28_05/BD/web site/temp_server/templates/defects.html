@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Дефекты — WeldTeam MES</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/theme.js"></script>
+</head>
+<body>
+
+<nav class="nav">
+  <a class="nav-brand" href="/">WeldTeam <span>/ цех BS</span></a>
+  <div class="nav-links">
+    <a class="nav-link" href="/">Главная</a>
+    <a class="nav-link" href="/maintenance">ТО</a>
+    <a class="nav-link active" href="/defects">Дефекты</a>
+    <a class="nav-link" href="/analytics">Аналитика</a>
+    <a class="nav-link" href="/workers">Сотрудники</a>
+    <a class="nav-link" href="/explorer">Обзор</a>
+    <button class="btn-theme" id="themeToggle">☀</button>
+  </div>
+</nav>
+
+<div class="page">
+
+  <!-- ── РЕГИСТРАЦИЯ ДЕФЕКТА ── -->
+  <div class="card" style="margin-bottom:1rem">
+    <div class="card-title danger">Зафиксировать дефект ОТК</div>
+
+    <!-- Автоматический режим (по точке) -->
+    <div class="g3-reg">
+      <div class="fgroup" style="margin:0">
+        <label class="lbl">Модель авто</label>
+        <select id="regModelSelect"><option value="">Выберите модель...</option></select>
+      </div>
+      <div class="fgroup" style="margin:0">
+        <label class="lbl">Номер точки</label>
+        <input type="text" id="regSpotInput" placeholder="Например: 16640">
+      </div>
+      <div class="fgroup" style="margin:0">
+        <label class="lbl">Код дефекта</label>
+        <select id="regCodeInput"><option value="">Выберите код...</option></select>
+      </div>
+      <div style="display:flex;align-items:flex-end">
+        <button class="btn btn-danger btn-full" id="regBtn">Зафиксировать</button>
+      </div>
+    </div>
+    <div id="regAlert" class="hidden mt-alert"></div>
+
+    <!-- Мануальный режим (точка не в БД) -->
+    <div style="margin-top:.5rem;text-align:right">
+      <button class="btn btn-ghost btn-sm" id="toggleManualBtn" style="font-size:11px">Точка не найдена в БД? Ввести вручную →</button>
+    </div>
+    <div id="manualRegForm" class="hidden" style="margin-top:.5rem;padding-top:.75rem;border-top:1px solid var(--border)">
+      <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.5rem">Мануальный ввод — по номеру пистолета</div>
+      <div class="g3-reg">
+        <div class="fgroup" style="margin:0">
+          <label class="lbl">Бренд (опц.)</label>
+          <select id="manBrandSelect"><option value="">— не указан —</option></select>
+        </div>
+        <div class="fgroup" style="margin:0">
+          <label class="lbl">Номер пистолета (G.XXX)</label>
+          <input type="number" id="manGunNum" placeholder="Например: 11" min="1">
+        </div>
+        <div class="fgroup" style="margin:0">
+          <label class="lbl">Код дефекта</label>
+          <select id="manCodeInput"><option value="">Выберите код...</option></select>
+        </div>
+        <div style="display:flex;align-items:flex-end">
+          <button class="btn btn-danger btn-full" id="manRegBtn">Зафиксировать</button>
+        </div>
+      </div>
+      <div id="manRegAlert" class="hidden mt-alert"></div>
+    </div>
+  </div>
+
+  <!-- ── ОТКРЫТЫЕ ДЕФЕКТЫ ── -->
+  <div class="card" style="margin-bottom:1rem">
+    <div class="board-header">
+      <div class="board-title">
+        Открытые дефекты
+        <span class="board-count zero" id="cntOpen">0</span>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="refreshBtn">↻ Обновить</button>
+    </div>
+
+    <div class="tbl-wrap">
+      <table class="tbl tbl-mobile" id="openTable">
+        <thead>
+          <tr>
+            <th>Дата</th><th>Бренд</th><th>Станция</th><th>Точка</th>
+            <th>Ган №&nbsp;[тип]</th><th>Код</th><th>Статус</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="openBody">
+          <tr class="empty-row"><td colspan="7">Загрузка...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Панель: Закрыть дефект -->
+    <div id="boardActionPanel" class="action-panel hidden">
+      <div class="action-panel-title">
+        <span>Закрыть дефект <strong id="panelCloseId"></strong></span>
+        <button class="action-panel-close" id="panelCloseCancelBtn">✕</button>
+      </div>
+
+      <!-- Форма обогащения (точка не в БД) -->
+      <div id="enrichForm" class="hidden" style="margin-bottom:.75rem;padding:.75rem;background:rgba(210,153,34,.08);border:1px solid var(--warn);border-radius:6px">
+        <div style="font-size:11px;font-weight:700;color:var(--warn);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.5rem">⚠ Точка не найдена в БД — уточните данные</div>
+        <div class="g2" style="margin-bottom:.5rem">
+          <div class="fgroup" style="margin:0">
+            <label class="lbl">Номер точки</label>
+            <input type="text" id="enrichSpotNum" readonly style="background:var(--bg);opacity:.7">
+          </div>
+          <div class="fgroup" style="margin:0">
+            <label class="lbl">Модель авто</label>
+            <select id="enrichModelSelect"><option value="">Выберите модель...</option></select>
+          </div>
+        </div>
+        <div class="fgroup" style="margin:0">
+          <label class="lbl">Номер пистолета (G.XXX)</label>
+          <input type="number" id="enrichGunNum" placeholder="Например: 11" min="1">
+        </div>
+      </div>
+
+      <div class="g2">
+        <div class="fgroup">
+          <label class="lbl">Кто устранил</label>
+          <select id="closeWorkerSelect"><option value="">Выберите сотрудника...</option></select>
+        </div>
+        <div class="fgroup">
+          <label class="lbl">Коренная причина</label>
+          <textarea id="closeRootCause" placeholder="Укажите причину дефекта..." style="min-height:60px"></textarea>
+        </div>
+      </div>
+      <div class="fgroup">
+        <label class="lbl">Контрмера / Решение</label>
+        <textarea id="closeSolution" placeholder="Опишите что было сделано..." style="min-height:60px"></textarea>
+      </div>
+      <div id="closeAlert" class="hidden mt-alert"></div>
+      <button class="btn btn-success btn-full" id="confirmCloseBtn">Закрыть дефект</button>
+    </div>
+  </div>
+
+  <!-- ── ЗАКРЫТЫЕ ДЕФЕКТЫ ── -->
+  <div class="card">
+    <div class="board-header">
+      <div class="board-title">Закрытые дефекты <span class="text-muted" style="font-size:11px;font-weight:400;text-transform:none">(последние 50)</span></div>
+    </div>
+    <div class="tbl-wrap">
+      <table class="tbl tbl-mobile">
+        <thead>
+          <tr>
+            <th>Дата</th><th>Бренд</th><th>Точка</th><th>Ган №</th>
+            <th>Код</th><th>Причина</th><th>Контрмера</th><th>Закрыл</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="closedBody">
+          <tr class="empty-row"><td colspan="9">Загрузка...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let allWorkers = [];
+let activeDefectId = null;
+let openDefectsMap = {};  // id → defect object
+
+function loadAll() {
+  fetch('/api/defects/all').then(r => r.json()).then(data => {
+    allWorkers = data.workers;
+    closeWorkerSelect.innerHTML = '<option value="">Выберите сотрудника...</option>';
+    allWorkers.forEach(w => closeWorkerSelect.add(new Option(`${w.surname} ${w.name}`, w.UniqueID)));
+    openDefectsMap = {};
+    data.open.forEach(d => { openDefectsMap[d.UniqueID] = d; });
+    renderOpen(data.open);
+    renderClosed(data.closed);
+  });
+}
+loadAll();
+document.getElementById('refreshBtn').addEventListener('click', loadAll);
+
+// ── Загрузка моделей авто и кодов дефектов ──
+let allModels = [];
+fetch('/api/models').then(r => r.json()).then(data => {
+  allModels = data;
+  data.forEach(m => regModelSelect.add(new Option(m.display_name, m.UniqueID)));
+});
+
+fetch('/api/defect_codes').then(r => r.json()).then(codes => {
+  [regCodeInput, manCodeInput].forEach(sel => {
+    codes.forEach(c => sel.add(new Option(`${c.code} — ${c.name}`, c.code)));
+  });
+});
+
+// ── Регистрация дефекта ──
+document.getElementById('regBtn').addEventListener('click', () => {
+  const alertEl = document.getElementById('regAlert');
+  const model = regModelSelect.value;
+  const spot  = regSpotInput.value.trim();
+  const code  = regCodeInput.value;
+  if (!model || !spot || !code) { showAlert(alertEl, 'warn', 'Выберите модель авто, номер точки и код дефекта'); return; }
+  fetch('/api/defects/register', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ model_id: model, spot_number: spot, problem_code: code })
+  }).then(r => r.json()).then(res => {
+    const alertType = res.status === 'success'
+      ? (res.found_in_db === false ? 'warn' : 'success')
+      : 'danger';
+    showAlert(alertEl, alertType, res.message);
+    if (res.status === 'success') {
+      regSpotInput.value = ''; regCodeInput.value = '';
+      loadAll();
+    }
+  });
+});
+regSpotInput.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('regBtn').click(); });
+
+// ── Мануальная регистрация ──
+document.getElementById('toggleManualBtn').addEventListener('click', () => {
+  const form = document.getElementById('manualRegForm');
+  const visible = !form.classList.toggle('hidden');
+  document.getElementById('toggleManualBtn').textContent =
+    visible ? '← Скрыть мануальный ввод' : 'Точка не найдена в БД? Ввести вручную →';
+  if (visible) {
+    const sel = document.getElementById('manBrandSelect');
+    if (sel.options.length < 2) {
+      fetch('/api/brands').then(r => r.json()).then(brands => {
+        brands.forEach(b => sel.add(new Option(b.brand, b.UniqueID)));
+      });
+    }
+  }
+});
+
+document.getElementById('manRegBtn').addEventListener('click', () => {
+  const alertEl = document.getElementById('manRegAlert');
+  const gnum = document.getElementById('manGunNum').value.trim();
+  const code = document.getElementById('manCodeInput').value;
+  if (!gnum || !code) { showAlert(alertEl, 'warn', 'Укажите номер пистолета и код дефекта'); return; }
+  fetch('/api/defects/register_manual', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ g_num: parseInt(gnum), problem_code: code })
+  }).then(r => r.json()).then(res => {
+    showAlert(alertEl, res.status === 'success' ? 'success' : 'danger', res.message);
+    if (res.status === 'success') {
+      document.getElementById('manGunNum').value = '';
+      document.getElementById('manCodeInput').value = '';
+      loadAll();
+    }
+  });
+});
+document.getElementById('manGunNum').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('manRegBtn').click();
+});
+
+// ── Рендер открытых дефектов ──
+function renderOpen(defects) {
+  const tbody   = document.getElementById('openBody');
+  const cntOpen = document.getElementById('cntOpen');
+  cntOpen.textContent = defects.length;
+  cntOpen.className   = defects.length ? 'board-count danger' : 'board-count zero';
+
+  if (!defects.length) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="9">Нет открытых дефектов</td></tr>';
+    return;
+  }
+  tbody.innerHTML = defects.map(d => {
+    const badge = d.status === 'in_work'
+      ? '<span class="badge bw">В работе</span>'
+      : '<span class="badge bd">Новый</span>';
+    const warnBadge = d.needs_enrichment
+      ? ' <span class="badge" style="background:rgba(210,153,34,.15);color:var(--warn);border:1px solid var(--warn)" title="Точка не в БД — требует уточнения">⚠</span>'
+      : '';
+    const spotDisplay = d.needs_enrichment
+      ? `<span style="color:var(--warn)">№${d.spot_number}</span>`
+      : `№${d.spot_number}`;
+    return `<tr id="row-${d.UniqueID}">
+      <td data-label="Дата" class="text-sm">${d.df_date}</td>
+      <td data-label="Бренд"><span class="badge bm">${d.brand}</span></td>
+      <td data-label="Станция" class="text-sm text-muted">${d.station_name||'—'}</td>
+      <td data-label="Точка" class="fw-bold">${spotDisplay}${warnBadge}</td>
+      <td data-label="Ган" class="text-sm fw-bold">№${d.g_num || '—'} <span class="text-muted">[${d.gun_model||'—'}]</span></td>
+      <td data-label="Код"><span class="badge bd">${d.problem_code}</span></td>
+      <td data-label="Статус">${badge}</td>
+      <td data-label="">
+        <button class="btn btn-success btn-sm" onclick="openClosePanel(${d.UniqueID})">Закрыть</button>
+        <button class="btn btn-ghost btn-sm" onclick="delDefect(${d.UniqueID})" title="Удалить">✕</button>
+      </td>
+    </tr>`;
+  }).join('');
+  closePanels();
+}
+
+// ── Рендер закрытых дефектов ──
+function renderClosed(defects) {
+  const tbody = document.getElementById('closedBody');
+  if (!defects.length) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="10">Нет закрытых дефектов</td></tr>';
+    return;
+  }
+  tbody.innerHTML = defects.map(d => `<tr>
+    <td data-label="Дата" class="text-sm">${d.df_date}</td>
+    <td data-label="Бренд"><span class="badge bm">${d.brand}</span></td>
+    <td data-label="Точка" class="fw-bold">№${d.spot_number}</td>
+    <td data-label="Ган" class="text-sm">№${d.g_num || '—'}</td>
+    <td data-label="Код"><span class="badge bd">${d.problem_code}</span></td>
+    <td data-label="Причина" class="text-sm text-muted">${d.root_cause || '—'}</td>
+    <td data-label="Контрмера" class="text-sm">${d.solution || '—'}</td>
+    <td data-label="Закрыл" class="text-sm">${d.solv_surname || '—'}</td>
+    <td data-label=""><button class="btn btn-ghost btn-sm" onclick="delDefect(${d.UniqueID})" title="Удалить">✕</button></td>
+  </tr>`).join('');
+}
+
+// ── Action panels ──
+window.openClosePanel = function(id) {
+  activeDefectId = id;
+  highlightRow(id);
+  document.getElementById('panelCloseId').textContent = `#${id}`;
+  document.getElementById('closeAlert').className = 'hidden';
+  document.getElementById('closeWorkerSelect').value = '';
+  document.getElementById('closeRootCause').value = '';
+  document.getElementById('closeSolution').value = '';
+
+  const defect = openDefectsMap[id];
+  const enrichForm = document.getElementById('enrichForm');
+  if (defect && defect.needs_enrichment) {
+    enrichForm.classList.remove('hidden');
+    document.getElementById('enrichSpotNum').value = defect.manual_spot_number || '';
+    document.getElementById('enrichGunNum').value = '';
+    const modelSel = document.getElementById('enrichModelSelect');
+    modelSel.innerHTML = '<option value="">Выберите модель...</option>';
+    if (defect.manual_model_id) {
+      fetch('/api/models').then(r => r.json()).then(models => {
+        models.forEach(m => modelSel.add(new Option(m.display_name, m.UniqueID)));
+        modelSel.value = defect.manual_model_id;
+        modelSel.disabled = true;
+      });
+    } else if (defect.manual_brand_id) {
+      fetch(`/api/models?brand_id=${defect.manual_brand_id}`).then(r => r.json()).then(models => {
+        models.forEach(m => modelSel.add(new Option(m.display_name, m.UniqueID)));
+        modelSel.disabled = false;
+      });
+    } else {
+      fetch('/api/models').then(r => r.json()).then(models => {
+        models.forEach(m => modelSel.add(new Option(m.display_name, m.UniqueID)));
+        modelSel.disabled = false;
+      });
+    }
+  } else {
+    enrichForm.classList.add('hidden');
+    document.getElementById('enrichModelSelect').disabled = false;
+  }
+
+  document.getElementById('boardActionPanel').classList.remove('hidden');
+  document.getElementById('boardActionPanel').scrollIntoView({behavior:'smooth',block:'nearest'});
+};
+
+function closePanels() {
+  document.getElementById('boardActionPanel').classList.add('hidden');
+  document.querySelectorAll('.board-row-active').forEach(r => r.classList.remove('board-row-active'));
+  activeDefectId = null;
+}
+function highlightRow(id) {
+  document.querySelectorAll('.board-row-active').forEach(r => r.classList.remove('board-row-active'));
+  const row = document.getElementById(`row-${id}`);
+  if (row) row.classList.add('board-row-active');
+}
+
+document.getElementById('panelCloseCancelBtn').addEventListener('click', closePanels);
+
+document.getElementById('confirmCloseBtn').addEventListener('click', () => {
+  const alertEl = document.getElementById('closeAlert');
+  const wId   = document.getElementById('closeWorkerSelect').value;
+  const cause = document.getElementById('closeRootCause').value.trim();
+  const text  = document.getElementById('closeSolution').value.trim();
+  if (!wId)  { showAlert(alertEl, 'warn', 'Выберите сотрудника'); return; }
+  if (!text) { showAlert(alertEl, 'warn', 'Введите контрмеру/решение'); return; }
+
+  const defect = openDefectsMap[activeDefectId];
+  const payload = { defect_id: activeDefectId, worker_solve_id: wId, root_cause: cause, solution: text };
+
+  if (defect && defect.needs_enrichment) {
+    const modelId = document.getElementById('enrichModelSelect').value;
+    const gunNum  = document.getElementById('enrichGunNum').value.trim();
+    if (!modelId) { showAlert(alertEl, 'warn', 'Выберите модель авто'); return; }
+    if (!gunNum)  { showAlert(alertEl, 'warn', 'Укажите номер пистолета'); return; }
+    payload.model_id = modelId;
+    payload.gun_num  = parseInt(gunNum);
+  }
+
+  fetch('/api/defects/close', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(payload)
+  }).then(r => r.json()).then(res => {
+    if (res.status === 'success') { closePanels(); loadAll(); }
+    else showAlert(alertEl, 'danger', res.message);
+  });
+});
+
+window.delDefect = function(id) {
+  if (!confirm(`Удалить дефект #${id}?`)) return;
+  fetch(`/api/defects/${id}`, { method: 'DELETE' })
+    .then(r => r.json()).then(res => {
+      if (res.status === 'success') loadAll();
+    });
+};
+
+function showAlert(el, type, msg) {
+  el.className = `alert alert-${type}`;
+  el.textContent = msg;
+}
+</script>
+</body>
+</html>

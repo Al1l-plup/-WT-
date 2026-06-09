@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Обзор данных — WeldTeam MES</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/theme.js"></script>
+</head>
+<body>
+
+<nav class="nav">
+  <a class="nav-brand" href="/">WeldTeam <span>/ цех BS</span></a>
+  <div class="nav-links">
+    <a class="nav-link" href="/">Главная</a>
+    <a class="nav-link" href="/maintenance">ТО</a>
+    <a class="nav-link" href="/defects">Дефекты</a>
+    <a class="nav-link" href="/analytics">Аналитика</a>
+    <a class="nav-link" href="/workers">Сотрудники</a>
+    <a class="nav-link active" href="/explorer">Обзор</a>
+    <button class="btn-theme" id="themeToggle">☀</button>
+  </div>
+</nav>
+
+<div class="page">
+  <div class="page-head">
+    <h1>Обзор данных</h1>
+    <p>Все данные по пистолету, станции или сварочной точке</p>
+  </div>
+
+  <!-- Переключатель режимов -->
+  <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:1.25rem">
+    <button class="view-btn active" data-mode="gun">🔫 Пистолет</button>
+    <button class="view-btn" data-mode="station">🏭 Станция</button>
+    <button class="view-btn" data-mode="spot">🎯 Точка</button>
+  </div>
+
+  <!-- ════════════════════ РЕЖИМ: ПИСТОЛЕТ ════════════════════ -->
+  <div id="mode-gun">
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-title">Поиск пистолета</div>
+      <div class="g2" style="gap:.75rem;margin-bottom:.75rem">
+        <div class="fgroup" style="margin:0">
+          <label class="lbl">Бренд</label>
+          <select id="g-brandSel"><option value="">— все —</option></select>
+        </div>
+        <div class="fgroup" style="margin:0">
+          <label class="lbl">Станция</label>
+          <select id="g-stationSel" disabled><option value="">— сначала бренд —</option></select>
+        </div>
+      </div>
+      <div class="fgroup" style="margin-bottom:.5rem">
+        <label class="lbl">Пистолет</label>
+        <select id="g-gunSel" disabled><option value="">— сначала станция —</option></select>
+      </div>
+      <div class="sep">или найти по номеру</div>
+      <div class="search-row">
+        <input type="number" id="g-numInput" placeholder="Номер пистолета (g_num)" min="1" style="flex:1">
+        <button class="btn btn-primary" id="g-numSearch">Найти</button>
+      </div>
+      <div id="g-searchAlert" class="hidden mt-alert"></div>
+    </div>
+
+    <div id="gun-data" class="hidden">
+      <!-- Паспорт -->
+      <div class="card" style="margin-bottom:1rem">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
+          <div class="card-title accent" style="margin:0">Паспорт пистолета</div>
+          <button class="btn btn-ghost btn-sm" id="gun-editBtn">✏ Редактировать</button>
+        </div>
+        <div class="g2" id="gun-passport"></div>
+        <div id="gun-editForm" class="hidden" style="margin-top:.75rem">
+          <div class="g2">
+            <div class="fgroup"><label class="lbl">Номер G.NUM</label><input type="number" id="gun-edit-gnum" min="1"></div>
+            <div class="fgroup">
+              <label class="lbl">Тип клещей</label>
+              <select id="gun-edit-type">
+                <option>AC</option><option>DC</option><option>Ручной ввод</option>
+              </select>
+            </div>
+          </div>
+          <div id="gun-editAlert" class="hidden mt-alert"></div>
+          <div style="display:flex;gap:.5rem;margin-top:.5rem">
+            <button class="btn btn-ghost btn-sm" id="gun-editCancel">Отмена</button>
+            <button class="btn btn-primary btn-sm" id="gun-editSave">Сохранить</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Активные уставки -->
+      <div class="card" style="margin-bottom:1rem">
+        <div class="card-title warn">Активные уставки</div>
+        <div class="tbl-wrap">
+          <table class="tbl tbl-mobile">
+            <thead><tr><th>Точка</th><th>Модель</th><th>Реж.</th><th>Давл. (daN)</th><th>К.Тр.</th><th>Ток 1</th><th>Ток 2</th><th>С даты</th></tr></thead>
+            <tbody id="gun-setups"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- История уставок -->
+      <div class="card" style="margin-bottom:1rem">
+        <div class="card-title">История уставок (архив)</div>
+        <div class="tbl-wrap">
+          <table class="tbl tbl-mobile">
+            <thead><tr><th>Дата нач.</th><th>Дата оконч.</th><th>Статус</th><th>Точка</th><th>Реж.</th><th>Ток 1</th><th>Ток 2</th><th>Комментарий</th></tr></thead>
+            <tbody id="gun-history"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="g2" style="margin-bottom:1rem">
+        <!-- Точки -->
+        <div class="card">
+          <div class="card-title success">Точки (активные)</div>
+          <div class="tbl-wrap">
+            <table class="tbl tbl-mobile">
+              <thead><tr><th>№ точки</th><th>Модель</th></tr></thead>
+              <tbody id="gun-spots"></tbody>
+            </table>
+          </div>
+        </div>
+        <!-- История ТО -->
+        <div class="card">
+          <div class="card-title success">История ТО</div>
+          <div class="tbl-wrap">
+            <table class="tbl tbl-mobile">
+              <thead><tr><th>Дата</th><th>Ср. ток (А)</th><th>Ср. давл. (daN)</th><th>Сотрудник</th></tr></thead>
+              <tbody id="gun-maint"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Дефекты -->
+      <div class="card">
+        <div class="card-title danger">Дефекты</div>
+        <div class="tbl-wrap">
+          <table class="tbl tbl-mobile">
+            <thead><tr><th>Дата</th><th>Точка</th><th>Модель</th><th>Код</th><th>Статус</th><th>Первопричина</th><th>Контрмера</th></tr></thead>
+            <tbody id="gun-defects"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════ РЕЖИМ: СТАНЦИЯ ════════════════════ -->
+  <div id="mode-station" class="hidden">
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-title">Выбор станции</div>
+      <div class="g2" style="gap:.75rem">
+        <div class="fgroup" style="margin:0">
+          <label class="lbl">Бренд</label>
+          <select id="st-brandSel"><option value="">Выберите бренд...</option></select>
+        </div>
+        <div class="fgroup" style="margin:0">
+          <label class="lbl">Станция</label>
+          <select id="st-stationSel" disabled><option value="">— сначала бренд —</option></select>
+        </div>
+      </div>
+    </div>
+
+    <div id="station-data" class="hidden">
+      <!-- Паспорт -->
+      <div class="card" style="margin-bottom:1rem">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
+          <div class="card-title accent" style="margin:0">Паспорт станции</div>
+          <button class="btn btn-ghost btn-sm" id="st-editBtn">✏ Редактировать</button>
+        </div>
+        <div class="g2" id="st-passport"></div>
+        <div id="st-editForm" class="hidden" style="margin-top:.75rem">
+          <div class="fgroup"><label class="lbl">Название станции</label><input type="text" id="st-edit-name"></div>
+          <div id="st-editAlert" class="hidden mt-alert"></div>
+          <div style="display:flex;gap:.5rem;margin-top:.5rem">
+            <button class="btn btn-ghost btn-sm" id="st-editCancel">Отмена</button>
+            <button class="btn btn-primary btn-sm" id="st-editSave">Сохранить</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="g2" style="margin-bottom:1rem">
+        <!-- Пистолеты -->
+        <div class="card">
+          <div class="card-title warn">Пистолеты на станции</div>
+          <div class="tbl-wrap">
+            <table class="tbl tbl-mobile">
+              <thead><tr><th>#</th><th>G.NUM</th><th>Тип</th><th>Реж.</th><th>Ток 1</th><th>Ток 2</th></tr></thead>
+              <tbody id="st-guns"></tbody>
+            </table>
+          </div>
+        </div>
+        <!-- Модели/точки -->
+        <div class="card">
+          <div class="card-title">Производимые модели</div>
+          <div class="tbl-wrap">
+            <table class="tbl tbl-mobile">
+              <thead><tr><th>Модель</th><th>Точек</th></tr></thead>
+              <tbody id="st-models"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="g2">
+        <!-- Дефекты сводка -->
+        <div class="card">
+          <div class="card-title danger">Дефекты (по кодам)</div>
+          <div class="tbl-wrap">
+            <table class="tbl tbl-mobile">
+              <thead><tr><th>Код</th><th>Название</th><th>Кол-во</th></tr></thead>
+              <tbody id="st-defects"></tbody>
+            </table>
+          </div>
+        </div>
+        <!-- Последние ТО -->
+        <div class="card">
+          <div class="card-title success">Последние ТО</div>
+          <div class="tbl-wrap">
+            <table class="tbl tbl-mobile">
+              <thead><tr><th>Дата</th><th>Пистолет</th><th>Ср. ток (А)</th><th>Сотрудник</th></tr></thead>
+              <tbody id="st-maint"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════ РЕЖИМ: ТОЧКА ════════════════════ -->
+  <div id="mode-spot" class="hidden">
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-title">Поиск точки сварки</div>
+      <div class="g2" style="gap:.75rem;margin-bottom:.5rem">
+        <div class="fgroup" style="margin:0">
+          <label class="lbl">Модель авто</label>
+          <select id="sp-modelSel"><option value="">Выберите модель...</option></select>
+        </div>
+        <div class="fgroup" style="margin:0">
+          <label class="lbl">Номер точки</label>
+          <input type="text" id="sp-numInput" placeholder="Напр. 237" list="sp-datalist">
+          <datalist id="sp-datalist"></datalist>
+        </div>
+      </div>
+      <button class="btn btn-primary" id="sp-search">Найти точку</button>
+      <div id="sp-searchAlert" class="hidden mt-alert"></div>
+    </div>
+
+    <div id="spot-data" class="hidden">
+      <!-- Паспорт -->
+      <div class="card" style="margin-bottom:1rem">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
+          <div class="card-title accent" style="margin:0">Паспорт точки</div>
+          <button class="btn btn-ghost btn-sm" id="sp-editBtn">✏ Редактировать</button>
+        </div>
+        <div class="g2" id="sp-passport"></div>
+        <div id="sp-editForm" class="hidden" style="margin-top:.75rem">
+          <div class="g2">
+            <div class="fgroup"><label class="lbl">Номер точки</label><input type="text" id="sp-edit-num"></div>
+            <div class="fgroup">
+              <label class="lbl">Модель</label>
+              <select id="sp-edit-model"></select>
+            </div>
+          </div>
+          <div id="sp-editAlert" class="hidden mt-alert"></div>
+          <div style="display:flex;gap:.5rem;margin-top:.5rem">
+            <button class="btn btn-ghost btn-sm" id="sp-editCancel">Отмена</button>
+            <button class="btn btn-primary btn-sm" id="sp-editSave">Сохранить</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Активная связь -->
+      <div class="card" style="margin-bottom:1rem">
+        <div class="card-title warn">Активная связь (пистолет ↔ точка)</div>
+        <div id="sp-active-link"></div>
+      </div>
+
+      <!-- История связей -->
+      <div class="card" style="margin-bottom:1rem">
+        <div class="card-title">История связей (архив)</div>
+        <div class="tbl-wrap">
+          <table class="tbl tbl-mobile">
+            <thead><tr><th>С даты</th><th>По дату</th><th>Статус</th><th>Пистолет</th><th>Реж.</th><th>Ток 1</th><th>Ток 2</th><th>Комментарий</th></tr></thead>
+            <tbody id="sp-history"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="g2">
+        <!-- Дефекты -->
+        <div class="card">
+          <div class="card-title danger">Дефекты на точке</div>
+          <div class="tbl-wrap">
+            <table class="tbl tbl-mobile">
+              <thead><tr><th>Дата</th><th>Код</th><th>Статус</th><th>Контрмера</th></tr></thead>
+              <tbody id="sp-defects"></tbody>
+            </table>
+          </div>
+        </div>
+        <!-- ТО пистолета -->
+        <div class="card">
+          <div class="card-title success">ТО активного пистолета</div>
+          <div class="tbl-wrap">
+            <table class="tbl tbl-mobile">
+              <thead><tr><th>Дата</th><th>Ср. ток (А)</th><th>Ср. давл. (daN)</th><th>Сотрудник</th></tr></thead>
+              <tbody id="sp-maint"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /page -->
+
+<script>
+// ─── РЕЖИМЫ ────────────────────────────────────────────────────────
+const modes = ['gun','station','spot'];
+
+function switchMode(mode) {
+  document.querySelectorAll('[data-mode]').forEach(b => b.classList.remove('active'));
+  document.querySelector(`[data-mode="${mode}"]`)?.classList.add('active');
+  modes.forEach(m => document.getElementById(`mode-${m}`).classList.add('hidden'));
+  document.getElementById(`mode-${mode}`)?.classList.remove('hidden');
+  const id = mode === 'gun' ? gunId : mode === 'station' ? stationId : spotId;
+  history.replaceState(null, '', id ? `?mode=${mode}&id=${id}` : `?mode=${mode}`);
+}
+
+document.querySelectorAll('[data-mode]').forEach(btn => {
+  btn.addEventListener('click', () => switchMode(btn.dataset.mode));
+});
+
+function showAlert(el, type, msg) { el.className = `alert alert-${type}`; el.textContent = msg; }
+function badgeStatus(s) {
+  if (s==='closed')     return '<span class="badge bs">Закрыт</span>';
+  if (s==='in_work')    return '<span class="badge bw">В работе</span>';
+  return '<span class="badge bm">Зарегистр.</span>';
+}
+
+// ─── ПИСТОЛЕТ: поиск ──────────────────────────────────────────────
+let gunId = null;
+
+// Инит бренд / станция / пистолет
+fetch('/api/brands').then(r => r.json()).then(brands => {
+  const sel = document.getElementById('g-brandSel');
+  brands.forEach(b => sel.add(new Option(b.brand, b.UniqueID)));
+});
+document.getElementById('g-brandSel').addEventListener('change', () => {
+  const v = document.getElementById('g-brandSel').value;
+  const sSel = document.getElementById('g-stationSel');
+  const gSel = document.getElementById('g-gunSel');
+  sSel.innerHTML = '<option value="">— выберите станцию —</option>'; sSel.disabled = !v;
+  gSel.innerHTML = '<option value="">— сначала станция —</option>'; gSel.disabled = true;
+  if (!v) return;
+  fetch(`/api/stations/${v}`).then(r => r.json()).then(data => {
+    data.forEach(s => sSel.add(new Option(s.station_name, s.UniqueID)));
+  });
+});
+document.getElementById('g-stationSel').addEventListener('change', () => {
+  const v = document.getElementById('g-stationSel').value;
+  const gSel = document.getElementById('g-gunSel');
+  gSel.innerHTML = '<option value="">— выберите пистолет —</option>'; gSel.disabled = !v;
+  if (!v) return;
+  fetch(`/api/guns/${v}`).then(r => r.json()).then(data => {
+    data.forEach(g => gSel.add(new Option(`№${g.g_num} [${g.model}]`, g.UniqueID)));
+    gSel.disabled = false;
+  });
+});
+document.getElementById('g-gunSel').addEventListener('change', () => {
+  const v = document.getElementById('g-gunSel').value;
+  if (v) loadGunData(parseInt(v));
+});
+
+document.getElementById('g-numSearch').addEventListener('click', () => {
+  const num = document.getElementById('g-numInput').value.trim();
+  const al = document.getElementById('g-searchAlert');
+  if (!num) { showAlert(al, 'warn', 'Введите номер пистолета'); return; }
+  fetch(`/api/guns/by_number/${num}`).then(r => r.json()).then(res => {
+    if (res.status === 'empty') { showAlert(al, 'danger', res.message); return; }
+    al.className = 'hidden';
+    loadGunData(res.gun.UniqueID);
+  });
+});
+document.getElementById('g-numInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('g-numSearch').click();
+});
+
+function loadGunData(id) {
+  gunId = id;
+  sessionStorage.setItem('explorer_mode', 'gun');
+  sessionStorage.setItem('explorer_id', id);
+  history.replaceState(null, '', `?mode=gun&id=${id}`);
+  fetch(`/api/explorer/gun/${id}`).then(r => r.json()).then(renderGun);
+}
+
+function renderGun(d) {
+  document.getElementById('gun-data').classList.remove('hidden');
+  const g = d.gun;
+  document.getElementById('gun-passport').innerHTML = `
+    <div class="stat"><div class="stat-val accent">G.${String(g.g_num).padStart(3,'0')}</div><div class="stat-lbl">Номер</div></div>
+    <div class="stat"><div class="stat-val">${g.gun_type||'—'}</div><div class="stat-lbl">Тип клещей</div></div>
+    <div class="stat"><div class="stat-val">${g.brand}</div><div class="stat-lbl">Бренд / Линия</div></div>
+    <div class="stat"><div class="stat-val">${g.station_name}</div><div class="stat-lbl">Станция</div></div>
+    <div class="stat"><div class="stat-val">${d.spots.length}</div><div class="stat-lbl">Сварочных точек</div></div>
+    <div class="stat"><div class="stat-val">${d.maintenance_count}</div><div class="stat-lbl">Записей ТО</div></div>
+    <div class="stat"><div class="stat-val">${d.defect_count}</div><div class="stat-lbl">Дефектов</div></div>
+  `;
+  document.getElementById('gun-edit-gnum').value = g.g_num;
+  document.getElementById('gun-edit-type').value = g.gun_type || 'AC';
+
+  document.getElementById('gun-setups').innerHTML = d.active_setups.length
+    ? d.active_setups.map(r => `<tr>
+        <td data-label="Точка" class="fw-bold">${r.spot_number||'—'}</td>
+        <td data-label="Модель" class="text-sm">${fmtModel(r.model_name,r.model_type)}</td>
+        <td data-label="Реж.">${r.mode||'—'}</td>
+        <td data-label="Давл.">${Math.round(r.pressure/10)}</td>
+        <td data-label="К.Тр." class="text-accent">${r.turn_R||'—'}</td>
+        <td data-label="Ток 1" class="text-danger">${r.heat_1||'—'}</td>
+        <td data-label="Ток 2" class="text-danger">${r.heat_2||'—'}</td>
+        <td data-label="С даты" class="text-muted text-sm">${r.start_date||'—'}</td>
+      </tr>`).join('')
+    : '<tr class="empty-row"><td colspan="8">Нет активных уставок</td></tr>';
+
+  document.getElementById('gun-history').innerHTML = d.setup_history.length
+    ? d.setup_history.map(r => `<tr>
+        <td data-label="Нач." class="text-sm">${r.start_date||'—'}</td>
+        <td data-label="Оконч." class="text-sm text-muted">${r.end_date||'—'}</td>
+        <td data-label="Статус">${r.is_active ? '<span class="badge bs">Акт.</span>' : '<span class="badge bm">Архив</span>'}</td>
+        <td data-label="Точка" class="text-sm">${r.spot_number||'—'}</td>
+        <td data-label="Реж.">${r.mode||'—'}</td>
+        <td data-label="Ток 1" class="text-danger">${r.heat_1||'—'}</td>
+        <td data-label="Ток 2" class="text-danger">${r.heat_2||'—'}</td>
+        <td data-label="Комментарий" class="text-muted text-sm">${r.comments||'—'}</td>
+      </tr>`).join('')
+    : '<tr class="empty-row"><td colspan="8">Нет истории</td></tr>';
+
+  document.getElementById('gun-spots').innerHTML = d.spots.length
+    ? d.spots.map(r => `<tr>
+        <td data-label="Точка" class="fw-bold">${r.spot_number}</td>
+        <td data-label="Модель" class="text-sm text-muted">${fmtModel(r.model_name,r.model_type)}</td>
+      </tr>`).join('')
+    : '<tr class="empty-row"><td colspan="2">Нет точек</td></tr>';
+
+  document.getElementById('gun-maint').innerHTML = d.maintenance.length
+    ? d.maintenance.map(r => `<tr>
+        <td data-label="Дата">${r.to_date}</td>
+        <td data-label="Ср. ток" class="fw-bold text-accent">${r.avg_weld} А</td>
+        <td data-label="Ср. давл.">${Math.round(r.avg_pres_N/10)} daN</td>
+        <td data-label="Сотрудник">${r.worker}</td>
+      </tr>`).join('')
+    : '<tr class="empty-row"><td colspan="4">Нет ТО</td></tr>';
+
+  document.getElementById('gun-defects').innerHTML = d.defects.length
+    ? d.defects.map(r => `<tr>
+        <td data-label="Дата" class="text-sm">${r.df_date}</td>
+        <td data-label="Точка" class="fw-bold">${r.spot_number}</td>
+        <td data-label="Модель" class="text-sm text-muted">${r.model_name}</td>
+        <td data-label="Код"><span class="badge bd">${r.problem_code}</span></td>
+        <td data-label="Статус">${badgeStatus(r.status)}</td>
+        <td data-label="Первопричина" class="text-sm text-muted">${r.root_cause||'—'}</td>
+        <td data-label="Контрмера" class="text-sm text-muted">${r.solution||'—'}</td>
+      </tr>`).join('')
+    : '<tr class="empty-row"><td colspan="7">Нет дефектов</td></tr>';
+
+  document.getElementById('gun-editForm').classList.add('hidden');
+  document.getElementById('gun-data').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+// Редактирование пистолета
+document.getElementById('gun-editBtn').addEventListener('click', () => {
+  document.getElementById('gun-editForm').classList.toggle('hidden');
+});
+document.getElementById('gun-editCancel').addEventListener('click', () => {
+  document.getElementById('gun-editForm').classList.add('hidden');
+});
+document.getElementById('gun-editSave').addEventListener('click', () => {
+  const al = document.getElementById('gun-editAlert');
+  const gnum = parseInt(document.getElementById('gun-edit-gnum').value);
+  const gtype = document.getElementById('gun-edit-type').value;
+  if (!gnum) { showAlert(al, 'warn', 'Введите корректный номер'); return; }
+  fetch(`/api/explorer/gun/${gunId}`, {
+    method: 'PUT', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({g_num: gnum, gun_type: gtype})
+  }).then(r => r.json()).then(res => {
+    if (res.status === 'success') { showAlert(al, 'success', res.message); setTimeout(() => loadGunData(gunId), 800); }
+    else showAlert(al, 'danger', res.message);
+  });
+});
+
+// ─── СТАНЦИЯ: поиск ───────────────────────────────────────────────
+let stationId = null;
+
+fetch('/api/brands').then(r => r.json()).then(brands => {
+  const sel = document.getElementById('st-brandSel');
+  brands.forEach(b => sel.add(new Option(b.brand, b.UniqueID)));
+});
+document.getElementById('st-brandSel').addEventListener('change', () => {
+  const v = document.getElementById('st-brandSel').value;
+  const sSel = document.getElementById('st-stationSel');
+  sSel.innerHTML = '<option value="">— выберите станцию —</option>'; sSel.disabled = !v;
+  if (!v) return;
+  fetch(`/api/stations/${v}`).then(r => r.json()).then(data => {
+    data.forEach(s => sSel.add(new Option(s.station_name, s.UniqueID)));
+    sSel.disabled = false;
+  });
+});
+document.getElementById('st-stationSel').addEventListener('change', () => {
+  const v = document.getElementById('st-stationSel').value;
+  if (v) loadStationData(parseInt(v));
+});
+
+function loadStationData(id) {
+  stationId = id;
+  sessionStorage.setItem('explorer_mode', 'station');
+  sessionStorage.setItem('explorer_id', id);
+  history.replaceState(null, '', `?mode=station&id=${id}`);
+  fetch(`/api/explorer/station/${id}`).then(r => r.json()).then(renderStation);
+}
+
+function renderStation(d) {
+  document.getElementById('station-data').classList.remove('hidden');
+  const s = d.station;
+  document.getElementById('st-passport').innerHTML = `
+    <div class="stat"><div class="stat-val accent">${s.station_name}</div><div class="stat-lbl">Станция</div></div>
+    <div class="stat"><div class="stat-val">${s.brand}</div><div class="stat-lbl">Бренд</div></div>
+    <div class="stat"><div class="stat-val">${d.guns.length}</div><div class="stat-lbl">Пистолетов</div></div>
+    <div class="stat"><div class="stat-val">${d.defects_summary.reduce((a,r)=>a+r.cnt,0)}</div><div class="stat-lbl">Дефектов всего</div></div>
+  `;
+  document.getElementById('st-edit-name').value = s.station_name;
+
+  document.getElementById('st-guns').innerHTML = d.guns.length
+    ? d.guns.map((r, i) => `<tr>
+        <td data-label="#" class="text-muted text-sm">${i+1}</td>
+        <td data-label="G.NUM" class="fw-bold">№${String(r.g_num).padStart(3,'0')}</td>
+        <td data-label="Тип" class="text-sm text-muted">${r.gun_type||'—'}</td>
+        <td data-label="Реж.">${r.mode||'—'}</td>
+        <td data-label="Ток 1" class="text-danger">${r.heat_1||'—'}</td>
+        <td data-label="Ток 2" class="text-danger">${r.heat_2||'—'}</td>
+      </tr>`).join('')
+    : '<tr class="empty-row"><td colspan="6">Нет пистолетов</td></tr>';
+
+  document.getElementById('st-models').innerHTML = d.models.length
+    ? d.models.map(r => `<tr>
+        <td data-label="Модель" class="text-sm">${fmtModel(r.model_name,r.model_type)}</td>
+        <td data-label="Точек" class="fw-bold">${r.spot_count}</td>
+      </tr>`).join('')
+    : '<tr class="empty-row"><td colspan="2">Нет данных</td></tr>';
+
+  document.getElementById('st-defects').innerHTML = d.defects_summary.length
+    ? d.defects_summary.map(r => `<tr>
+        <td data-label="Код"><span class="badge bd">${r.problem_code}</span></td>
+        <td data-label="Название" class="text-sm text-muted">${r.name}</td>
+        <td data-label="Кол-во" class="fw-bold">${r.cnt}</td>
+      </tr>`).join('')
+    : '<tr class="empty-row"><td colspan="3">Нет дефектов</td></tr>';
+
+  document.getElementById('st-maint').innerHTML = d.recent_maintenance.length
+    ? d.recent_maintenance.map(r => `<tr>
+        <td data-label="Дата">${r.to_date}</td>
+        <td data-label="Пистолет" class="fw-bold">№${String(r.g_num).padStart(3,'0')}</td>
+        <td data-label="Ср. ток" class="text-accent">${r.avg_weld} А</td>
+        <td data-label="Сотрудник">${r.worker}</td>
+      </tr>`).join('')
+    : '<tr class="empty-row"><td colspan="4">Нет ТО</td></tr>';
+
+  document.getElementById('st-editForm').classList.add('hidden');
+  document.getElementById('station-data').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+document.getElementById('st-editBtn').addEventListener('click', () => {
+  document.getElementById('st-editForm').classList.toggle('hidden');
+});
+document.getElementById('st-editCancel').addEventListener('click', () => {
+  document.getElementById('st-editForm').classList.add('hidden');
+});
+document.getElementById('st-editSave').addEventListener('click', () => {
+  const al = document.getElementById('st-editAlert');
+  const name = document.getElementById('st-edit-name').value.trim();
+  if (!name) { showAlert(al, 'warn', 'Введите название'); return; }
+  fetch(`/api/explorer/station/${stationId}`, {
+    method: 'PUT', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({station_name: name})
+  }).then(r => r.json()).then(res => {
+    if (res.status === 'success') { showAlert(al, 'success', res.message); setTimeout(() => loadStationData(stationId), 800); }
+    else showAlert(al, 'danger', res.message);
+  });
+});
+
+// ─── ТОЧКА: поиск ─────────────────────────────────────────────────
+let spotId = null;
+let spModels = [];
+
+fetch('/api/models').then(r => r.json()).then(data => {
+  spModels = data;
+  const sel = document.getElementById('sp-modelSel');
+  const editSel = document.getElementById('sp-edit-model');
+  data.forEach(m => {
+    sel.add(new Option(m.display_name, m.UniqueID));
+    editSel.add(new Option(m.display_name, m.UniqueID));
+  });
+});
+
+document.getElementById('sp-modelSel').addEventListener('change', () => {
+  const v = document.getElementById('sp-modelSel').value;
+  const dl = document.getElementById('sp-datalist');
+  dl.innerHTML = '';
+  if (!v) return;
+  fetch(`/api/spots/by_model/${v}`).then(r => r.json()).then(spots => {
+    spots.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.spot_number;
+      dl.appendChild(opt);
+    });
+  });
+});
+
+document.getElementById('sp-search').addEventListener('click', doSpotSearch);
+document.getElementById('sp-numInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doSpotSearch();
+});
+
+function doSpotSearch() {
+  const al = document.getElementById('sp-searchAlert');
+  const modelId = document.getElementById('sp-modelSel').value;
+  const num = document.getElementById('sp-numInput').value.trim();
+  if (!modelId) { showAlert(al, 'warn', 'Выберите модель авто'); return; }
+  if (!num) { showAlert(al, 'warn', 'Введите номер точки'); return; }
+  fetch(`/api/spots/find?model_id=${modelId}&spot_number=${encodeURIComponent(num)}`)
+    .then(r => r.json()).then(res => {
+      if (res.status !== 'success') { showAlert(al, 'danger', `Точка №${num} не найдена`); return; }
+      al.className = 'hidden';
+      loadSpotData(res.spot.UniqueID);
+    });
+}
+
+function loadSpotData(id) {
+  spotId = id;
+  sessionStorage.setItem('explorer_mode', 'spot');
+  sessionStorage.setItem('explorer_id', id);
+  history.replaceState(null, '', `?mode=spot&id=${id}`);
+  fetch(`/api/explorer/spot/${id}`).then(r => r.json()).then(renderSpot);
+}
+
+function renderSpot(d) {
+  document.getElementById('spot-data').classList.remove('hidden');
+  const s = d.spot;
+  document.getElementById('sp-passport').innerHTML = `
+    <div class="stat"><div class="stat-val accent">${s.spot_number}</div><div class="stat-lbl">№ точки</div></div>
+    <div class="stat"><div class="stat-val">${fmtModel(s.model_name,s.model_type)}</div><div class="stat-lbl">Модель</div></div>
+    <div class="stat"><div class="stat-val">${s.brand||'—'}</div><div class="stat-lbl">Бренд</div></div>
+    <div class="stat"><div class="stat-val">${d.link_history.length}</div><div class="stat-lbl">Связей (история)</div></div>
+  `;
+  document.getElementById('sp-edit-num').value = s.spot_number;
+  document.getElementById('sp-edit-model').value = s.model_id;
+
+  if (d.active_link) {
+    const al = d.active_link;
+    document.getElementById('sp-active-link').innerHTML = `
+      <div class="g2">
+        <div class="stat"><div class="stat-val accent">G.${String(al.g_num).padStart(3,'0')}</div><div class="stat-lbl">Пистолет</div></div>
+        <div class="stat"><div class="stat-val">${al.gun_type||'—'}</div><div class="stat-lbl">Тип</div></div>
+        <div class="stat"><div class="stat-val">${al.station_name}</div><div class="stat-lbl">Станция</div></div>
+        <div class="stat"><div class="stat-val">${al.mode||'—'}</div><div class="stat-lbl">Режим</div></div>
+        <div class="stat"><div class="stat-val text-danger">${al.heat_1||'—'} А</div><div class="stat-lbl">Ток 1</div></div>
+        <div class="stat"><div class="stat-val text-danger">${al.heat_2||'—'} А</div><div class="stat-lbl">Ток 2</div></div>
+        <div class="stat"><div class="stat-val">${Math.round((al.pressure||0)/10)} daN</div><div class="stat-lbl">Давление</div></div>
+        <div class="stat"><div class="stat-val text-accent">${al.turn_R||'—'}</div><div class="stat-lbl">К.Тр.</div></div>
+      </div>
+      <div class="text-muted text-sm" style="margin-top:.5rem">С ${al.start_date||'?'} · Комментарий: ${al.comments||'—'}</div>
+    `;
+  } else {
+    document.getElementById('sp-active-link').innerHTML = '<div class="text-muted text-sm">Нет активной связи (точка не назначена пистолету)</div>';
+  }
+
+  document.getElementById('sp-history').innerHTML = d.link_history.length
+    ? d.link_history.map(r => `<tr>
+        <td data-label="С даты" class="text-sm">${r.start_date||'—'}</td>
+        <td data-label="По дату" class="text-sm text-muted">${r.end_date||'—'}</td>
+        <td data-label="Статус">${r.is_active ? '<span class="badge bs">Акт.</span>' : '<span class="badge bm">Архив</span>'}</td>
+        <td data-label="Пистолет" class="fw-bold">G.${String(r.g_num).padStart(3,'0')}</td>
+        <td data-label="Реж.">${r.mode||'—'}</td>
+        <td data-label="Ток 1" class="text-danger">${r.heat_1||'—'}</td>
+        <td data-label="Ток 2" class="text-danger">${r.heat_2||'—'}</td>
+        <td data-label="Комментарий" class="text-muted text-sm">${r.comments||'—'}</td>
+      </tr>`).join('')
+    : '<tr class="empty-row"><td colspan="8">Нет истории</td></tr>';
+
+  document.getElementById('sp-defects').innerHTML = d.defects.length
+    ? d.defects.map(r => `<tr>
+        <td data-label="Дата" class="text-sm">${r.df_date}</td>
+        <td data-label="Код"><span class="badge bd">${r.problem_code}</span></td>
+        <td data-label="Статус">${badgeStatus(r.status)}</td>
+        <td data-label="Контрмера" class="text-sm text-muted">${r.solution||'—'}</td>
+      </tr>`).join('')
+    : '<tr class="empty-row"><td colspan="4">Нет дефектов</td></tr>';
+
+  document.getElementById('sp-maint').innerHTML = d.gun_maintenance.length
+    ? d.gun_maintenance.map(r => `<tr>
+        <td data-label="Дата">${r.to_date}</td>
+        <td data-label="Ср. ток" class="fw-bold text-accent">${r.avg_weld} А</td>
+        <td data-label="Ср. давл.">${Math.round(r.avg_pres_N/10)} daN</td>
+        <td data-label="Сотрудник">${r.worker}</td>
+      </tr>`).join('')
+    : '<tr class="empty-row"><td colspan="4">Нет данных</td></tr>';
+
+  document.getElementById('sp-editForm').classList.add('hidden');
+  document.getElementById('spot-data').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+document.getElementById('sp-editBtn').addEventListener('click', () => {
+  document.getElementById('sp-editForm').classList.toggle('hidden');
+});
+document.getElementById('sp-editCancel').addEventListener('click', () => {
+  document.getElementById('sp-editForm').classList.add('hidden');
+});
+document.getElementById('sp-editSave').addEventListener('click', () => {
+  const al = document.getElementById('sp-editAlert');
+  const num = document.getElementById('sp-edit-num').value.trim();
+  const modelId = document.getElementById('sp-edit-model').value;
+  if (!num) { showAlert(al, 'warn', 'Введите номер точки'); return; }
+  fetch(`/api/explorer/spot/${spotId}`, {
+    method: 'PUT', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({spot_number: num, model_id: parseInt(modelId)})
+  }).then(r => r.json()).then(res => {
+    if (res.status === 'success') { showAlert(al, 'success', res.message); setTimeout(() => loadSpotData(spotId), 800); }
+    else showAlert(al, 'danger', res.message);
+  });
+});
+
+function fmtModel(name, type) {
+  if (!type || type.toLowerCase() === 'single') return name || '—';
+  return `${name} ${type}`;
+}
+
+// ─── ВОССТАНОВЛЕНИЕ СОСТОЯНИЯ ─────────────────────────────────────
+// Приоритет: URL-параметры → sessionStorage
+// Это позволяет вернуться к последнему просмотренному объекту
+// даже если пользователь переходил на другие страницы.
+// Сброс происходит только при явной перезагрузке страницы (F5/Ctrl+R).
+(function restoreState() {
+  const p    = new URLSearchParams(window.location.search);
+  const mode = p.get('mode') || sessionStorage.getItem('explorer_mode');
+  const id   = parseInt(p.get('id')   || sessionStorage.getItem('explorer_id'));
+  if (!mode) return;
+  switchMode(mode);
+  if (!id) return;
+  if (mode === 'gun')          loadGunData(id);
+  else if (mode === 'station') loadStationData(id);
+  else if (mode === 'spot')    loadSpotData(id);
+})();
+</script>
+</body>
+</html>

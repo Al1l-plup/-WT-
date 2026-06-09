@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WeldTeam MES</title>
+  <script src="/static/theme.js"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <a class="nav-brand" href="/">WeldTeam <span>/ цех BS</span></a>
+  <div class="nav-links">
+    <a class="nav-link active" href="/">Главная</a>
+    <a class="nav-link" href="/maintenance">ТО</a>
+    <a class="nav-link" href="/defects">Дефекты</a>
+    <a class="nav-link" href="/analytics">Аналитика</a>
+    <a class="nav-link" href="/workers">Сотрудники</a>
+    <a class="nav-link" href="/explorer">Обзор</a>
+    <button class="btn-theme" id="themeToggle">☀</button>
+  </div>
+</nav>
+
+<div class="page">
+  <div class="page-head">
+    <h1>Система управления сваркой</h1>
+    <p>Цех BS · Chery · GWM · Changan</p>
+  </div>
+
+  <div class="modules">
+    <a href="/maintenance" class="module-card">
+      <div class="module-icon">🔧</div>
+      <div class="module-title">Техническое обслуживание</div>
+      <div class="module-desc">Замеры тока и давления, просмотр и обновление уставок техпроцесса, история клещей</div>
+      <div class="module-arr">→</div>
+    </a>
+    <a href="/defects" class="module-card">
+      <div class="module-icon">📊</div>
+      <div class="module-title">Журнал дефектов</div>
+      <div class="module-desc">Аналитика за месяц, регистрация тикетов ОТК, закрытие дефектов, корректировка уставок</div>
+      <div class="module-arr">→</div>
+    </a>
+  </div>
+
+  <div class="stats-bar mt-3">
+    <div class="stat"><div class="stat-val accent" id="s-maint">—</div><div class="stat-lbl">Записей ТО</div></div>
+    <div class="stat"><div class="stat-val danger" id="s-open">—</div><div class="stat-lbl">Открытых дефектов</div></div>
+    <div class="stat"><div class="stat-val" id="s-total">—</div><div class="stat-lbl">Всего дефектов</div></div>
+  </div>
+</div>
+
+<script>
+fetch('/api/stats').then(r => r.json()).then(d => {
+  document.getElementById('s-maint').textContent = d.maintenance_records;
+  document.getElementById('s-open').textContent  = d.defects_open;
+  document.getElementById('s-total').textContent = d.defects_total;
+}).catch(() => {});
+</script>
+</body>
+</html>

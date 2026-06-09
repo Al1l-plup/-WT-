@@ -34,7 +34,7 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
 // все остальные маршруты → index.html (SPA)
 if (process.env.NODE_ENV === 'production' && fs.existsSync(DIST)) {
-  app.get('*', (req, res) => res.sendFile(path.join(DIST, 'index.html')));
+  app.get('/{*splat}', (req, res) => res.sendFile(path.join(DIST, 'index.html')));
 }
 
 app.use((err, req, res, next) => {

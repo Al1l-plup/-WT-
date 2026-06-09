@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WeldTeam MES — Презентация</title>
+<style>
+  :root {
+    --bg:      #0d1117;
+    --card:    #161b22;
+    --border:  #30363d;
+    --fg:      #e6edf3;
+    --muted:   #8b949e;
+    --accent:  #58a6ff;
+    --success: #3fb950;
+    --warn:    #e3b341;
+    --danger:  #f85149;
+    --purple:  #bc8cff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--fg);
+    font-family: -apple-system, 'Segoe UI', sans-serif; overflow: hidden; }
+
+  /* ── SLIDES ── */
+  .deck { width: 100%; height: 100%; position: relative; }
+  .slide {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    padding: 3rem 5rem;
+    opacity: 0; pointer-events: none;
+    transition: opacity .35s ease;
+  }
+  .slide.active { opacity: 1; pointer-events: all; }
+
+  /* ── NAV ── */
+  .nav-bar {
+    position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 1rem;
+    background: rgba(22,27,34,.92); border: 1px solid var(--border);
+    border-radius: 2rem; padding: .5rem 1.25rem;
+    backdrop-filter: blur(8px); z-index: 100;
+  }
+  .nav-btn {
+    background: none; border: none; color: var(--fg); cursor: pointer;
+    font-size: 1.25rem; padding: .25rem .5rem; border-radius: 6px;
+    transition: background .15s;
+  }
+  .nav-btn:hover { background: var(--border); }
+  .nav-btn:disabled { opacity: .3; cursor: default; }
+  .slide-counter { font-size: .85rem; color: var(--muted); min-width: 60px; text-align: center; }
+  .progress-bar {
+    position: fixed; top: 0; left: 0; height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--purple));
+    transition: width .35s ease; z-index: 200;
+  }
+
+  /* ── TYPOGRAPHY ── */
+  .tag {
+    display: inline-block; font-size: .7rem; font-weight: 700; letter-spacing: .1em;
+    text-transform: uppercase; padding: .25rem .75rem; border-radius: 2rem;
+    margin-bottom: 1rem;
+  }
+  .tag-blue  { background: rgba(88,166,255,.15); color: var(--accent); border: 1px solid rgba(88,166,255,.3); }
+  .tag-green { background: rgba(63,185,80,.15);  color: var(--success); border: 1px solid rgba(63,185,80,.3); }
+  .tag-warn  { background: rgba(227,179,65,.15); color: var(--warn);    border: 1px solid rgba(227,179,65,.3); }
+  .tag-red   { background: rgba(248,81,73,.15);  color: var(--danger);  border: 1px solid rgba(248,81,73,.3); }
+  .tag-purple{ background: rgba(188,140,255,.15);color: var(--purple);  border: 1px solid rgba(188,140,255,.3); }
+
+  h1 { font-size: clamp(2rem, 5vw, 3.5rem); font-weight: 800; line-height: 1.1; }
+  h2 { font-size: clamp(1.4rem, 3vw, 2.2rem); font-weight: 700; margin-bottom: 1.5rem; }
+  .subtitle { font-size: clamp(1rem, 2vw, 1.35rem); color: var(--muted); margin-top: .75rem; }
+  .accent { color: var(--accent); }
+  .success { color: var(--success); }
+  .warn { color: var(--warn); }
+  .danger { color: var(--danger); }
+  .purple { color: var(--purple); }
+
+  /* ── CARDS ── */
+  .cards { display: grid; gap: 1rem; width: 100%; }
+  .cards-2 { grid-template-columns: repeat(2, 1fr); }
+  .cards-3 { grid-template-columns: repeat(3, 1fr); }
+  .cards-4 { grid-template-columns: repeat(4, 1fr); }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 1.25rem 1.5rem;
+  }
+  .card-icon { font-size: 2rem; margin-bottom: .5rem; }
+  .card h3 { font-size: 1rem; font-weight: 700; margin-bottom: .4rem; }
+  .card p, .card li { font-size: .88rem; color: var(--muted); line-height: 1.6; }
+  .card ul { padding-left: 1.1rem; }
+
+  /* ── STAT BLOCKS ── */
+  .stats { display: flex; gap: 1.5rem; flex-wrap: wrap; justify-content: center; margin-top: 1.5rem; }
+  .stat-box {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 1.25rem 2rem; text-align: center; min-width: 140px;
+  }
+  .stat-num { font-size: 2.5rem; font-weight: 800; line-height: 1; }
+  .stat-lbl { font-size: .78rem; color: var(--muted); margin-top: .4rem; text-transform: uppercase; letter-spacing: .05em; }
+
+  /* ── LIST ── */
+  .check-list { list-style: none; padding: 0; }
+  .check-list li {
+    padding: .55rem 0; border-bottom: 1px solid var(--border);
+    font-size: .95rem; display: flex; align-items: flex-start; gap: .75rem;
+  }
+  .check-list li:last-child { border: none; }
+  .check-list li::before { content: '✓'; color: var(--success); font-weight: 700; flex-shrink: 0; }
+
+  /* ── WORKFLOW ── */
+  .flow { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; justify-content: center; margin-top: 1rem; }
+  .flow-step {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 8px; padding: .6rem 1.25rem; font-size: .9rem; font-weight: 600;
+  }
+  .flow-arrow { color: var(--muted); font-size: 1.2rem; }
+
+  /* ── TITLE SLIDE ── */
+  #s1 { background: radial-gradient(ellipse at 30% 50%, rgba(88,166,255,.08) 0%, transparent 60%),
+               radial-gradient(ellipse at 70% 80%, rgba(188,140,255,.06) 0%, transparent 50%); }
+  .brand-logo { font-size: clamp(2.5rem, 6vw, 4.5rem); font-weight: 900; letter-spacing: -.02em; }
+  .brand-logo span { color: var(--accent); }
+  .version-badge {
+    display: inline-flex; align-items: center; gap: .5rem;
+    background: rgba(63,185,80,.12); border: 1px solid rgba(63,185,80,.3);
+    color: var(--success); padding: .4rem 1rem; border-radius: 2rem; font-size: .85rem;
+    margin-top: 1.25rem;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success);
+    animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.8)} }
+
+  /* ── SECTION DIVIDER ── */
+  .section-slide {
+    background: radial-gradient(ellipse at center, rgba(88,166,255,.07) 0%, transparent 70%);
+  }
+  .big-emoji { font-size: 5rem; margin-bottom: 1rem; }
+
+  /* ── FUTURE SLIDE ── */
+  .roadmap-item {
+    display: flex; gap: 1rem; align-items: flex-start;
+    padding: .75rem 0; border-bottom: 1px solid var(--border);
+  }
+  .roadmap-item:last-child { border: none; }
+  .phase-badge {
+    font-size: .7rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    padding: .2rem .6rem; border-radius: 4px; white-space: nowrap; flex-shrink: 0; margin-top: 2px;
+  }
+  .phase-1 { background: rgba(88,166,255,.15); color: var(--accent); }
+  .phase-2 { background: rgba(227,179,65,.15); color: var(--warn); }
+  .phase-3 { background: rgba(188,140,255,.15); color: var(--purple); }
+  .roadmap-text h4 { font-size: .95rem; font-weight: 600; margin-bottom: .2rem; }
+  .roadmap-text p { font-size: .82rem; color: var(--muted); }
+
+  /* ── HIGHLIGHT BOX ── */
+  .highlight {
+    background: rgba(88,166,255,.08); border: 1px solid rgba(88,166,255,.25);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 1rem 1.5rem; margin-top: 1rem;
+    font-size: .92rem; color: var(--fg);
+  }
+
+  /* keyboard hint */
+  .kbd-hint { position: fixed; top: 1rem; right: 1.5rem; font-size: .75rem; color: var(--border); }
+</style>
+</head>
+<body>
+
+<div class="progress-bar" id="progress"></div>
+<div class="kbd-hint">← → или кнопки внизу</div>
+
+<div class="deck">
+
+  <!-- ══ 1. ТИТУЛ ══ -->
+  <div class="slide active" id="s1">
+    <div style="text-align:center;max-width:800px">
+      <div class="brand-logo">Weld<span>Team</span> <span style="color:var(--muted);font-weight:300">MES</span></div>
+      <div class="subtitle" style="margin-top:.75rem;font-size:1.1rem">Система управления сварочным производством</div>
+      <div class="version-badge"><div class="dot"></div> Система работает · Данные внесены · Фундамент заложен</div>
+      <div style="margin-top:2.5rem;display:flex;gap:1.5rem;justify-content:center;flex-wrap:wrap">
+        <div class="tag tag-green">Для отдела ИТО</div>
+        <div class="tag tag-blue">Для отдела ОТК</div>
+        <div class="tag tag-purple">Цех BS · GWM</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 2. ЧТО СДЕЛАНО ══ -->
+  <div class="slide">
+    <div style="width:100%;max-width:960px">
+      <div class="tag tag-green">Фундамент</div>
+      <h2>Что уже реализовано и работает</h2>
+      <div class="stats">
+        <div class="stat-box"><div class="stat-num accent">569</div><div class="stat-lbl">Сварочных пистолетов</div></div>
+        <div class="stat-box"><div class="stat-num" style="color:var(--purple)">16 680</div><div class="stat-lbl">Сварочных точек</div></div>
+        <div class="stat-box"><div class="stat-num warn">6</div><div class="stat-lbl">Моделей авто</div></div>
+        <div class="stat-box"><div class="stat-num success">2 606</div><div class="stat-lbl">Записей плана ТО</div></div>
+        <div class="stat-box"><div class="stat-num danger">3</div><div class="stat-lbl">Производственных линии</div></div>
+      </div>
+      <div class="highlight">
+        Вся структура цеха занесена в базу данных: бренды → станции → пистолеты → точки сварки → уставки техпроцесса. Это фундаментальная работа, которая позволяет строить любой аналитический и операционный функционал.
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 3. АРХИТЕКТУРА ══ -->
+  <div class="slide">
+    <div style="width:100%;max-width:960px">
+      <div class="tag tag-blue">Технология</div>
+      <h2>Как работает система</h2>
+      <div class="cards cards-3">
+        <div class="card">
+          <div class="card-icon">🌐</div>
+          <h3>Веб-приложение</h3>
+          <p>Открывается в любом браузере. Не требует установки. Работает на ПК, телефоне и планшете в локальной сети цеха.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🗄️</div>
+          <h3>База данных</h3>
+          <p>Вся информация хранится централизованно. Любой сотрудник видит актуальные данные в реальном времени.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">📱</div>
+          <h3>Мобильная версия</h3>
+          <p>Страницы адаптированы под телефон. Можно регистрировать ТО и дефекты прямо у станка, без ПК.</p>
+        </div>
+      </div>
+      <div style="margin-top:1.25rem" class="cards cards-3">
+        <div class="card">
+          <div class="card-icon">🔒</div>
+          <h3>Аудит изменений</h3>
+          <p>Каждое изменение уставок записывается с датой и комментарием. История не удаляется.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">⚡</div>
+          <h3>Валидация данных</h3>
+          <p>Система проверяет замеры ТО: допуск ±100 А по току и ±50 daN по давлению. Выход за пределы — предупреждение.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🌙</div>
+          <h3>Тёмная тема</h3>
+          <p>Комфортная работа в любых условиях освещения цеха. Переключение сохраняется между сессиями.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 4. СЕКЦИЯ ИТО ══ -->
+  <div class="slide section-slide">
+    <div style="text-align:center">
+      <div class="big-emoji">🔧</div>
+      <div class="tag tag-green">Отдел ИТО</div>
+      <h1>Техническое обслуживание</h1>
+      <p class="subtitle">Планирование, выполнение и контроль ТО сварочных пистолетов</p>
+    </div>
+  </div>
+
+  <!-- ══ 5. ТО — ПЛАН И ВЫПОЛНЕНИЕ ══ -->
+  <div class="slide">
+    <div style="width:100%;max-width:960px">
+      <div class="tag tag-green">ИТО · Планирование</div>
+      <h2>Ежедневный план ТО</h2>
+      <div class="cards cards-2">
+        <div>
+          <ul class="check-list">
+            <li>Годовой план ТО загружен — 2 606 записей по всем брендам</li>
+            <li>Назначить пистолеты на ТО одним кликом — с фильтром по бренду и дате</li>
+            <li>В задаче видно: номер и тип пистолета, бренд, <strong>станция</strong></li>
+            <li>Взять задачу в работу прямо с экрана телефона у станка</li>
+            <li>Записать ТО из задачи — задача автоматически закрывается</li>
+            <li>Прогресс выполнения плана по брендам с % готовности</li>
+          </ul>
+        </div>
+        <div class="card" style="display:flex;flex-direction:column;gap:.75rem">
+          <div style="font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">Поток работы</div>
+          <div class="flow" style="flex-direction:column;align-items:flex-start;gap:.5rem">
+            <div class="flow-step" style="border-color:var(--muted)">📋 Назначить пистолеты</div>
+            <div class="flow-arrow">↓</div>
+            <div class="flow-step" style="border-color:var(--accent)">🔧 Взять в работу</div>
+            <div class="flow-arrow">↓</div>
+            <div class="flow-step" style="border-color:var(--warn)">📏 Снять замеры (3×ток, 3×давление)</div>
+            <div class="flow-arrow">↓</div>
+            <div class="flow-step" style="border-color:var(--success)">✅ ТО зафиксировано</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 6. ТО — УСТАВКИ ══ -->
+  <div class="slide">
+    <div style="width:100%;max-width:960px">
+      <div class="tag tag-warn">ИТО · Уставки техпроцесса</div>
+      <h2>Управление параметрами сварки</h2>
+      <div class="cards cards-2">
+        <div>
+          <ul class="check-list">
+            <li>Уставки хранятся в БД для каждого пистолета и каждой точки</li>
+            <li>Все параметры: давление (daN), коэффициент трансформации, ток 1/2, времена циклограммы</li>
+            <li>Изменение уставок — с обязательным комментарием «зачем меняем»</li>
+            <li>Полный архив: когда, какие параметры, какой комментарий</li>
+            <li>Старые уставки не удаляются — сохраняется история изменений</li>
+            <li>Привязка замеров ТО к конкретной уставке для сравнения факт/план</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="card-icon">📊</div>
+          <h3>Что видно в архиве уставок</h3>
+          <ul style="padding-left:1rem;margin-top:.5rem">
+            <li style="color:var(--muted);font-size:.88rem;padding:.3rem 0">Дата введения уставки</li>
+            <li style="color:var(--muted);font-size:.88rem;padding:.3rem 0">Режим сварки</li>
+            <li style="color:var(--muted);font-size:.88rem;padding:.3rem 0">Давление, К.Трансформации</li>
+            <li style="color:var(--muted);font-size:.88rem;padding:.3rem 0">Ток 1 и Ток 2</li>
+            <li style="color:var(--success);font-size:.88rem;padding:.3rem 0;font-weight:600">Комментарий к изменению ← новое</li>
+            <li style="color:var(--muted);font-size:.88rem;padding:.3rem 0">Активна / в архиве</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 7. СЕКЦИЯ ОТК ══ -->
+  <div class="slide section-slide">
+    <div style="text-align:center">
+      <div class="big-emoji">🔍</div>
+      <div class="tag tag-blue">Отдел ОТК</div>
+      <h1>Управление дефектами</h1>
+      <p class="subtitle">Регистрация, расследование и закрытие дефектов сварки</p>
+    </div>
+  </div>
+
+  <!-- ══ 8. ДЕФЕКТЫ ══ -->
+  <div class="slide">
+    <div style="width:100%;max-width:960px">
+      <div class="tag tag-blue">ОТК · Дефекты</div>
+      <h2>Регистрация и закрытие дефектов</h2>
+      <div class="cards cards-2">
+        <div>
+          <ul class="check-list">
+            <li>16 кодов дефектов из техпроцесса (CR, SN, LP, BN, SW и др.)</li>
+            <li>Регистрация: модель авто → номер точки → код дефекта</li>
+            <li>В карточке видно: номер и <strong>тип</strong> пистолета, <strong>бренд</strong>, <strong>станция</strong> — сразу можно найти</li>
+            <li>Workflow простой: Зарегистрирован → <strong>Закрыть</strong> (без лишних шагов)</li>
+            <li>При закрытии: первопричина + контрмера + ответственный сотрудник</li>
+            <li>История закрытых дефектов с поиском</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div style="font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:.75rem">16 кодов дефектов</div>
+          <div style="display:flex;flex-wrap:wrap;gap:.4rem">
+            <span style="background:rgba(248,81,73,.12);color:var(--danger);padding:.2rem .6rem;border-radius:4px;font-size:.8rem;font-weight:600">CR</span>
+            <span style="background:rgba(248,81,73,.12);color:var(--danger);padding:.2rem .6rem;border-radius:4px;font-size:.8rem;font-weight:600">SN</span>
+            <span style="background:rgba(248,81,73,.12);color:var(--danger);padding:.2rem .6rem;border-radius:4px;font-size:.8rem;font-weight:600">LP</span>
+            <span style="background:rgba(248,81,73,.12);color:var(--danger);padding:.2rem .6rem;border-radius:4px;font-size:.8rem;font-weight:600">BN</span>
+            <span style="background:rgba(248,81,73,.12);color:var(--danger);padding:.2rem .6rem;border-radius:4px;font-size:.8rem;font-weight:600">SW</span>
+            <span style="background:rgba(248,81,73,.12);color:var(--danger);padding:.2rem .6rem;border-radius:4px;font-size:.8rem;font-weight:600">BT</span>
+            <span style="background:rgba(248,81,73,.12);color:var(--danger);padding:.2rem .6rem;border-radius:4px;font-size:.8rem;font-weight:600">MS</span>
+            <span style="background:rgba(248,81,73,.12);color:var(--danger);padding:.2rem .6rem;border-radius:4px;font-size:.8rem;font-weight:600">ME</span>
+            <span style="background:rgba(248,81,73,.12);color:var(--danger);padding:.2rem .6rem;border-radius:4px;font-size:.8rem;font-weight:600">IE</span>
+            <span style="background:rgba(248,81,73,.12);color:var(--danger);padding:.2rem .6rem;border-radius:4px;font-size:.8rem;font-weight:600">MN</span>
+            <span style="background:rgba(248,81,73,.12);color:var(--danger);padding:.2rem .6rem;border-radius:4px;font-size:.8rem;font-weight:600">NA</span>
+            <span style="background:rgba(248,81,73,.12);color:var(--danger);padding:.2rem .6rem;border-radius:4px;font-size:.8rem;font-weight:600">EO</span>
+            <span style="background:rgba(248,81,73,.12);color:var(--danger);padding:.2rem .6rem;border-radius:4px;font-size:.8rem;font-weight:600">BE</span>
+            <span style="background:rgba(248,81,73,.12);color:var(--danger);padding:.2rem .6rem;border-radius:4px;font-size:.8rem;font-weight:600">P</span>
+            <span style="background:rgba(248,81,73,.12);color:var(--danger);padding:.2rem .6rem;border-radius:4px;font-size:.8rem;font-weight:600">MI</span>
+            <span style="background:rgba(248,81,73,.12);color:var(--danger);padding:.2rem .6rem;border-radius:4px;font-size:.8rem;font-weight:600">EMU</span>
+          </div>
+          <div style="margin-top:1rem;font-size:.82rem;color:var(--muted)">Словарь кодов хранится в БД и может пополняться</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 9. АНАЛИТИКА ══ -->
+  <div class="slide">
+    <div style="width:100%;max-width:960px">
+      <div class="tag tag-blue">ОТК · Аналитика</div>
+      <h2>Аналитика дефектов</h2>
+      <div class="cards cards-2">
+        <div>
+          <ul class="check-list">
+            <li>Фильтры: этот месяц / 3 мес / 6 мес / год / свой период</li>
+            <li>Фильтр по модели автомобиля и конкретной станции</li>
+            <li>Диаграмма-пончик: наглядно видно какие коды доминируют</li>
+            <li>Таблица разбивки по станциям — где больше всего проблем</li>
+            <li>Самый частый код дефекта за период — на главном экране</li>
+          </ul>
+          <div class="highlight" style="margin-top:1rem">
+            Аналитика отвечает на вопрос: <strong>где и что чаще всего ломается?</strong><br>
+            Позволяет принимать системные решения, а не тушить пожары
+          </div>
+        </div>
+        <div class="card" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1rem">
+          <div style="width:130px;height:130px;border-radius:50%;background:conic-gradient(var(--danger) 0 35%,var(--warn) 35% 55%,var(--accent) 55% 72%,var(--success) 72% 85%,var(--purple) 85% 100%);position:relative">
+            <div style="position:absolute;inset:25%;border-radius:50%;background:var(--card)"></div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:.3rem;width:100%">
+            <div style="display:flex;align-items:center;gap:.5rem;font-size:.82rem"><span style="width:10px;height:10px;border-radius:50%;background:var(--danger);flex-shrink:0"></span><span>CR — Трещина</span></div>
+            <div style="display:flex;align-items:center;gap:.5rem;font-size:.82rem"><span style="width:10px;height:10px;border-radius:50%;background:var(--warn);flex-shrink:0"></span><span>SN — Малое ядро</span></div>
+            <div style="display:flex;align-items:center;gap:.5rem;font-size:.82rem"><span style="width:10px;height:10px;border-radius:50%;background:var(--accent);flex-shrink:0"></span><span>LP — Непровар</span></div>
+            <div style="display:flex;align-items:center;gap:.5rem;font-size:.82rem;color:var(--muted)"><span style="width:10px;height:10px;border-radius:50%;background:var(--success);flex-shrink:0"></span><span>прочие коды...</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 10. ОБЗОР ДАННЫХ ══ -->
+  <div class="slide">
+    <div style="width:100%;max-width:960px">
+      <div class="tag tag-purple">ИТО + ОТК · Обзор данных</div>
+      <h2>Полный паспорт любого объекта цеха</h2>
+      <div class="cards cards-3">
+        <div class="card">
+          <div class="card-icon">🔫</div>
+          <h3>По пистолету</h3>
+          <ul>
+            <li>Паспорт: номер, тип, бренд, станция</li>
+            <li>Активные уставки по каждой точке</li>
+            <li>Архив уставок с комментариями</li>
+            <li>История всех ТО</li>
+            <li>Список точек которые он варит</li>
+            <li>Все дефекты</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="card-icon">🏭</div>
+          <h3>По станции</h3>
+          <ul>
+            <li>Все пистолеты с нумерацией</li>
+            <li>Производимые модели и кол-во точек</li>
+            <li>Сводка дефектов по кодам</li>
+            <li>Последние ТО на станции</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="card-icon">🎯</div>
+          <h3>По точке сварки</h3>
+          <ul>
+            <li>Активный пистолет и уставка</li>
+            <li>История: когда какой пистолет варил</li>
+            <li>Все дефекты на этой точке</li>
+            <li>Последние ТО пистолета</li>
+          </ul>
+        </div>
+      </div>
+      <div class="highlight">
+        <strong>Ключевое преимущество:</strong> любой инженер за 10 секунд получает полную картину по любому элементу цеха — не нужно искать в Excel, звонить коллегам или поднимать бумажные журналы
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 11. СЕКЦИЯ БУДУЩЕЕ ══ -->
+  <div class="slide section-slide">
+    <div style="text-align:center">
+      <div class="big-emoji">🚀</div>
+      <div class="tag tag-purple">Дальнейшее развитие</div>
+      <h1>Что планируется дальше</h1>
+      <p class="subtitle">Фундамент заложен — теперь надстраиваем</p>
+    </div>
+  </div>
+
+  <!-- ══ 12. ROADMAP ══ -->
+  <div class="slide">
+    <div style="width:100%;max-width:960px">
+      <div class="tag tag-purple">Roadmap</div>
+      <h2>Планируемые доработки</h2>
+      <div class="cards-2" style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem">
+        <div>
+          <div class="roadmap-item">
+            <span class="phase-badge phase-1">Фаза 1</span>
+            <div class="roadmap-text">
+              <h4>Авторизация и роли</h4>
+              <p>Разграничение доступа: ИТО, ОТК, Производство. Каждый видит своё</p>
+            </div>
+          </div>
+          <div class="roadmap-item">
+            <span class="phase-badge phase-1">Фаза 1</span>
+            <div class="roadmap-text">
+              <h4>Экспорт отчётов</h4>
+              <p>Выгрузка ТО и дефектов в Excel / PDF для совещаний и архива</p>
+            </div>
+          </div>
+          <div class="roadmap-item">
+            <span class="phase-badge phase-2">Фаза 2</span>
+            <div class="roadmap-text">
+              <h4>Уведомления о просроченных ТО</h4>
+              <p>Автоматические напоминания когда пистолет давно не обслуживался</p>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="roadmap-item">
+            <span class="phase-badge phase-2">Фаза 2</span>
+            <div class="roadmap-text">
+              <h4>Статистика контрмер</h4>
+              <p>Анализ эффективности: какие контрмеры реально устраняют дефекты повторно</p>
+            </div>
+          </div>
+          <div class="roadmap-item">
+            <span class="phase-badge phase-2">Фаза 2</span>
+            <div class="roadmap-text">
+              <h4>Тренды и прогнозирование</h4>
+              <p>Графики деградации пистолетов, прогноз следующего ТО по данным истории</p>
+            </div>
+          </div>
+          <div class="roadmap-item">
+            <span class="phase-badge phase-3">Фаза 3</span>
+            <div class="roadmap-text">
+              <h4>Интеграция с оборудованием</h4>
+              <p>Автоматическое считывание параметров сварки с контроллеров</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 13. ИТОГ ══ -->
+  <div class="slide" id="s-last">
+    <div style="text-align:center;max-width:800px">
+      <div class="tag tag-green">Итог</div>
+      <h1 style="font-size:clamp(1.8rem,4vw,3rem)">Самое главное — <span class="accent">сделано</span></h1>
+      <p class="subtitle" style="margin-top:1rem;font-size:1rem;max-width:600px;margin-left:auto;margin-right:auto">
+        База данных заполнена, все модули работают, история ведётся.<br>
+        Теперь система будет становиться умнее с каждой записью.
+      </p>
+      <div class="cards cards-3" style="margin-top:2rem">
+        <div class="card" style="text-align:left">
+          <div style="font-size:1.5rem;margin-bottom:.5rem">✅</div>
+          <h3>Для ИТО</h3>
+          <p>ТО планируется, выполняется и фиксируется в системе. Уставки под контролем.</p>
+        </div>
+        <div class="card" style="text-align:left">
+          <div style="font-size:1.5rem;margin-bottom:.5rem">✅</div>
+          <h3>Для ОТК</h3>
+          <p>Дефекты регистрируются с привязкой к точке и пистолету. Аналитика в реальном времени.</p>
+        </div>
+        <div class="card" style="text-align:left">
+          <div style="font-size:1.5rem;margin-bottom:.5rem">✅</div>
+          <h3>Для производства</h3>
+          <p>Любой инженер за 10 секунд видит полную картину по любому пистолету, станции или точке.</p>
+        </div>
+      </div>
+      <div style="margin-top:2rem;font-size:1.5rem;font-weight:800;color:var(--accent)">WeldTeam MES</div>
+      <div style="font-size:.85rem;color:var(--muted);margin-top:.3rem">Цех BS · GWM · 2026</div>
+    </div>
+  </div>
+
+</div><!-- /deck -->
+
+<!-- Навигация -->
+<div class="nav-bar">
+  <button class="nav-btn" id="prevBtn" disabled>←</button>
+  <div class="slide-counter" id="counter">1 / 13</div>
+  <button class="nav-btn" id="nextBtn">→</button>
+</div>
+
+<script>
+const slides = document.querySelectorAll('.slide');
+const total  = slides.length;
+let cur = 0;
+
+function go(n) {
+  slides[cur].classList.remove('active');
+  cur = Math.max(0, Math.min(total - 1, n));
+  slides[cur].classList.add('active');
+  document.getElementById('counter').textContent = `${cur + 1} / ${total}`;
+  document.getElementById('prevBtn').disabled = cur === 0;
+  document.getElementById('nextBtn').disabled = cur === total - 1;
+  document.getElementById('progress').style.width = `${(cur + 1) / total * 100}%`;
+}
+
+document.getElementById('prevBtn').addEventListener('click', () => go(cur - 1));
+document.getElementById('nextBtn').addEventListener('click', () => go(cur + 1));
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') go(cur + 1);
+  if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')                     go(cur - 1);
+});
+
+// Touch swipe
+let tx = 0;
+document.addEventListener('touchstart', e => { tx = e.touches[0].clientX; });
+document.addEventListener('touchend',   e => {
+  const dx = e.changedTouches[0].clientX - tx;
+  if (Math.abs(dx) > 50) go(cur + (dx < 0 ? 1 : -1));
+});
+
+go(0);
+</script>
+</body>
+</html>
