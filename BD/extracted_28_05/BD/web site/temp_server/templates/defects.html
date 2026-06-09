@@ -89,7 +89,7 @@
       <table class="tbl tbl-mobile" id="openTable">
         <thead>
           <tr>
-            <th>Дата</th><th>Бренд</th><th>Станция</th><th>Точка</th>
+            <th>Дата</th><th>Модель</th><th>Станция</th><th>Точка</th>
             <th>Ган №&nbsp;[тип]</th><th>Код</th><th>Статус</th><th></th>
           </tr>
         </thead>
@@ -153,7 +153,7 @@
       <table class="tbl tbl-mobile">
         <thead>
           <tr>
-            <th>Дата</th><th>Бренд</th><th>Точка</th><th>Ган №</th>
+            <th>Дата</th><th>Модель</th><th>Точка</th><th>Ган №</th>
             <th>Код</th><th>Причина</th><th>Контрмера</th><th>Закрыл</th><th></th>
           </tr>
         </thead>
@@ -281,7 +281,7 @@ function renderOpen(defects) {
       : `№${d.spot_number}`;
     return `<tr id="row-${d.UniqueID}">
       <td data-label="Дата" class="text-sm">${d.df_date}</td>
-      <td data-label="Бренд"><span class="badge bm">${d.brand}</span></td>
+      <td data-label="Модель" class="text-sm">${d.model_name||d.brand||'—'}${(d.model_type&&d.model_type.toLowerCase()!=='single')?' '+d.model_type:''}</td>
       <td data-label="Станция" class="text-sm text-muted">${d.station_name||'—'}</td>
       <td data-label="Точка" class="fw-bold">${spotDisplay}${warnBadge}</td>
       <td data-label="Ган" class="text-sm fw-bold">№${d.g_num || '—'} <span class="text-muted">[${d.gun_model||'—'}]</span></td>
@@ -305,7 +305,7 @@ function renderClosed(defects) {
   }
   tbody.innerHTML = defects.map(d => `<tr>
     <td data-label="Дата" class="text-sm">${d.df_date}</td>
-    <td data-label="Бренд"><span class="badge bm">${d.brand}</span></td>
+    <td data-label="Модель" class="text-sm">${d.model_name||d.brand||'—'}${(d.model_type&&d.model_type.toLowerCase()!=='single')?' '+d.model_type:''}</td>
     <td data-label="Точка" class="fw-bold">№${d.spot_number}</td>
     <td data-label="Ган" class="text-sm">№${d.g_num || '—'}</td>
     <td data-label="Код"><span class="badge bd">${d.problem_code}</span></td>

@@ -402,7 +402,16 @@ function renderGun(d) {
     <div class="stat"><div class="stat-val">${g.gun_type||'—'}</div><div class="stat-lbl">Тип клещей</div></div>
     <div class="stat"><div class="stat-val">${g.brand}</div><div class="stat-lbl">Бренд / Линия</div></div>
     <div class="stat"><div class="stat-val">${g.station_name}</div><div class="stat-lbl">Станция</div></div>
-    <div class="stat"><div class="stat-val">${d.spots.length}</div><div class="stat-lbl">Сварочных точек</div></div>
+    ${(() => {
+      const byModel = {};
+      d.spots.forEach(s => { const k = fmtModel(s.model_name, s.model_type); byModel[k] = (byModel[k]||0) + 1; });
+      const entries = Object.entries(byModel);
+      if (entries.length <= 1) {
+        return `<div class="stat"><div class="stat-val">${d.spots.length}</div><div class="stat-lbl">Сварочных точек</div></div>`;
+      }
+      return `<div class="stat"><div class="stat-val">${d.spots.length}</div><div class="stat-lbl">Точек всего</div></div>`
+        + entries.map(([m,c]) => `<div class="stat"><div class="stat-val">${c}</div><div class="stat-lbl">${m}</div></div>`).join('');
+    })()}
     <div class="stat"><div class="stat-val">${d.maintenance_count}</div><div class="stat-lbl">Записей ТО</div></div>
     <div class="stat"><div class="stat-val">${d.defect_count}</div><div class="stat-lbl">Дефектов</div></div>
   `;

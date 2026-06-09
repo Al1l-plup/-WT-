@@ -441,6 +441,8 @@ def defects_all():
                COALESCE(d.solution,'')                     as solution,
                COALESCE(s.spot_number, d.manual_spot_number, '—') as spot_number,
                COALESCE(b.brand, enrich_b.brand, '—')     as brand,
+               COALESCE(m.model_name, enrich_m.model_name, '—') as model_name,
+               COALESCE(m.type, enrich_m.type, '')         as model_type,
                COALESCE(g.g_num, 0)                        as g_num,
                COALESCE(g.gun_type,'—')                    as gun_model,
                COALESCE(d_st.station_name,'—')             as station_name,
