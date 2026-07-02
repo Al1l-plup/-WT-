@@ -19,6 +19,9 @@ __pycache__/
 *.db-shm
 *.db-wal
 
+# Локальные бэкапы БД (не коммитим — только страховка на машине)
+data/backups/
+
 # IDE / ОС
 .idea/
 .vscode/

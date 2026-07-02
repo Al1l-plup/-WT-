@@ -4,6 +4,7 @@ from datetime import date, datetime
 from flask import Blueprint, jsonify, request
 
 from app.db import get_db
+from app.snapshots import snapshot_maintenance
 
 bp = Blueprint('maintenance', __name__)
 
@@ -52,6 +53,8 @@ def save_maintenance():
         """, (w1, w2, w3, p1_N, p2_N, p3_N,
               int(data.get('worker_id') or 0), gun_id, param_id))
         new_id = cur.lastrowid
+        # Заморозить контекст ТО (пистолет/станция/бренд/исполнитель/уставки) на момент записи
+        snapshot_maintenance(db, new_id)
         task_id = data.get('task_id')
         if task_id:
             try:
@@ -84,14 +87,11 @@ def delete_maintenance(record_id):
 @bp.route('/api/maintenance/analytics')
 def maintenance_analytics():
     db = get_db()
+    # Аналитика по «замороженным» на момент записи данным (snapshot).
     by_brand = db.execute("""
-        SELECT COALESCE(b.brand,'Без линии') as brand, COUNT(m.UniqueId) as cnt
-        FROM maintenance m JOIN gun g ON m.gun_id=g.UniqueID
-        LEFT JOIN gun_transformer_assignment gta ON g.UniqueID=gta.gun_id AND gta.is_active=1
-        LEFT JOIN transformer_station_assignment tsa ON gta.transformer_id=tsa.transformer_id AND tsa.is_active=1
-        LEFT JOIN station st ON tsa.station_id=st.UniqueID
-        LEFT JOIN brand b ON st.brand_id=b.UniqueID
-        GROUP BY b.UniqueID ORDER BY cnt DESC
+        SELECT COALESCE(snap_brand,'Без линии') as brand, COUNT(UniqueId) as cnt
+        FROM maintenance
+        GROUP BY snap_brand_id ORDER BY cnt DESC
     """).fetchall()
     by_month = db.execute("""
         SELECT strftime('%Y-%m',to_date) as month, COUNT(*) as cnt
@@ -101,15 +101,10 @@ def maintenance_analytics():
         SELECT m.UniqueId, m.to_date,
                ROUND((m.first_weld+m.second_weld+m.third_weld)/3.0) as avg_weld,
                ROUND((m.first_pressure+m.second_pressure+m.third_pressure)/3.0) as avg_pres_N,
-               g.g_num, g.gun_type as gun_model,
-               COALESCE(w.surname,'—') as worker_surname,
-               COALESCE(b.brand,'—') as brand
-        FROM maintenance m JOIN gun g ON m.gun_id=g.UniqueID
-        LEFT JOIN worker w ON m.worker_id=w.UniqueID
-        LEFT JOIN gun_transformer_assignment gta ON g.UniqueID=gta.gun_id AND gta.is_active=1
-        LEFT JOIN transformer_station_assignment tsa ON gta.transformer_id=tsa.transformer_id AND tsa.is_active=1
-        LEFT JOIN station st ON tsa.station_id=st.UniqueID
-        LEFT JOIN brand b ON st.brand_id=b.UniqueID
+               m.snap_g_num as g_num, COALESCE(m.snap_gun_type,'—') as gun_model,
+               COALESCE(m.snap_worker_surname,'—') as worker_surname,
+               COALESCE(m.snap_brand,'—') as brand
+        FROM maintenance m
         ORDER BY m.to_date DESC, m.UniqueId DESC LIMIT 15
     """).fetchall()
     total = db.execute('SELECT COUNT(*) FROM maintenance').fetchone()[0]

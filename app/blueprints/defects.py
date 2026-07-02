@@ -2,6 +2,7 @@
 from flask import Blueprint, jsonify, request
 
 from app.db import get_db
+from app.snapshots import snapshot_defect
 
 bp = Blueprint('defects', __name__)
 
@@ -27,11 +28,13 @@ def register_defect():
 
     if not row:
         try:
-            db.execute("""
+            cur = db.cursor()
+            cur.execute("""
                 INSERT INTO defects (problem_code, root_cause, solution, df_date,
                                     spot_id, gun_id, status, manual_spot_number, manual_model_id)
                 VALUES (?, '', '', DATE('now'), NULL, NULL, 'registered', ?, ?)
             """, (problem_code, spot_number, int(model_id)))
+            snapshot_defect(db, cur.lastrowid)
             db.commit()
             return jsonify({'status': 'success',
                             'message': f'Дефект {problem_code} зарегистрирован. ⚠ Точка №{spot_number} не найдена в БД — уточните данные при взятии в работу.',
@@ -41,11 +44,13 @@ def register_defect():
             return jsonify({'status': 'error', 'message': str(e)}), 500
 
     try:
-        db.execute("""
+        cur = db.cursor()
+        cur.execute("""
             INSERT INTO defects
                 (problem_code, root_cause, solution, df_date, spot_id, gun_id, status)
             VALUES (?, '', '', DATE('now'), ?, ?, 'registered')
         """, (problem_code, row['spot_id'], row['gun_id']))
+        snapshot_defect(db, cur.lastrowid)
         db.commit()
         return jsonify({'status': 'success', 'message': f'Дефект {problem_code} на точке №{spot_number} зафиксирован'})
     except Exception as e:
@@ -58,11 +63,13 @@ def add_defect():
     data = request.json or {}
     db = get_db()
     try:
-        db.execute("""
+        cur = db.cursor()
+        cur.execute("""
             INSERT INTO defects (problem_code, description, root_cause, solution, df_date,
                                  worker_register_id, worker_solve_id, spot_id, gun_id, status)
             VALUES (?, '', '', 'В процессе устранения', DATE('now'), NULL, NULL, ?, ?, 'registered')
         """, (data['problem_code'], int(data['spot_id']), int(data['gun_id'])))
+        snapshot_defect(db, cur.lastrowid)
         db.commit()
         return jsonify({'status': 'success', 'message': 'Карточка дефекта сохранена!'})
     except Exception as e:
@@ -78,13 +85,13 @@ def defects_all():
                COALESCE(d.status,'registered')             as status,
                COALESCE(d.root_cause,'')                   as root_cause,
                COALESCE(d.solution,'')                     as solution,
-               COALESCE(s.spot_number, d.manual_spot_number, '—') as spot_number,
-               COALESCE(b.brand, enrich_b.brand, '—')     as brand,
-               COALESCE(m.model_name, enrich_m.model_name, '—') as model_name,
-               COALESCE(m.type, enrich_m.type, '')         as model_type,
-               COALESCE(g.g_num, 0)                        as g_num,
-               COALESCE(g.gun_type,'—')                    as gun_model,
-               COALESCE(d_st.station_name,'—')             as station_name,
+               COALESCE(d.snap_spot_number, s.spot_number, d.manual_spot_number, '—') as spot_number,
+               COALESCE(d.snap_brand, b.brand, enrich_b.brand, '—')     as brand,
+               COALESCE(d.snap_model_name, m.model_name, enrich_m.model_name, '—') as model_name,
+               COALESCE(d.snap_model_type, m.type, enrich_m.type, '')   as model_type,
+               COALESCE(d.snap_g_num, g.g_num, 0)          as g_num,
+               COALESCE(d.snap_gun_type, g.gun_type,'—')   as gun_model,
+               COALESCE(d.snap_station_name, d_st.station_name,'—')     as station_name,
                COALESCE(w_asgn.surname,'')                 as asgn_surname,
                COALESCE(w_solv.surname,'')                 as solv_surname,
                d.manual_spot_number,
@@ -215,6 +222,8 @@ def close_defect():
                 UPDATE defects SET solution=?, root_cause=?, worker_solve_id=?, status='closed'
                 WHERE UniqueID=?
             """, (solution, root_cause, int(worker_solve_id), int(defect_id)))
+        # Перезаписать снимок: при обогащении у дефекта появились точка/пистолет
+        snapshot_defect(db, int(defect_id))
         db.commit()
         return jsonify({'status': 'success', 'message': 'Дефект закрыт!'})
     except Exception as e:
@@ -316,6 +325,8 @@ def enrich_defect():
         """, (spot_id, gun_id, int(worker_id), root_cause,
               spot_id if new_spot else None, int(defect_id)))
 
+        # Перезаписать снимок: у дефекта появились точка/пистолет
+        snapshot_defect(db, int(defect_id))
         db.commit()
         return jsonify({'status': 'success', 'message': 'Точка создана, дефект взят в работу!'})
     except Exception as e:
@@ -344,10 +355,12 @@ def register_defect_manual():
     else:
         gun_id = gun['UniqueID']
     try:
-        db.execute("""
+        cur = db.cursor()
+        cur.execute("""
             INSERT INTO defects (problem_code, root_cause, solution, df_date, spot_id, gun_id, status)
             VALUES (?, '', '', DATE('now'), NULL, ?, 'registered')
         """, (problem_code, gun_id))
+        snapshot_defect(db, cur.lastrowid)
         db.commit()
         return jsonify({'status': 'success',
                         'message': f'Дефект {problem_code} на пистолете №{g_num} зафиксирован'})

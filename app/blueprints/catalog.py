@@ -85,16 +85,18 @@ def get_gun_history(gun_id):
         SELECT m.UniqueId, m.to_date,
                m.first_weld, m.second_weld, m.third_weld,
                m.first_pressure, m.second_pressure, m.third_pressure,
-               w.surname,
-               COALESCE(p.mode,'—') as mode,
-               COALESCE(p.heat_1,0) as heat_1, COALESCE(p.heat_2,0) as heat_2
+               COALESCE(m.snap_worker_surname, w.surname) as surname,
+               COALESCE(m.snap_mode, p.mode, '—') as mode,
+               COALESCE(m.snap_heat_1, p.heat_1, 0) as heat_1,
+               COALESCE(m.snap_heat_2, p.heat_2, 0) as heat_2
         FROM maintenance m
         LEFT JOIN worker w ON m.worker_id = w.UniqueID
         LEFT JOIN parameters p ON m.parameter_id = p.UniqueID
         WHERE m.gun_id=? ORDER BY m.to_date DESC, m.UniqueId DESC LIMIT 5
     """, (gun_id,)).fetchall()
     d_logs = db.execute("""
-        SELECT d.UniqueID, d.df_date, d.problem_code, d.root_cause, d.solution, s.spot_number,
+        SELECT d.UniqueID, d.df_date, d.problem_code, d.root_cause, d.solution,
+               COALESCE(d.snap_spot_number, s.spot_number) as spot_number,
                COALESCE(w_reg.surname,'—') as registered_by,
                COALESCE(w_solv.surname,'В процессе') as solved_by
         FROM defects d

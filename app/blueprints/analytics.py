@@ -21,25 +21,18 @@ def analytics_defects():
     if not date_to:
         date_to = datetime.now().strftime('%Y-%m-31')
 
+    # Аналитика считается по «замороженному» расположению на момент записи (snapshot),
+    # поэтому прошлые периоды не меняются при перепривязке точек/пистолетов.
     cond   = ['d.df_date BETWEEN ? AND ?']
     params = [date_from, date_to]
 
     if model_id:
-        cond.append('s.model_id = ?'); params.append(int(model_id))
+        cond.append('d.snap_model_id = ?'); params.append(int(model_id))
     if station_id:
-        cond.append('st.UniqueID = ?'); params.append(int(station_id))
+        cond.append('d.snap_station_id = ?'); params.append(int(station_id))
 
     where = ' AND '.join(cond)
-    joins = """
-        FROM defects d
-        LEFT JOIN spot s   ON d.spot_id   = s.UniqueID
-        LEFT JOIN model m  ON s.model_id  = m.UniqueID
-        LEFT JOIN brand b  ON m.brand_id  = b.UniqueID
-        LEFT JOIN gun g    ON d.gun_id    = g.UniqueID
-        LEFT JOIN gun_transformer_assignment gta ON g.UniqueID=gta.gun_id AND gta.is_active=1
-        LEFT JOIN transformer_station_assignment tsa ON gta.transformer_id=tsa.transformer_id AND tsa.is_active=1
-        LEFT JOIN station st ON tsa.station_id=st.UniqueID
-    """
+    joins = " FROM defects d "
 
     by_code = db.execute(f"""
         SELECT d.problem_code as code, COUNT(*) as cnt,
@@ -51,11 +44,11 @@ def analytics_defects():
     """, params).fetchall()
 
     by_station = db.execute(f"""
-        SELECT COALESCE(st.station_name,'—') as station,
-               COALESCE(b.brand,'—') as brand,
+        SELECT COALESCE(d.snap_station_name,'—') as station,
+               COALESCE(d.snap_brand,'—') as brand,
                d.problem_code as code, COUNT(*) as cnt
         {joins} WHERE {where}
-        GROUP BY st.UniqueID, d.problem_code ORDER BY station, cnt DESC
+        GROUP BY d.snap_station_id, d.problem_code ORDER BY station, cnt DESC
     """, params).fetchall()
 
     total = db.execute(f"SELECT COUNT(*) {joins} WHERE {where}", params).fetchone()[0]

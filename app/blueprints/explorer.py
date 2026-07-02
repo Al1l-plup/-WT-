@@ -57,7 +57,7 @@ def explorer_gun(gun_id):
         SELECT m.UniqueId, m.to_date,
                ROUND((m.first_weld+m.second_weld+m.third_weld)/3.0)            as avg_weld,
                ROUND((m.first_pressure+m.second_pressure+m.third_pressure)/3.0) as avg_pres_N,
-               COALESCE(w.surname,'—') as worker
+               COALESCE(m.snap_worker_surname, w.surname, '—') as worker
         FROM maintenance m
         LEFT JOIN worker w ON m.worker_id=w.UniqueID
         WHERE m.gun_id=?
@@ -75,8 +75,8 @@ def explorer_gun(gun_id):
 
     defects = db.execute("""
         SELECT d.UniqueID, d.df_date, d.problem_code, COALESCE(d.status,'registered') as status,
-               COALESCE(s.spot_number, d.manual_spot_number, '—') as spot_number,
-               COALESCE(mo.model_name,'—') as model_name,
+               COALESCE(d.snap_spot_number, s.spot_number, d.manual_spot_number, '—') as spot_number,
+               COALESCE(d.snap_model_name, mo.model_name,'—') as model_name,
                COALESCE(d.root_cause,'') as root_cause,
                COALESCE(d.solution,'') as solution
         FROM defects d
