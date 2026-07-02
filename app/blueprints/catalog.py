@@ -2,6 +2,7 @@
 from flask import Blueprint, jsonify, request
 
 from app.db import get_db
+from app.errors import api_error
 
 bp = Blueprint('catalog', __name__)
 
@@ -157,7 +158,7 @@ def update_parameters_direct():
         return jsonify({'status': 'success', 'message': 'Уставки обновлены!'})
     except Exception as e:
         db.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return api_error(e)
 
 
 @bp.route('/api/models')
@@ -251,7 +252,7 @@ def get_or_create_gun():
                         'gun': {'UniqueID': new_id, 'g_num': int(g_num), 'model': 'Ручной ввод'}})
     except Exception as e:
         db.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return api_error(e)
 
 
 @bp.route('/api/spots/by_model/<int:model_id>')

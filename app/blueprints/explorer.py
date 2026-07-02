@@ -2,6 +2,7 @@
 from flask import Blueprint, jsonify, request
 
 from app.db import get_db
+from app.errors import api_error
 
 bp = Blueprint('explorer', __name__)
 
@@ -126,7 +127,7 @@ def update_gun(gun_id):
                         'maintenance_count': maint_count, 'defect_count': def_count})
     except Exception as e:
         db.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return api_error(e)
 
 
 @bp.route('/api/explorer/station/<int:station_id>')
@@ -215,7 +216,7 @@ def update_station(station_id):
         return jsonify({'status': 'success', 'message': 'Станция обновлена'})
     except Exception as e:
         db.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return api_error(e)
 
 
 @bp.route('/api/explorer/spot/<int:spot_id>')
@@ -310,4 +311,4 @@ def update_spot(spot_id):
         return jsonify({'status': 'success', 'message': 'Точка обновлена'})
     except Exception as e:
         db.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return api_error(e)

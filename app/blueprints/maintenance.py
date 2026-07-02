@@ -4,6 +4,7 @@ from datetime import date, datetime
 from flask import Blueprint, jsonify, request
 
 from app.db import get_db
+from app.errors import api_error
 from app.snapshots import snapshot_maintenance
 
 bp = Blueprint('maintenance', __name__)
@@ -69,7 +70,7 @@ def save_maintenance():
         return jsonify({'status': 'success', 'message': 'Карточка ТО сохранена!', 'maintenance_id': new_id})
     except Exception as e:
         db.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return api_error(e)
 
 
 @bp.route('/api/maintenance/<int:record_id>', methods=['DELETE'])
@@ -81,7 +82,7 @@ def delete_maintenance(record_id):
         return jsonify({'status': 'success', 'message': 'Запись ТО удалена'})
     except Exception as e:
         db.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return api_error(e)
 
 
 @bp.route('/api/maintenance/analytics')
@@ -229,7 +230,7 @@ def take_daily_task(task_id):
         return jsonify({'status': 'success', 'message': 'Задача взята в работу'})
     except Exception as e:
         db.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return api_error(e)
 
 
 @bp.route('/api/maintenance/daily/<int:task_id>/done', methods=['POST'])
@@ -246,7 +247,7 @@ def complete_daily_task(task_id):
         return jsonify({'status': 'success'})
     except Exception as e:
         db.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return api_error(e)
 
 
 @bp.route('/api/maintenance/daily/<int:task_id>', methods=['DELETE'])
@@ -258,7 +259,7 @@ def cancel_daily_task(task_id):
         return jsonify({'status': 'success'})
     except Exception as e:
         db.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return api_error(e)
 
 
 @bp.route('/api/maintenance/progress')

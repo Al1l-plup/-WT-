@@ -2,6 +2,7 @@
 from flask import Blueprint, jsonify, request
 
 from app.db import get_db
+from app.errors import api_error
 from app.snapshots import snapshot_defect
 
 bp = Blueprint('defects', __name__)
@@ -41,7 +42,7 @@ def register_defect():
                             'found_in_db': False})
         except Exception as e:
             db.rollback()
-            return jsonify({'status': 'error', 'message': str(e)}), 500
+            return api_error(e)
 
     try:
         cur = db.cursor()
@@ -55,7 +56,7 @@ def register_defect():
         return jsonify({'status': 'success', 'message': f'Дефект {problem_code} на точке №{spot_number} зафиксирован'})
     except Exception as e:
         db.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return api_error(e)
 
 
 @bp.route('/api/defects/add', methods=['POST'])
@@ -74,7 +75,7 @@ def add_defect():
         return jsonify({'status': 'success', 'message': 'Карточка дефекта сохранена!'})
     except Exception as e:
         db.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return api_error(e)
 
 
 @bp.route('/api/defects/all')
@@ -141,7 +142,7 @@ def take_defect():
         return jsonify({'status': 'success', 'message': 'Дефект взят в работу!'})
     except Exception as e:
         db.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return api_error(e)
 
 
 @bp.route('/api/defects/update', methods=['POST'])
@@ -157,7 +158,7 @@ def update_defect():
         return jsonify({'status': 'success', 'message': 'Дефект закрыт!'})
     except Exception as e:
         db.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return api_error(e)
 
 
 @bp.route('/api/defects/close', methods=['POST'])
@@ -228,7 +229,7 @@ def close_defect():
         return jsonify({'status': 'success', 'message': 'Дефект закрыт!'})
     except Exception as e:
         db.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return api_error(e)
 
 
 @bp.route('/api/defects/<int:defect_id>', methods=['DELETE'])
@@ -255,7 +256,7 @@ def delete_defect(defect_id):
         return jsonify({'status': 'success', 'message': 'Дефект удалён'})
     except Exception as e:
         db.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return api_error(e)
 
 
 @bp.route('/api/defects/enrich', methods=['POST'])
@@ -331,7 +332,7 @@ def enrich_defect():
         return jsonify({'status': 'success', 'message': 'Точка создана, дефект взят в работу!'})
     except Exception as e:
         db.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return api_error(e)
 
 
 @bp.route('/api/defects/register_manual', methods=['POST'])
@@ -351,7 +352,7 @@ def register_defect_manual():
             db.commit()
         except Exception as e:
             db.rollback()
-            return jsonify({'status': 'error', 'message': str(e)}), 500
+            return api_error(e)
     else:
         gun_id = gun['UniqueID']
     try:
@@ -366,4 +367,4 @@ def register_defect_manual():
                         'message': f'Дефект {problem_code} на пистолете №{g_num} зафиксирован'})
     except Exception as e:
         db.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return api_error(e)

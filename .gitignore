@@ -14,7 +14,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
-# Служебные файлы SQLite (сама база data/welding_shop.db коммитится)
+# База данных не хранится в git — собирается из миграций + db/seed.sql
+# (python scripts/init_db.py). Служебные файлы SQLite тоже игнорируем.
+data/welding_shop.db
 *.db-journal
 *.db-shm
 *.db-wal

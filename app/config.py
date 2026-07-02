@@ -28,6 +28,9 @@ class Config:
     HOST = os.environ.get('HOST', '0.0.0.0')
     PORT = int(os.environ.get('PORT', '5000'))
 
+    # Уровень логирования (DEBUG/INFO/WARNING/ERROR).
+    LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
+
     # Запускать миграции БД при старте приложения.
     RUN_MIGRATIONS = True
 

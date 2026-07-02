@@ -1,9 +1,8 @@
+
 from pptx import Presentation
-from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt
-import copy
 
 # ── Цвета бренда ────────────────────────────────────────────────────────
 BG     = RGBColor(0x0d, 0x11, 0x17)
@@ -43,7 +42,6 @@ def new_slide():
 
 
 def add_rect(sl, x, y, w, h, fill_color=None, line_color=None, line_width=Pt(1)):
-    from pptx.util import Emu
     shape = sl.shapes.add_shape(1, x, y, w, h)  # MSO_SHAPE_TYPE.RECTANGLE = 1
     shape.line.width = line_width
     if fill_color:
@@ -149,8 +147,8 @@ def stat_box(sl, x, y, w, h, num, lbl, num_color=ACCENT):
 def section_slide(num_str, tag_text, tag_color, title, subtitle, emoji):
     sl = new_slide()
     # Лёгкое свечение по центру
-    glow = add_rect(sl, Inches(3.5), Inches(1.5), Inches(6.33), Inches(4.5),
-                    fill_color=RGBColor(0x0d, 0x15, 0x22), line_color=None)
+    add_rect(sl, Inches(3.5), Inches(1.5), Inches(6.33), Inches(4.5),
+             fill_color=RGBColor(0x0d, 0x15, 0x22), line_color=None)
 
     cx = SW / 2
     # Emoji

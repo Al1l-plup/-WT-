@@ -14,7 +14,8 @@
 - **Python 3.11+**
 - **Flask 3** — веб-фреймворк, шаблоны Jinja2
 - **Waitress** — продакшн WSGI-сервер (кроссплатформенный, работает на Windows)
-- **SQLite** — БД (файл `data/welding_shop.db`)
+- **SQLite** — БД (файл `data/welding_shop.db`, в git не хранится — собирается из миграций + seed)
+- **Alembic** — версионируемые миграции схемы
 - **python-dotenv** — конфигурация через `.env`
 - Фронтенд — серверные шаблоны + чистый CSS/JS (без сборки)
 
@@ -36,26 +37,23 @@ app/                    # пакет приложения
 ├── __init__.py         # create_app() — фабрика приложения
 ├── config.py           # конфигурация (профили dev/prod/testing, чтение .env)
 ├── db.py               # соединение с SQLite (через flask.g)
-├── migrations.py       # идемпотентные миграции схемы (запуск при старте)
+├── migrations.py       # запуск Alembic-миграций (upgrade head) при старте
+├── errors.py           # единая обработка ошибок API (без утечки деталей клиенту)
+├── snapshots.py        # заморозка контекста фактов (историческая целостность)
 ├── constants.py        # справочник кодов дефектов
-├── blueprints/         # маршруты по разделам
-│   ├── pages.py        # HTML-страницы
-│   ├── catalog.py      # бренды/станции/пистолеты/параметры/модели/точки
-│   ├── maintenance.py  # ТО и планирование
-│   ├── defects.py      # доска дефектов
-│   ├── analytics.py    # аналитика и статистика
-│   ├── workers.py      # сотрудники
-│   └── explorer.py     # обзор данных
+├── blueprints/         # маршруты по разделам (pages, catalog, maintenance, …)
 ├── templates/          # Jinja2-шаблоны
 └── static/             # CSS/JS
-data/welding_shop.db    # база данных (SQLite)
-db/                     # SQL-скрипты создания/наполнения схемы, ERD (.drawio)
-scripts/                # обслуживание БД (merge.py, import_schedule.py, ...)
-docs/                   # документация, презентации
-tests/                  # smoke-тесты (pytest)
-wsgi.py                 # запуск в продакшн (Waitress)
-run.py                  # запуск для разработки (встроенный сервер Flask)
-requirements.txt        # зависимости
+migrations/             # Alembic: env.py + versions/ (версии схемы)
+alembic.ini             # конфигурация Alembic
+db/                     # schema.sql, seed.sql (справочники), ERD (.drawio), SQL-скрипты
+data/welding_shop.db    # БД (SQLite) — НЕ в git, собирается scripts/init_db.py
+scripts/                # init_db.py, dump_seed.py, reset_facts.py, merge.py …
+docs/                   # документация (BEST_PRACTICES.md, презентации)
+tests/                  # pytest: smoke + инвариантные (self-contained)
+.github/workflows/      # CI (ruff + pytest)
+wsgi.py / run.py        # запуск: продакшн (Waitress) / разработка (Flask)
+requirements*.txt       # зависимости (prod / dev)
 ЗАПУСК.bat              # запуск в один клик под Windows
 ```
 
@@ -85,7 +83,13 @@ pip install -r requirements.txt
 # 5. Создать .env из примера (необязательно, есть значения по умолчанию)
 copy .env.example .env      # Windows
 # cp .env.example .env      # Linux/macOS
+
+# 6. Собрать базу данных (схема из миграций + справочники из db/seed.sql)
+python scripts/init_db.py
 ```
+
+> База `data/welding_shop.db` в репозитории не хранится — её собирает `scripts/init_db.py`
+> из миграций Alembic и `db/seed.sql`. Факты (ТО, дефекты) при этом пустые.
 
 ## Запуск
 
@@ -114,7 +118,8 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-Тесты работают с копией БД во временной папке — боевая база не изменяется.
+Тесты **самодостаточны**: собирают эталонную БД из миграций + `db/seed.sql` во временной
+папке, поэтому не зависят от боевой БД и воспроизводимы в CI.
 
 ## Основные эндпоинты
 
@@ -128,12 +133,31 @@ pytest
 | Сотрудники | GET/POST/PUT/DELETE | `/api/workers` |
 | Explorer | GET/PUT | `/api/explorer/gun/<id>`, `/api/explorer/station/<id>`, `/api/explorer/spot/<id>` |
 
-## База данных
+## База данных и миграции
 
-- Файл: `data/welding_shop.db` (SQLite), коммитится в репозиторий.
-- Схема приводится к актуальной автоматически при старте (`app/migrations.py`).
-- SQL создания/наполнения и ERD-схема — в папке `db/`.
+- Файл `data/welding_shop.db` (SQLite) **в git не хранится** — собирается `scripts/init_db.py`
+  из миграций Alembic + `db/seed.sql`. Так репозиторий остаётся лёгким, а данные воспроизводимы.
+- **Схема** ведётся миграциями Alembic (`migrations/`). При старте приложение автоматически
+  приводит БД к последней ревизии (`app/migrations.py::run_migrations` → `alembic upgrade head`).
+  Существующая «унаследованная» БД без Alembic автоматически «штампуется» baseline-ревизией.
+- **Справочные данные** — в `db/seed.sql` (генерируется `scripts/dump_seed.py` из БД).
+  Человекочитаемая схема — `db/schema.sql`; ERD и SQL-скрипты — в `db/`.
+
+### Работа с миграциями
+
+```bash
+# создать новую ревизию (после правки схемы), затем описать шаги в файле версии
+alembic revision -m "описание"
+
+# применить/откатить
+alembic upgrade head
+alembic downgrade -1
+
+# пересобрать seed из текущей БД (после изменения справочных данных)
+python scripts/dump_seed.py
+```
 
 ## Как участвовать в разработке
 
-См. [CONTRIBUTING.md](CONTRIBUTING.md) — рабочий процесс git, ветки, коммиты.
+См. [CONTRIBUTING.md](CONTRIBUTING.md) — рабочий процесс git, ветки, коммиты,
+и [docs/BEST_PRACTICES.md](docs/BEST_PRACTICES.md) — правила разработки и тестирования.

@@ -2,7 +2,11 @@
 Импорт плана ТО из Excel History Sheets → таблица maintenance_schedule в DB.
 Запускать один раз: python import_schedule.py
 """
-import sqlite3, openpyxl, re, os
+import os
+import re
+import sqlite3
+
+import openpyxl
 
 DB   = r'C:\Users\al.galimov\WeldTeam\BD\extracted_28_05\BD\web site\temp_server\welding_shop.db'
 DIR  = r'C:\Users\al.galimov\WeldTeam\ВОПРОСЫ К CLAUDE CODE'

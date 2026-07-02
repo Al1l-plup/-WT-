@@ -10,13 +10,13 @@ Usage:
 С  --promote → атомарно заменяет old (прод) на work.db (только после --apply).
 """
 
-import sqlite3
-import os
-import sys
 import argparse
 import datetime
 import logging
+import os
 import shutil
+import sqlite3
+import sys
 
 # ── Константы ────────────────────────────────────────────────────────────────
 
@@ -513,7 +513,7 @@ def main():
         shutil.copy2(backup_path, args.out)
         log.info(f'Рабочая копия: {args.out}')
     else:
-        log.info(f'DRY-RUN: work.db не создаётся/не изменяется.')
+        log.info('DRY-RUN: work.db не создаётся/не изменяется.')
 
     # ── 3. Сравнение схем ─────────────────────────────────────────────────────
     old_conn = open_db(args.old, readonly=True)
@@ -523,7 +523,6 @@ def main():
 
     # ── 4. DIFF данных (отчёт) ────────────────────────────────────────────────
     log.info('── Счётчики строк ───────────────────────────────────────')
-    all_tables = [t for t in MERGE_ORDER if t not in SKIP_TABLES]
     for tbl in sorted(user_tables(old_conn)):
         if tbl in SKIP_TABLES: continue
         no = old_conn.execute(f'SELECT COUNT(*) FROM "{tbl}"').fetchone()[0]
@@ -620,10 +619,10 @@ def main():
     else:
         log.info('═══ Merge на work.db применён. ══════════════════════')
         log.info('Чтобы заменить прод, выполните:')
-        log.info(f'  1. Остановите/переведите сайт в read-only')
+        log.info('  1. Остановите/переведите сайт в read-only')
         log.info(f'  2. python merge.py --old "{args.old}" --new "{args.new}" '
                  f'--out "{args.out}" --apply --promote')
-        log.info(f'  3. Запустите сайт, проверьте')
+        log.info('  3. Запустите сайт, проверьте')
         log.info(f'  Бэкап сохранён: {backup_path}')
 
 
