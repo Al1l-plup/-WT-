@@ -1,0 +1,18 @@
+[project]
+name = "weldteam-mes"
+version = "1.0.0"
+description = "WeldTeam MES — учёт ТО пистолетов точечной сварки, доска дефектов и аналитика (Flask + SQLite)"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+# E501 — длинные строки SQL; E701/E702 — компактный стиль перенесённого кода.
+ignore = ["E501", "E701", "E702"]

@@ -1,0 +1,14 @@
+# Нормализация переносов строк
+* text=auto eol=lf
+
+# Windows-скрипты — всегда CRLF
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Бинарные файлы — не трогать
+*.db binary
+*.pptx binary
+*.docx binary
+*.png binary
+*.drawio binary
+*.sqbpro binary

@@ -1,9 +1,30 @@
-node_modules/
+# Виртуальные окружения
+.venv/
+venv/
+env/
+
+# Переменные окружения (секреты)
 .env
-dist/
-*.db-journal
-*.db-shm
-*.db-wal
+
+# Python
 __pycache__/
 *.pyc
 *.pyo
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Служебные файлы SQLite (сама база data/welding_shop.db коммитится)
+*.db-journal
+*.db-shm
+*.db-wal
+
+# IDE / ОС
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Node (наследие прежней версии, если появится снова)
+node_modules/
+dist/
