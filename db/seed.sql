@@ -540,13 +540,14 @@ INSERT INTO "station" ("UniqueID", "station_name", "brand_id") VALUES (175, 'CA-
 INSERT INTO "station" ("UniqueID", "station_name", "brand_id") VALUES (176, 'CA-MB-180', 3);
 INSERT INTO "station" ("UniqueID", "station_name", "brand_id") VALUES (177, 'CA-MB-190', 3);
 
--- model: 6 rows
+-- model: 7 rows
 INSERT INTO "model" ("UniqueID", "model_name", "model_code", "type", "brand_id") VALUES (1, 'Tiggo2', 'A13T', 'single', 1);
 INSERT INTO "model" ("UniqueID", "model_name", "model_code", "type", "brand_id") VALUES (2, 'Jolion', 'A01', '2WD', 2);
 INSERT INTO "model" ("UniqueID", "model_name", "model_code", "type", "brand_id") VALUES (3, 'Jolion', 'A01', '4WD', 2);
 INSERT INTO "model" ("UniqueID", "model_name", "model_code", "type", "brand_id") VALUES (4, 'Tank 300', 'P01G', 'NOT ToD', 2);
 INSERT INTO "model" ("UniqueID", "model_name", "model_code", "type", "brand_id") VALUES (5, 'Tank 300', 'P01G', 'ToD', 2);
 INSERT INTO "model" ("UniqueID", "model_name", "model_code", "type", "brand_id") VALUES (6, 'CS55', 'CS55', 'single', 3);
+INSERT INTO "model" ("UniqueID", "model_name", "model_code", "type", "brand_id") VALUES (7, 'CS65', 'CS65', 'single', 3);
 
 -- gun: 570 rows
 INSERT INTO "gun" ("UniqueID", "g_num", "gun_type") VALUES (1, 1, 'UCH-C12071');
@@ -1050,7 +1051,7 @@ INSERT INTO "gun" ("UniqueID", "g_num", "gun_type") VALUES (498, 558, 'PTX-C4227
 INSERT INTO "gun" ("UniqueID", "g_num", "gun_type") VALUES (499, 559, 'PTX-C4227');
 INSERT INTO "gun" ("UniqueID", "g_num", "gun_type") VALUES (500, 560, 'PTX-C4252');
 INSERT INTO "gun" ("UniqueID", "g_num", "gun_type") VALUES (501, 561, 'PTX-C4252');
-INSERT INTO "gun" ("UniqueID", "g_num", "gun_type") VALUES (502, 562, 'PTX-C4254');
+INSERT INTO "gun" ("UniqueID", "g_num", "gun_type") VALUES (502, 562, 'AC');
 INSERT INTO "gun" ("UniqueID", "g_num", "gun_type") VALUES (503, 563, 'PTX-C4254');
 INSERT INTO "gun" ("UniqueID", "g_num", "gun_type") VALUES (504, 564, 'PTX-C4254');
 INSERT INTO "gun" ("UniqueID", "g_num", "gun_type") VALUES (505, 565, 'PTX-C4254');

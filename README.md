@@ -44,11 +44,11 @@ app/                    # пакет приложения
 ├── blueprints/         # маршруты по разделам (pages, catalog, maintenance, …)
 ├── templates/          # Jinja2-шаблоны
 └── static/             # CSS/JS
-migrations/             # Alembic: env.py + versions/ (версии схемы)
+migrations/             # Alembic: env.py + versions/ (0001 baseline, 0002 drop-temp, 0003 weld_balance)
 alembic.ini             # конфигурация Alembic
 db/                     # schema.sql, seed.sql (справочники), ERD (.drawio), SQL-скрипты
 data/welding_shop.db    # БД (SQLite) — НЕ в git, собирается scripts/init_db.py
-scripts/                # init_db.py, dump_seed.py, reset_facts.py, merge.py …
+scripts/                # init_db, dump_seed, reset_facts, import_weld_balance, merge …
 docs/                   # документация (BEST_PRACTICES.md, презентации)
 tests/                  # pytest: smoke + инвариантные (self-contained)
 .github/workflows/      # CI (ruff + pytest)
@@ -156,6 +156,21 @@ alembic downgrade -1
 # пересобрать seed из текущей БД (после изменения справочных данных)
 python scripts/dump_seed.py
 ```
+
+### Импорт Weld Balance (полные инженерные данные)
+
+Полный weld balance (5 файлов `.xlsm` по моделям) заносится в нормализованный слой
+`weld_point` / `weld_point_part` / `wb_material` (существующие таблицы не изменяются):
+
+```bash
+# отчёт без записи (объёмы, % связок gun/spot, варианты)
+python scripts/import_weld_balance.py "путь/к/Weld balance 3 brands"
+# запись в БД (идемпотентно по source_file); best-effort связи с gun/spot/station
+python scripts/import_weld_balance.py "путь/к/Weld balance 3 brands" --apply
+```
+
+Данные weld balance в git не коммитятся (загружаются импортёром из Excel). Сами таблицы
+создаются миграцией `0003`. Модель **CS65** (Changan) создаётся импортёром и есть в seed.
 
 ## Как участвовать в разработке
 
