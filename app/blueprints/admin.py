@@ -19,6 +19,7 @@ from app.audit import (
     table_meta,
 )
 from app.db import get_db
+from app.documents import DOCUMENTS, doc_list
 from app.errors import api_error
 
 bp = Blueprint('admin', __name__)
@@ -86,10 +87,15 @@ def read_table(name):
     sort = request.args.get('sort', '').strip()
     direction = 'DESC' if request.args.get('dir', 'asc').lower() == 'desc' else 'ASC'
 
-    where, params = '', []
+    conds, params = [], []
     if q:
-        where = ' WHERE ' + ' OR '.join(f'{_q(c)} || \'\' LIKE ?' for c in cols)
-        params = [f'%{q}%'] * len(cols)
+        conds.append('(' + ' OR '.join(f'{_q(c)} || \'\' LIKE ?' for c in cols) + ')')
+        params += [f'%{q}%'] * len(cols)
+    fcol = request.args.get('filter_col', '').strip()
+    if fcol in cols:
+        conds.append(f'{_q(fcol)}=?')
+        params.append(request.args.get('filter_val', ''))
+    where = ' WHERE ' + ' AND '.join(conds) if conds else ''
 
     order = f' ORDER BY {_q(sort)} {direction}' if sort in cols else ''
     total = db.execute(f'SELECT COUNT(*) FROM {_q(name)}{where}', params).fetchone()[0]
@@ -219,6 +225,95 @@ def batch_apply(name):
         stamp_audit(db, _author(), batch, since)
         db.commit()
         return jsonify({'status': 'success', 'batch_id': batch, **counts})
+    except Exception as e:
+        db.rollback()
+        return api_error(e)
+
+
+# ── документы (Перечень оборудования / Weld Balance / Параметры) ─────────────
+@bp.route('/api/admin/docs')
+def list_docs():
+    return jsonify(doc_list())
+
+
+def _doc_read(db, cfg, args):
+    cols = cfg['columns']
+    pk_sel = [f'{expr} AS "__pk_{tbl}"' for tbl, expr in cfg['pks'].items()]
+    col_sel = [f'({c["expr"]}) AS "{c["field"]}"' for c in cols]
+    base = cfg['base']
+
+    q = args.get('q', '').strip()
+    where, params = '', []
+    if q:
+        where = ' WHERE (' + ' OR '.join(f'({c["expr"]}) || \'\' LIKE ?' for c in cols) + ')'
+        params = [f'%{q}%'] * len(cols)
+
+    sort = args.get('sort', '').strip()
+    direction = 'DESC' if args.get('dir', 'asc').lower() == 'desc' else 'ASC'
+    sort_expr = next((c['expr'] for c in cols if c['field'] == sort), None)
+    order = f' ORDER BY {sort_expr} {direction}' if sort_expr else f' ORDER BY {cfg["order"]}'
+
+    limit = min(int(args.get('limit', 200)), 1000)
+    offset = int(args.get('offset', 0))
+    total = db.execute(f'SELECT COUNT(*) {base}{where}', params).fetchone()[0]
+    rows = db.execute(f'SELECT {", ".join(pk_sel + col_sel)} {base}{where}{order} LIMIT ? OFFSET ?',
+                      params + [limit, offset]).fetchall()
+    columns = [{'field': c['field'], 'label': c['label'], 'editable': bool(c.get('edit')), 'fk': c.get('fk')}
+               for c in cols]
+    return {'title': cfg['title'], 'columns': columns, 'rows': [dict(r) for r in rows],
+            'total': total, 'primary': cfg['primary'], 'child': cfg.get('child'),
+            'limit': limit, 'offset': offset}
+
+
+@bp.route('/api/admin/doc/<doc_id>')
+def read_doc(doc_id):
+    cfg = DOCUMENTS.get(doc_id)
+    if not cfg:
+        return jsonify({'status': 'error', 'message': 'Документ не найден'}), 404
+    return jsonify(_doc_read(get_db(), cfg, request.args))
+
+
+@bp.route('/api/admin/doc/<doc_id>/batch', methods=['POST'])
+def batch_doc(doc_id):
+    cfg = DOCUMENTS.get(doc_id)
+    if not cfg:
+        return jsonify({'status': 'error', 'message': 'Документ не найден'}), 404
+    db = get_db()
+    editable = {c['field']: c for c in cfg['columns'] if c.get('edit')}
+    primary = cfg['primary']
+    changes = (request.get_json(silent=True) or {}).get('changes', [])
+    try:
+        since, batch = max_change_id(db), uuid.uuid4().hex
+        updates = {}  # (table, pk_value) -> {col: value}
+        for ch in changes:
+            op = ch.get('op')
+            if op == 'update':
+                c = editable.get(ch.get('field'))
+                if not c:
+                    continue
+                pkval = (ch.get('row_pks') or {}).get(c['table'])
+                if pkval in (None, ''):
+                    continue  # связанной строки нет (напр. станция не назначена) — пропускаем
+                updates.setdefault((c['table'], pkval), {})[c['col']] = ch.get('value')
+            elif op == 'insert':
+                vals = {editable[f]['col']: v for f, v in (ch.get('values') or {}).items()
+                        if f in editable and editable[f]['table'] == primary}
+                keys = list(vals)
+                if keys:
+                    db.execute(f'INSERT INTO {_q(primary)} ({", ".join(_q(k) for k in keys)}) '
+                               f'VALUES ({", ".join("?" * len(keys))})', [vals[k] for k in keys])
+                else:
+                    db.execute(f'INSERT INTO {_q(primary)} DEFAULT VALUES')
+            elif op == 'delete':
+                pkcol, _ = table_meta(db, primary)
+                db.execute(f'DELETE FROM {_q(primary)} WHERE {_q(pkcol)}=?', (ch.get('pk'),))
+        for (tbl, pkval), colvals in updates.items():
+            pkcol, _ = table_meta(db, tbl)
+            sets = ', '.join(f'{_q(k)}=?' for k in colvals)
+            db.execute(f'UPDATE {_q(tbl)} SET {sets} WHERE {_q(pkcol)}=?', list(colvals.values()) + [pkval])
+        stamp_audit(db, _author(), batch, since)
+        db.commit()
+        return jsonify({'status': 'success', 'batch_id': batch, 'rows_updated': len(updates)})
     except Exception as e:
         db.rollback()
         return api_error(e)

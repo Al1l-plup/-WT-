@@ -7,8 +7,11 @@
   <script src="/static/theme.js"></script>
   <link rel="stylesheet" href="/static/style.css">
   <style>
+    .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+    .tab{padding:8px 14px;border:1px solid var(--border);border-radius:8px 8px 0 0;cursor:pointer;background:var(--bg);font-size:14px}
+    .tab.on{background:var(--accent);color:#fff;border-color:var(--accent)}
     .wrap{display:flex;gap:14px;align-items:flex-start}
-    .side{flex:0 0 210px;max-height:78vh;overflow:auto;border:1px solid var(--border);border-radius:8px}
+    .side{flex:0 0 200px;max-height:74vh;overflow:auto;border:1px solid var(--border);border-radius:8px}
     .side a{display:flex;justify-content:space-between;padding:7px 12px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px}
     .side a.on{background:var(--accent);color:#fff}
     .side a .c{opacity:.6;font-size:11px}
@@ -17,10 +20,8 @@
     .bar input,.bar select,.bar button{padding:6px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit}
     .bar button{cursor:pointer}
     .primary{background:var(--accent);color:#fff;border:none!important}
-    .danger{color:var(--danger,#c0392b)}
     .badge{font-size:12px;opacity:.75}
-    #sheet{max-height:66vh;overflow:auto;border:1px solid var(--border);border-radius:8px;outline:none}
-    /* Excel-грид */
+    .grid{max-height:56vh;overflow:auto;border:1px solid var(--border);border-radius:8px;outline:none}
     table.sheet{border-collapse:separate;border-spacing:0;font-size:12px;width:max-content;min-width:100%}
     table.sheet th,table.sheet td{border-right:1px solid var(--border);border-bottom:1px solid var(--border);padding:3px 8px;white-space:nowrap;max-width:340px;overflow:hidden;text-overflow:ellipsis}
     table.sheet thead th{position:sticky;top:0;z-index:2;background:var(--card);cursor:pointer;user-select:none}
@@ -28,6 +29,7 @@
     table.sheet thead tr.filter input{width:100%;box-sizing:border-box;padding:2px 5px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:inherit;font-size:11px}
     table.sheet td.rownum,table.sheet th.rownum{position:sticky;left:0;background:var(--card);color:var(--muted,#888);text-align:center;z-index:1;cursor:default}
     table.sheet td{cursor:cell}
+    table.sheet td.ro{opacity:.6;cursor:default}
     table.sheet td.sel{background:color-mix(in srgb,var(--accent) 18%,transparent)}
     table.sheet td.active{outline:2px solid var(--accent);outline-offset:-2px}
     table.sheet td.dirty{background:color-mix(in srgb,#e0a800 30%,transparent)}
@@ -35,6 +37,8 @@
     table.sheet tr.deleted td{text-decoration:line-through;opacity:.5}
     table.sheet input.celledit,table.sheet select.celledit{width:100%;box-sizing:border-box;border:none;background:var(--bg);color:inherit;font-size:12px;padding:2px 4px}
     .delrow{border:none;background:none;cursor:pointer;color:var(--muted,#888)}
+    #childWrap{margin-top:12px;display:none}
+    h3.sub{margin:0 0 6px;font-size:14px}
   </style>
 </head>
 <body>
@@ -55,23 +59,35 @@
 
 <div class="page">
   <div class="page-head" style="display:flex;justify-content:space-between;align-items:center">
-    <div><h1>Редактор базы данных</h1><p class="badge">Правьте ячейки как в Excel · стрелки/Tab/Enter · Ctrl+C/Ctrl+V · «Сохранить» пишет пакет в журнал (можно откатить).</p></div>
-    <div>Автор: <input id="author" placeholder="имя"></div>
+    <div><h1>Редактор данных</h1><p class="badge">Правьте ячейки как в Excel · стрелки/Tab/Enter · Ctrl+C/Ctrl+V · 🔒 — только чтение · «Сохранить» пишет пакет в журнал (откат на «Журнал»).</p></div>
+    <div>Автор: <input id="author" placeholder="имя" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit"></div>
   </div>
 
+  <div class="tabs" id="tabs"></div>
+
   <div class="wrap">
-    <div class="side" id="tables"></div>
+    <div class="side" id="tables" style="display:none"></div>
     <div class="main">
-      <div class="bar" id="bar" style="display:none">
-        <strong id="tname"></strong>
-        <input id="q" placeholder="поиск по всей таблице…" style="flex:1;min-width:120px">
+      <div class="bar">
+        <strong id="title"></strong>
+        <input id="q" placeholder="поиск…" style="flex:1;min-width:120px">
         <button id="addBtn">+ строка</button>
         <button id="saveBtn" class="primary">Сохранить <span id="cnt"></span></button>
         <button id="cancelBtn">Отменить</button>
         <span class="badge" id="pageInfo"></span>
         <button id="prev">←</button><button id="next">→</button>
       </div>
-      <div id="sheet"></div>
+      <div class="grid" id="sheet"></div>
+
+      <div id="childWrap">
+        <h3 class="sub" id="childTitle">Детали точки</h3>
+        <div class="bar">
+          <button id="childAdd">+ деталь</button>
+          <button id="childSave" class="primary">Сохранить детали <span id="childCnt"></span></button>
+          <span class="badge" id="childHint">Выберите точку выше</span>
+        </div>
+        <div class="grid" id="childSheet" style="max-height:32vh"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -83,57 +99,129 @@ const author = $('#author');
 author.value = localStorage.getItem('wt-author') || '';
 author.oninput = () => localStorage.setItem('wt-author', author.value);
 const hdr = () => ({'Content-Type':'application/json','X-Author':author.value||'anonymous'});
+const jget = async u => (await fetch(u)).json();
 
-let cur=null, sheet=null, fkCache={}, page=0, pageSize=200, sort='', dir='asc';
+let mode='doc', cur=null, primary=null, childCfg=null, childPointId=null;
+let sheet=null, childSheet=null, page=0, pageSize=200, sort='', dir='asc', fkCache={};
 
 async function fkLoader(tbl){
   if(!fkCache[tbl]){
-    const d = await (await fetch(`/api/admin/table/${tbl}?limit=1000`)).json();
+    const d = await jget(`/api/admin/table/${tbl}?limit=1000`);
     const label = d.columns.map(c=>c.name).find(n=>n!==d.pk) || d.pk;
-    fkCache[tbl] = {options: d.rows.map(r=>({id:r[d.pk], label:r[label]}))};
+    fkCache[tbl] = {options:d.rows.map(r=>({id:r[d.pk], label:r[label]}))};
   }
   return fkCache[tbl];
 }
+function guard(){ const dirty=(sheet&&sheet.dirtyCount())||(childSheet&&childSheet.dirtyCount()); return !dirty || confirm('Есть несохранённые изменения. Отменить их?'); }
+function setCnt(){ $('#cnt').textContent = sheet&&sheet.dirtyCount()? `(${sheet.dirtyCount()})`:''; }
 
-async function loadTables(){
-  const t = await (await fetch('/api/admin/tables')).json();
-  $('#tables').innerHTML = t.map(x=>`<a data-t="${x.name}"><span>${x.name}</span><span class="c">${x.rows}</span></a>`).join('');
-  $('#tables').querySelectorAll('a').forEach(a=>a.onclick=()=>{ if(guard()) selectTable(a.dataset.t); });
+async function init(){
+  const docs = await jget('/api/admin/docs');
+  $('#tabs').innerHTML = docs.map(d=>`<div class="tab" data-doc="${d.id}">${d.title}</div>`).join('')
+    + `<div class="tab" data-raw="1">Все таблицы (админ)</div>`;
+  $('#tabs').querySelectorAll('.tab').forEach(t=>t.onclick=()=>{ if(!guard())return;
+    if(t.dataset.raw) openRaw(); else openDoc(t.dataset.doc, t); });
+  openDoc(docs[0].id, $('#tabs .tab'));
 }
-function guard(){ return !(sheet && sheet.dirtyCount()>0) || confirm('Есть несохранённые изменения. Отменить их?'); }
+function markTab(el){ $('#tabs').querySelectorAll('.tab').forEach(x=>x.classList.remove('on')); if(el) el.classList.add('on'); }
 
-async function selectTable(name){
-  cur=name; page=0; sort=''; $('#q').value='';
-  $('#tables').querySelectorAll('a').forEach(a=>a.classList.toggle('on',a.dataset.t===name));
-  $('#bar').style.display='flex'; $('#tname').textContent=name;
-  await load();
+// ── документы ──────────────────────────────────────────────────────────────
+async function openDoc(id, el){
+  mode='doc'; cur=id; page=0; sort=''; $('#q').value=''; $('#tables').style.display='none';
+  markTab(el||[...$('#tabs').querySelectorAll('.tab')].find(t=>t.dataset.doc===id));
+  await loadDoc();
 }
-async function load(){
+async function loadDoc(){
   const q=encodeURIComponent($('#q').value.trim());
   const s=sort?`&sort=${sort}&dir=${dir}`:'';
-  const d = await (await fetch(`/api/admin/table/${cur}?limit=${pageSize}&offset=${page*pageSize}&q=${q}${s}`)).json();
-  sheet = new Sheet($('#sheet'), {pk:d.pk, columns:d.columns, rows:d.rows, fkLoader});
-  sheet.onChange = n => $('#cnt').textContent = n?`(${n})`:'';
-  sheet.onSort = col => { if(!guard()) return; if(sort===col){dir=dir==='asc'?'desc':'asc';} else {sort=col;dir='asc';} page=0; load(); };
-  const from=d.total?page*pageSize+1:0, to=Math.min((page+1)*pageSize,d.total);
-  $('#pageInfo').textContent = `${from}–${to} из ${d.total}`;
-  $('#cnt').textContent='';
+  const d = await jget(`/api/admin/doc/${cur}?limit=${pageSize}&offset=${page*pageSize}&q=${q}${s}`);
+  primary=d.primary; childCfg=d.child;
+  const fkMaps={};
+  for(const c of d.columns) if(c.fk){ const fo=await fkLoader(c.fk); fkMaps[c.field]=new Map(fo.options.map(o=>[String(o.id), o.label])); }
+  sheet = new Sheet($('#sheet'), {columns:d.columns, rows:d.rows, fkLoader, fkMaps});
+  sheet.onChange=setCnt;
+  sheet.onSort=col=>{ if(!guard())return; if(sort===col){dir=dir==='asc'?'desc':'asc';}else{sort=col;dir='asc';} page=0; loadDoc(); };
+  sheet.onSelect = childCfg ? (r,row)=>selectPoint(row) : null;
+  $('#title').textContent=d.title;
+  pageBar(d);
+  // под-таблица деталей
+  if(childCfg){ $('#childWrap').style.display='block'; $('#childTitle').textContent=childCfg.title; childPointId=null; childSheet=null; $('#childSheet').innerHTML=''; $('#childHint').textContent='Выберите точку выше'; }
+  else { $('#childWrap').style.display='none'; childSheet=null; }
 }
-async function save(){
+async function saveDoc(){
+  const changes=[];
+  for(const d of sheet.diff()){
+    if(d.state==='deleted') changes.push({op:'delete', pk:d.pkValues[primary]});
+    else if(d.state==='new') changes.push({op:'insert', values:d.changed});
+    else for(const f in d.changed) changes.push({op:'update', field:f, value:d.changed[f], row_pks:d.pkValues});
+  }
+  if(!changes.length){ alert('Нет изменений'); return; }
+  const res = await (await fetch(`/api/admin/doc/${cur}/batch`,{method:'POST',headers:hdr(),body:JSON.stringify({changes})})).json();
+  if(res.status==='success'){ fkCache={}; loadDoc(); } else alert(res.message||'Ошибка');
+}
+
+// ── под-таблица деталей (weld_point_part) ────────────────────────────────────
+async function selectPoint(row){
+  const pid = row['__pk_'+primary]; if(pid===childPointId) return;
+  if(childSheet && childSheet.dirtyCount()>0 && !confirm('Несохранённые детали будут потеряны. Продолжить?')) return;
+  childPointId=pid;
+  const d = await jget(`/api/admin/table/${childCfg.table}?filter_col=${childCfg.fk_col}&filter_val=${pid}&limit=100`);
+  childSheet = new Sheet($('#childSheet'), {pk:d.pk, columns:d.columns, rows:d.rows, fkLoader});
+  childSheet.onChange=()=>{ $('#childCnt').textContent = childSheet.dirtyCount()?`(${childSheet.dirtyCount()})`:''; };
+  $('#childHint').textContent = `Точка #${pid} · деталей: ${d.total}`;
+}
+async function saveChild(){
+  if(!childSheet){ return; }
+  const changes = childSheet.getChanges();
+  if(!changes.length){ alert('Нет изменений'); return; }
+  const res = await (await fetch(`/api/admin/table/${childCfg.table}/batch`,{method:'POST',headers:hdr(),body:JSON.stringify({changes})})).json();
+  if(res.status==='success'){ const pid=childPointId; childPointId=null; selectPoint({['__pk_'+primary]:pid}); } else alert(res.message||'Ошибка');
+}
+
+// ── режим «Все таблицы» ──────────────────────────────────────────────────────
+async function openRaw(){
+  mode='raw'; cur=null; $('#childWrap').style.display='none'; $('#title').textContent='';
+  markTab([...$('#tabs').querySelectorAll('.tab')].find(t=>t.dataset.raw));
+  $('#tables').style.display=''; $('#sheet').innerHTML='';
+  const t = await jget('/api/admin/tables');
+  $('#tables').innerHTML = t.map(x=>`<a data-t="${x.name}"><span>${x.name}</span><span class="c">${x.rows}</span></a>`).join('');
+  $('#tables').querySelectorAll('a').forEach(a=>a.onclick=()=>{ if(guard()) selectRawTable(a.dataset.t); });
+}
+async function selectRawTable(name){
+  cur=name; page=0; sort=''; $('#q').value='';
+  $('#tables').querySelectorAll('a').forEach(a=>a.classList.toggle('on',a.dataset.t===name));
+  await loadRaw();
+}
+async function loadRaw(){
+  const q=encodeURIComponent($('#q').value.trim()); const s=sort?`&sort=${sort}&dir=${dir}`:'';
+  const d = await jget(`/api/admin/table/${cur}?limit=${pageSize}&offset=${page*pageSize}&q=${q}${s}`);
+  const fkMaps={};
+  for(const c of d.columns) if(c.fk){ const fo=await fkLoader(c.fk.table); fkMaps[c.name]=new Map(fo.options.map(o=>[String(o.id), o.label])); }
+  sheet = new Sheet($('#sheet'), {pk:d.pk, columns:d.columns.map(c=>({name:c.name,label:c.name,pk:c.pk,fk:c.fk?c.fk.table:null})), rows:d.rows, fkLoader, fkMaps});
+  sheet.onChange=setCnt;
+  sheet.onSort=col=>{ if(!guard())return; if(sort===col){dir=dir==='asc'?'desc':'asc';}else{sort=col;dir='asc';} page=0; loadRaw(); };
+  $('#title').textContent=cur; pageBar(d);
+}
+async function saveRaw(){
   const changes = sheet.getChanges();
   if(!changes.length){ alert('Нет изменений'); return; }
-  const res = await (await fetch(`/api/admin/table/${cur}/batch`, {method:'POST', headers:hdr(), body:JSON.stringify({changes})})).json();
-  if(res.status==='success'){ fkCache={}; await load(); loadTables(); }
-  else alert(res.message||'Ошибка');
+  const res = await (await fetch(`/api/admin/table/${cur}/batch`,{method:'POST',headers:hdr(),body:JSON.stringify({changes})})).json();
+  if(res.status==='success'){ fkCache={}; loadRaw(); } else alert(res.message||'Ошибка');
 }
-$('#addBtn').onclick = ()=>sheet && sheet.addRow();
-$('#saveBtn').onclick = save;
-$('#cancelBtn').onclick = ()=>{ if(guard()) load(); };
-$('#prev').onclick = ()=>{ if(page>0 && guard()){page--; load();} };
-$('#next').onclick = ()=>{ if(guard()){page++; load();} };
-let qt; $('#q').oninput=()=>{ clearTimeout(qt); qt=setTimeout(()=>{ if(guard()){page=0; load();} },400); };
-window.onbeforeunload = ()=> (sheet && sheet.dirtyCount()>0) ? 'Есть несохранённые изменения' : undefined;
-loadTables();
+
+// ── общее ────────────────────────────────────────────────────────────────────
+function pageBar(d){ const from=d.total?page*pageSize+1:0, to=Math.min((page+1)*pageSize,d.total); $('#pageInfo').textContent=`${from}–${to} из ${d.total}`; $('#cnt').textContent=''; }
+const reload = ()=> mode==='doc'?loadDoc():loadRaw();
+$('#addBtn').onclick=()=>sheet&&sheet.addRow();
+$('#saveBtn').onclick=()=> mode==='doc'?saveDoc():saveRaw();
+$('#cancelBtn').onclick=()=>{ if(guard()) reload(); };
+$('#prev').onclick=()=>{ if(page>0&&guard()){page--; reload();} };
+$('#next').onclick=()=>{ if(guard()){page++; reload();} };
+$('#childAdd').onclick=()=>{ if(childSheet&&childPointId!=null) childSheet.addRow({[childCfg.fk_col]:childPointId}); };
+$('#childSave').onclick=saveChild;
+let qt; $('#q').oninput=()=>{ clearTimeout(qt); qt=setTimeout(()=>{ if(guard()){page=0; reload();} },400); };
+window.onbeforeunload=()=> ((sheet&&sheet.dirtyCount())||(childSheet&&childSheet.dirtyCount()))?'Есть несохранённые изменения':undefined;
+init();
 </script>
 </body>
 </html>
