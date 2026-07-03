@@ -4,9 +4,11 @@
 миграции БД, регистрирует закрытие соединения и все blueprints.
 """
 import logging
+import sqlite3
 
 from flask import Flask
 
+from app.audit import ensure_audit_triggers
 from app.config import Config, get_config
 from app.db import close_db
 from app.errors import register_error_handlers
@@ -25,6 +27,14 @@ def create_app(config: type[Config] | None = None) -> Flask:
 
     if app.config.get('RUN_MIGRATIONS'):
         run_migrations(app.config['DB_PATH'])
+
+    # Триггеры журнала версий (аудит) — актуализируем по текущей схеме при старте.
+    if app.config.get('AUDIT_ENABLED', True):
+        _con = sqlite3.connect(app.config['DB_PATH'])
+        try:
+            ensure_audit_triggers(_con)
+        finally:
+            _con.close()
 
     app.teardown_appcontext(close_db)
 

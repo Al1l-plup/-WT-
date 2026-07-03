@@ -5,19 +5,24 @@
 Закоммиченная бинарная БД для тестов НЕ требуется — прогон воспроизводим в CI.
 """
 import shutil
+import sqlite3
 
 import pytest
 
 from app import create_app
+from app.audit import ensure_audit_triggers
 from app.config import TestingConfig
 from scripts.init_db import init_db
 
 
 @pytest.fixture(scope='session')
 def template_db(tmp_path_factory):
-    """Собрать эталонную БД (схема + справочники) один раз за сессию."""
+    """Собрать эталонную БД (схема + справочники + триггеры аудита) один раз за сессию."""
     db_path = tmp_path_factory.mktemp('db') / 'template.db'
     init_db(db_path, force=True)
+    con = sqlite3.connect(db_path)
+    ensure_audit_triggers(con)  # чтобы копии уже содержали журнал версий
+    con.close()
     return db_path
 
 
@@ -28,7 +33,8 @@ def app(template_db, tmp_path):
 
     class _Config(TestingConfig):
         DB_PATH = str(db_copy)
-        RUN_MIGRATIONS = False  # копия эталона уже мигрирована
+        RUN_MIGRATIONS = False   # копия эталона уже мигрирована
+        AUDIT_ENABLED = False    # триггеры уже в копии — не пересоздаём
 
     yield create_app(_Config)
 

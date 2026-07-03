@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 DEFAULT_DB = ROOT / 'data' / 'welding_shop.db'
 FACT_TABLES = ('maintenance', 'defects', 'maintenance_daily_task')
 
@@ -33,6 +34,11 @@ def main() -> None:
 
     # 2) Очистка фактов
     con = sqlite3.connect(db_path)
+    try:
+        from app.audit import drop_audit_triggers
+        drop_audit_triggers(con)  # массовое удаление — не засоряем журнал версий
+    except Exception:
+        pass
     before = {t: con.execute(f'SELECT COUNT(*) FROM {t}').fetchone()[0] for t in FACT_TABLES}
     for t in FACT_TABLES:
         con.execute(f'DELETE FROM {t}')

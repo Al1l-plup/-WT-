@@ -196,8 +196,11 @@ def run(directory: str, db_path: str, apply: bool) -> None:
     if not files:
         sys.exit(f'Нет .xlsm/.xlsx в {directory}')
 
-    run_migrations(db_path)  # гарантируем схему (0003)
+    run_migrations(db_path)  # гарантируем схему
     db = sqlite3.connect(db_path)
+    if apply:
+        from app.audit import drop_audit_triggers
+        drop_audit_triggers(db)  # bulk-загрузка — не засоряем журнал версий
     model_map = resolve_model_map(db)
     gun_cache, spot_cache = build_caches(db)
     materials = {n: mid for mid, n in db.execute("SELECT id, name FROM wb_material")}

@@ -6,10 +6,19 @@
 """
 import logging
 import socket
+import sys
 
 from waitress import serve
 
 from app import create_app
+
+# Баннер содержит эмодзи/кириллицу — делаем вывод устойчивым к кодировке консоли
+# (напр. cp1251 на Windows при запуске не через ЗАПУСК.bat, где стоит chcp 65001).
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 
 logging.basicConfig(level=logging.INFO)
 

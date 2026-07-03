@@ -34,6 +34,9 @@ class Config:
     # Запускать миграции БД при старте приложения.
     RUN_MIGRATIONS = True
 
+    # Актуализировать триггеры журнала версий (аудита) при старте.
+    AUDIT_ENABLED = True
+
     DEBUG = False
     TESTING = False
 

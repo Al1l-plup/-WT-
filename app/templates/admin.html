@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Редактор БД · WeldTeam MES</title>
+  <script src="/static/theme.js"></script>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    .wrap{display:flex;gap:16px;align-items:flex-start}
+    .side{flex:0 0 230px;max-height:75vh;overflow:auto;border:1px solid var(--border);border-radius:8px}
+    .side a{display:flex;justify-content:space-between;padding:7px 12px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px}
+    .side a.on{background:var(--accent);color:#fff}
+    .side a .c{opacity:.6;font-size:11px}
+    .main{flex:1;min-width:0}
+    table.grid{width:100%;border-collapse:collapse;font-size:12px}
+    table.grid th,table.grid td{border:1px solid var(--border);padding:4px 7px;text-align:left;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    table.grid th{background:var(--card);position:sticky;top:0}
+    .gridwrap{max-height:62vh;overflow:auto;border:1px solid var(--border);border-radius:8px}
+    .rowbtn{cursor:pointer;padding:2px 7px;border:1px solid var(--border);border-radius:5px;background:var(--card);font-size:12px}
+    .bar{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+    .bar input,.bar select{padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg,inherit)}
+    dialog{border:1px solid var(--border);border-radius:10px;background:var(--card);color:inherit;max-width:560px;width:92%}
+    dialog .fld{display:flex;flex-direction:column;gap:3px;margin-bottom:9px}
+    dialog label{font-size:12px;opacity:.75}
+    dialog input,dialog select{padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit}
+    .primary{background:var(--accent);color:#fff;border:none;padding:7px 14px;border-radius:6px;cursor:pointer}
+    .muted{opacity:.6;font-size:12px}
+  </style>
+</head>
+<body>
+<nav class="nav">
+  <a class="nav-brand" href="/">WeldTeam <span>/ цех BS</span></a>
+  <div class="nav-links">
+    <a class="nav-link" href="/">Главная</a>
+    <a class="nav-link" href="/maintenance">ТО</a>
+    <a class="nav-link" href="/defects">Дефекты</a>
+    <a class="nav-link" href="/analytics">Аналитика</a>
+    <a class="nav-link" href="/workers">Сотрудники</a>
+    <a class="nav-link" href="/explorer">Обзор</a>
+    <a class="nav-link active" href="/admin">Редактор</a>
+    <a class="nav-link" href="/history">Журнал</a>
+    <button class="btn-theme" id="themeToggle">☀</button>
+  </div>
+</nav>
+
+<div class="page">
+  <div class="page-head" style="display:flex;justify-content:space-between;align-items:center">
+    <div><h1>Редактор базы данных</h1><p class="muted">Правки фиксируются в журнале версий — их можно откатить.</p></div>
+    <div>Автор: <input id="author" placeholder="имя" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit"></div>
+  </div>
+
+  <div class="wrap">
+    <div class="side" id="tables"></div>
+    <div class="main">
+      <div class="bar" id="bar" style="display:none">
+        <strong id="tname"></strong>
+        <input id="q" placeholder="поиск…" style="flex:1;min-width:120px">
+        <button class="primary" id="addBtn">+ Добавить</button>
+        <span class="muted" id="count"></span>
+      </div>
+      <div class="gridwrap"><table class="grid" id="grid"></table></div>
+    </div>
+  </div>
+</div>
+
+<dialog id="dlg">
+  <h3 id="dlgTitle" style="margin-top:0"></h3>
+  <div id="fields"></div>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+    <button class="rowbtn" onclick="document.getElementById('dlg').close()">Отмена</button>
+    <button class="rowbtn" id="delBtn" style="color:var(--danger,#c0392b)">Удалить</button>
+    <button class="primary" id="saveBtn">Сохранить</button>
+  </div>
+</dialog>
+
+<script>
+const $ = s => document.querySelector(s);
+const author = $('#author');
+author.value = localStorage.getItem('wt-author') || '';
+author.oninput = () => localStorage.setItem('wt-author', author.value);
+const hdr = () => ({'Content-Type':'application/json','X-Author':author.value||'anonymous'});
+
+let cur = null, meta = null, fkCache = {};
+
+async function loadTables(){
+  const t = await (await fetch('/api/admin/tables')).json();
+  $('#tables').innerHTML = t.map(x =>
+    `<a data-t="${x.name}"><span>${x.name}</span><span class="c">${x.rows}</span></a>`).join('');
+  $('#tables').querySelectorAll('a').forEach(a => a.onclick = () => selectTable(a.dataset.t));
+}
+async function selectTable(name){
+  cur = name;
+  $('#tables').querySelectorAll('a').forEach(a => a.classList.toggle('on', a.dataset.t===name));
+  $('#bar').style.display = 'flex'; $('#tname').textContent = name; $('#q').value='';
+  await loadRows();
+}
+async function loadRows(){
+  const q = encodeURIComponent($('#q').value.trim());
+  const d = await (await fetch(`/api/admin/table/${cur}?limit=200&q=${q}`)).json();
+  meta = d;
+  $('#count').textContent = `${d.rows.length} из ${d.total}`;
+  const cols = d.columns.map(c => c.name);
+  let html = '<thead><tr><th></th>' + cols.map(c=>`<th>${c}</th>`).join('') + '</tr></thead><tbody>';
+  for(const r of d.rows){
+    html += '<tr><td><button class="rowbtn" data-pk="'+r[d.pk]+'">✎</button></td>' +
+      cols.map(c=>`<td title="${esc(r[c])}">${esc(r[c])}</td>`).join('') + '</tr>';
+  }
+  $('#grid').innerHTML = html + '</tbody>';
+  $('#grid').querySelectorAll('button[data-pk]').forEach(b =>
+    b.onclick = () => openEditor(d.rows.find(x => String(x[d.pk])===b.dataset.pk)));
+}
+function esc(v){ return v===null||v===undefined ? '' : String(v).replace(/[&<>"]/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+
+async function fkOptions(fk){
+  const key = fk.table;
+  if(!fkCache[key]){
+    const d = await (await fetch(`/api/admin/table/${fk.table}?limit=500`)).json();
+    fkCache[key] = {pk:d.pk, cols:d.columns.map(c=>c.name), rows:d.rows};
+  }
+  return fkCache[key];
+}
+async function openEditor(row){
+  const isNew = !row;
+  $('#dlgTitle').textContent = (isNew?'Новая строка · ':'Изменить · ') + cur;
+  const box = $('#fields'); box.innerHTML='';
+  for(const c of meta.columns){
+    const val = row ? row[c.name] : '';
+    const wrap = document.createElement('div'); wrap.className='fld';
+    const lab = document.createElement('label'); lab.textContent = c.name + (c.pk?' (PK)':'') + (c.fk?` → ${c.fk.table}`:'');
+    let inp;
+    if(c.fk){
+      inp = document.createElement('select');
+      inp.innerHTML = '<option value="">—</option>';
+      const fo = await fkOptions(c.fk);
+      const label = fo.cols.find(x=>x!==fo.pk) || fo.pk;
+      for(const o of fo.rows){ const op=document.createElement('option'); op.value=o[fo.pk];
+        op.textContent = `${o[fo.pk]} · ${o[label]}`; if(String(o[fo.pk])===String(val)) op.selected=true; inp.appendChild(op); }
+    } else {
+      inp = document.createElement('input'); inp.value = (val===null||val===undefined)?'':val;
+    }
+    inp.dataset.col = c.name;
+    if(c.pk && !isNew) inp.disabled = true;
+    wrap.appendChild(lab); wrap.appendChild(inp); box.appendChild(wrap);
+  }
+  $('#delBtn').style.display = isNew ? 'none' : '';
+  const dlg = $('#dlg'); dlg.returnValue='';
+  $('#saveBtn').onclick = () => save(isNew, row);
+  $('#delBtn').onclick = () => del(row);
+  dlg.showModal();
+}
+function collect(){
+  const values = {};
+  $('#fields').querySelectorAll('[data-col]').forEach(i => { if(!i.disabled) values[i.dataset.col] = i.value===''?null:i.value; });
+  return values;
+}
+async function save(isNew, row){
+  const values = collect();
+  const url = isNew ? `/api/admin/table/${cur}` : `/api/admin/table/${cur}/${row[meta.pk]}`;
+  const res = await (await fetch(url, {method:isNew?'POST':'PUT', headers:hdr(), body:JSON.stringify({values})})).json();
+  if(res.status==='success'){ $('#dlg').close(); loadRows(); loadTables(); } else alert(res.message||'Ошибка');
+}
+async function del(row){
+  if(!confirm('Удалить строку?')) return;
+  const res = await (await fetch(`/api/admin/table/${cur}/${row[meta.pk]}`, {method:'DELETE', headers:hdr()})).json();
+  if(res.status==='success'){ $('#dlg').close(); loadRows(); loadTables(); } else alert(res.message||'Ошибка');
+}
+$('#addBtn').onclick = () => openEditor(null);
+let qt; $('#q').oninput = () => { clearTimeout(qt); qt=setTimeout(loadRows, 300); };
+loadTables();
+</script>
+</body>
+</html>

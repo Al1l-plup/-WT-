@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Журнал версий · WeldTeam MES</title>
+  <script src="/static/theme.js"></script>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    table.grid{width:100%;border-collapse:collapse;font-size:12px}
+    table.grid th,table.grid td{border:1px solid var(--border);padding:4px 7px;text-align:left;vertical-align:top}
+    table.grid th{background:var(--card);position:sticky;top:0}
+    .gridwrap{max-height:60vh;overflow:auto;border:1px solid var(--border);border-radius:8px}
+    .rowbtn{cursor:pointer;padding:2px 8px;border:1px solid var(--border);border-radius:5px;background:var(--card);font-size:12px}
+    .primary{background:var(--accent);color:#fff;border:none;padding:7px 14px;border-radius:6px;cursor:pointer}
+    .bar{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+    .bar input,.bar select{padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit}
+    .op{padding:1px 6px;border-radius:4px;font-size:11px}
+    .op.INSERT{background:#2e7d32;color:#fff}.op.UPDATE{background:#1565c0;color:#fff}.op.DELETE{background:#c0392b;color:#fff}
+    .card{border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:16px}
+    code{font-size:11px;opacity:.8;white-space:pre-wrap;word-break:break-all}
+    .muted{opacity:.6;font-size:12px}
+  </style>
+</head>
+<body>
+<nav class="nav">
+  <a class="nav-brand" href="/">WeldTeam <span>/ цех BS</span></a>
+  <div class="nav-links">
+    <a class="nav-link" href="/">Главная</a>
+    <a class="nav-link" href="/maintenance">ТО</a>
+    <a class="nav-link" href="/defects">Дефекты</a>
+    <a class="nav-link" href="/analytics">Аналитика</a>
+    <a class="nav-link" href="/workers">Сотрудники</a>
+    <a class="nav-link" href="/explorer">Обзор</a>
+    <a class="nav-link" href="/admin">Редактор</a>
+    <a class="nav-link active" href="/history">Журнал</a>
+    <button class="btn-theme" id="themeToggle">☀</button>
+  </div>
+</nav>
+
+<div class="page">
+  <div class="page-head"><h1>Журнал версий</h1><p class="muted">Все изменения БД. Любую правку можно откатить; точки восстановления возвращают состояние целиком.</p></div>
+
+  <div class="card">
+    <strong>Точки восстановления</strong>
+    <div class="bar" style="margin-top:8px">
+      <input id="rpName" placeholder="название точки (напр. перед импортом)">
+      <button class="primary" id="rpCreate">Создать точку</button>
+    </div>
+    <div id="rpList"></div>
+  </div>
+
+  <div class="bar">
+    <label>Таблица: <select id="fltTable"><option value="">все</option></select></label>
+    <button class="rowbtn" id="refresh">Обновить</button>
+    <span class="muted" id="count"></span>
+  </div>
+  <div class="gridwrap"><table class="grid" id="grid"></table></div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const author = () => localStorage.getItem('wt-author') || 'anonymous';
+const hdr = () => ({'Content-Type':'application/json','X-Author':author()});
+function esc(v){ return v===null||v===undefined ? '' : String(v).replace(/[&<>]/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); }
+
+async function loadTables(){
+  const t = await (await fetch('/api/admin/tables')).json();
+  $('#fltTable').innerHTML = '<option value="">все</option>' + t.map(x=>`<option>${x.name}</option>`).join('');
+}
+async function loadHistory(){
+  const tbl = $('#fltTable').value;
+  const d = await (await fetch(`/api/admin/history?limit=200&table=${encodeURIComponent(tbl)}`)).json();
+  $('#count').textContent = `${d.entries.length} из ${d.total}`;
+  let h = '<thead><tr><th>#</th><th>время</th><th>таблица</th><th>PK</th><th>оп.</th><th>было→стало</th><th>автор</th><th></th></tr></thead><tbody>';
+  for(const e of d.entries){
+    h += `<tr><td>${e.id}</td><td>${esc(e.ts)}</td><td>${esc(e.table_name)}</td><td>${esc(e.row_pk)}</td>`+
+      `<td><span class="op ${e.op}">${e.op}</span>${e.is_revert?' ↩':''}</td>`+
+      `<td><code>${esc((e.before_json||'—'))}\n${esc((e.after_json||'—'))}</code></td>`+
+      `<td>${esc(e.author)}</td>`+
+      `<td><button class="rowbtn" data-id="${e.id}">Откатить</button></td></tr>`;
+  }
+  $('#grid').innerHTML = h + '</tbody>';
+  $('#grid').querySelectorAll('button[data-id]').forEach(b => b.onclick = () => revert(b.dataset.id));
+}
+async function revert(id){
+  if(!confirm('Откатить это изменение?')) return;
+  const r = await (await fetch(`/api/admin/history/${id}/revert`, {method:'POST', headers:hdr(), body:'{}'})).json();
+  if(r.status==='success'){ loadHistory(); loadRP(); } else alert(r.message||'Ошибка');
+}
+async function loadRP(){
+  const rp = await (await fetch('/api/admin/restore-points')).json();
+  $('#rpList').innerHTML = rp.length ? rp.map(p =>
+    `<div style="display:flex;gap:10px;align-items:center;padding:4px 0">
+       <strong>${esc(p.name)}</strong><span class="muted">${esc(p.created_at)} · ${esc(p.author)}</span>
+       <button class="rowbtn" data-rp="${p.id}">Откатить к точке</button></div>`).join('')
+    : '<span class="muted">Пока нет точек восстановления.</span>';
+  $('#rpList').querySelectorAll('button[data-rp]').forEach(b => b.onclick = () => rollback(b.dataset.rp));
+}
+async function rollback(id){
+  if(!confirm('Откатить БД к этой точке? Все изменения после неё будут отменены.')) return;
+  const r = await (await fetch(`/api/admin/restore-points/${id}/rollback`, {method:'POST', headers:hdr(), body:'{}'})).json();
+  if(r.status==='success'){ alert(r.message); loadHistory(); loadRP(); } else alert(r.message||'Ошибка');
+}
+$('#rpCreate').onclick = async () => {
+  const name = $('#rpName').value.trim(); if(!name){ alert('Укажите название'); return; }
+  const r = await (await fetch('/api/admin/restore-points', {method:'POST', headers:hdr(), body:JSON.stringify({name})})).json();
+  if(r.status==='success'){ $('#rpName').value=''; loadRP(); } else alert(r.message||'Ошибка');
+};
+$('#refresh').onclick = loadHistory;
+$('#fltTable').onchange = loadHistory;
+loadTables(); loadHistory(); loadRP();
+</script>
+</body>
+</html>
