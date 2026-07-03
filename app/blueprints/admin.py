@@ -12,6 +12,7 @@ from app.audit import (
     create_restore_point,
     editable_tables,
     max_change_id,
+    revert_batch,
     revert_change,
     rollback_to,
     stamp_audit,
@@ -79,18 +80,21 @@ def read_table(name):
         return jsonify({'status': 'error', 'message': 'Таблица недоступна'}), 404
     pk, cols = meta
     fks = _fk_map(db, name)
-    limit = min(int(request.args.get('limit', DEFAULT_LIMIT)), 500)
+    limit = min(int(request.args.get('limit', DEFAULT_LIMIT)), 1000)
     offset = int(request.args.get('offset', 0))
     q = request.args.get('q', '').strip()
+    sort = request.args.get('sort', '').strip()
+    direction = 'DESC' if request.args.get('dir', 'asc').lower() == 'desc' else 'ASC'
 
     where, params = '', []
     if q:
         where = ' WHERE ' + ' OR '.join(f'{_q(c)} || \'\' LIKE ?' for c in cols)
         params = [f'%{q}%'] * len(cols)
 
+    order = f' ORDER BY {_q(sort)} {direction}' if sort in cols else ''
     total = db.execute(f'SELECT COUNT(*) FROM {_q(name)}{where}', params).fetchone()[0]
     rows = db.execute(
-        f'SELECT * FROM {_q(name)}{where} LIMIT ? OFFSET ?', params + [limit, offset]
+        f'SELECT * FROM {_q(name)}{where}{order} LIMIT ? OFFSET ?', params + [limit, offset]
     ).fetchall()
     columns = [{'name': c, 'pk': c == pk, 'fk': fks.get(c)} for c in cols]
     return jsonify({'table': name, 'pk': pk, 'columns': columns,
@@ -174,6 +178,52 @@ def delete_row(name, pk_val):
         return api_error(e)
 
 
+# ── пакетное сохранение (Excel-редактор) ────────────────────────────────────
+@bp.route('/api/admin/table/<name>/batch', methods=['POST'])
+def batch_apply(name):
+    db = get_db()
+    meta = _require_table(db, name)
+    if not meta:
+        return jsonify({'status': 'error', 'message': 'Таблица недоступна'}), 404
+    pk, cols = meta
+    changes = (request.get_json(silent=True) or {}).get('changes', [])
+    for ch in changes:
+        bad = [c for c in ch.get('values', {}) if c not in cols]
+        if bad:
+            return jsonify({'status': 'error', 'message': f'Неизвестные колонки: {bad}'}), 400
+    try:
+        since, batch = max_change_id(db), uuid.uuid4().hex
+        counts = {'insert': 0, 'update': 0, 'delete': 0}
+        for ch in changes:
+            op = ch.get('op')
+            if op == 'update':
+                vals = {k: v for k, v in ch.get('values', {}).items() if k != pk}
+                if not vals:
+                    continue
+                sets = ', '.join(f'{_q(k)}=?' for k in vals)
+                db.execute(f'UPDATE {_q(name)} SET {sets} WHERE {_q(pk)}=?',
+                           list(vals.values()) + [ch.get('pk')])
+            elif op == 'insert':
+                vals = ch.get('values', {})
+                keys = list(vals)
+                if keys:
+                    db.execute(f'INSERT INTO {_q(name)} ({", ".join(_q(k) for k in keys)}) '
+                               f'VALUES ({", ".join("?" * len(keys))})', [vals[k] for k in keys])
+                else:
+                    db.execute(f'INSERT INTO {_q(name)} DEFAULT VALUES')
+            elif op == 'delete':
+                db.execute(f'DELETE FROM {_q(name)} WHERE {_q(pk)}=?', (ch.get('pk'),))
+            else:
+                continue
+            counts[op] += 1
+        stamp_audit(db, _author(), batch, since)
+        db.commit()
+        return jsonify({'status': 'success', 'batch_id': batch, **counts})
+    except Exception as e:
+        db.rollback()
+        return api_error(e)
+
+
 # ── журнал изменений ─────────────────────────────────────────────────────────
 @bp.route('/api/admin/history')
 def history():
@@ -187,7 +237,7 @@ def history():
         params = [table]
     total = db.execute(f'SELECT COUNT(*) FROM change_log{cond}', params).fetchone()[0]
     rows = db.execute(
-        f'SELECT id, ts, table_name, row_pk, op, before_json, after_json, author, is_revert '
+        f'SELECT id, ts, table_name, row_pk, op, before_json, after_json, author, is_revert, batch_id '
         f'FROM change_log{cond} ORDER BY id DESC LIMIT ? OFFSET ?', params + [limit, offset]
     ).fetchall()
     return jsonify({'total': total, 'entries': [dict(r) for r in rows]})
@@ -201,6 +251,19 @@ def revert(change_id):
         if not ok:
             return jsonify({'status': 'error', 'message': 'Запись журнала не найдена'}), 404
         return jsonify({'status': 'success', 'message': 'Изменение откачено'})
+    except Exception as e:
+        db.rollback()
+        return api_error(e)
+
+
+@bp.route('/api/admin/history/batch/<batch_id>/revert', methods=['POST'])
+def revert_batch_ep(batch_id):
+    db = get_db()
+    try:
+        n = revert_batch(db, batch_id, author=_author())
+        if not n:
+            return jsonify({'status': 'error', 'message': 'Пакет не найден'}), 404
+        return jsonify({'status': 'success', 'reverted': n, 'message': f'Откачено изменений: {n}'})
     except Exception as e:
         db.rollback()
         return api_error(e)

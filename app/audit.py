@@ -114,6 +114,21 @@ def revert_change(db: sqlite3.Connection, change_id: int, author: str | None = N
     return True
 
 
+def revert_batch(db: sqlite3.Connection, batch_id: str, author: str | None = None) -> int:
+    """Откатить целый пакет изменений (все записи журнала с этим batch_id)."""
+    entries = db.execute(
+        "SELECT table_name,row_pk,op,before_json FROM change_log WHERE batch_id=? ORDER BY id DESC",
+        (batch_id,)).fetchall()
+    if not entries:
+        return 0
+    since = max_change_id(db)
+    for e in entries:
+        _apply_inverse(db, e[0], e[1], e[2], e[3])
+    stamp_audit(db, author or 'revert', f'revert-batch-{batch_id}', since, is_revert=1)
+    db.commit()
+    return len(entries)
+
+
 def create_restore_point(db, name, author=None, note=None) -> int:
     """Создать точку восстановления = запомнить текущий max(change_log.id)."""
     cur = db.execute("INSERT INTO restore_point(name,last_change_id,author,note) VALUES (?,?,?,?)",

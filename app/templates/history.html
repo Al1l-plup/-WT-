@@ -70,23 +70,39 @@ async function loadTables(){
 }
 async function loadHistory(){
   const tbl = $('#fltTable').value;
-  const d = await (await fetch(`/api/admin/history?limit=200&table=${encodeURIComponent(tbl)}`)).json();
+  const d = await (await fetch(`/api/admin/history?limit=300&table=${encodeURIComponent(tbl)}`)).json();
   $('#count').textContent = `${d.entries.length} из ${d.total}`;
+  // группируем по batch_id (записи уже по убыванию id)
+  const groups = new Map();
+  for(const e of d.entries){ const k=e.batch_id||('single-'+e.id); if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(e); }
   let h = '<thead><tr><th>#</th><th>время</th><th>таблица</th><th>PK</th><th>оп.</th><th>было→стало</th><th>автор</th><th></th></tr></thead><tbody>';
-  for(const e of d.entries){
-    h += `<tr><td>${e.id}</td><td>${esc(e.ts)}</td><td>${esc(e.table_name)}</td><td>${esc(e.row_pk)}</td>`+
-      `<td><span class="op ${e.op}">${e.op}</span>${e.is_revert?' ↩':''}</td>`+
-      `<td><code>${esc((e.before_json||'—'))}\n${esc((e.after_json||'—'))}</code></td>`+
-      `<td>${esc(e.author)}</td>`+
-      `<td><button class="rowbtn" data-id="${e.id}">Откатить</button></td></tr>`;
+  for(const [bid, es] of groups){
+    if(es.length>1 && !bid.startsWith('single-')){
+      h += `<tr style="background:var(--card)"><td colspan="8"><strong>Пакет · ${es.length} изм.</strong> `+
+        `<span class="muted">${esc(es[0].ts)} · ${esc(es[0].author)}</span> `+
+        `<button class="rowbtn" data-batch="${bid}">Откатить пакет</button></td></tr>`;
+    }
+    for(const e of es){
+      h += `<tr><td>${e.id}</td><td>${esc(e.ts)}</td><td>${esc(e.table_name)}</td><td>${esc(e.row_pk)}</td>`+
+        `<td><span class="op ${e.op}">${e.op}</span>${e.is_revert?' ↩':''}</td>`+
+        `<td><code>${esc((e.before_json||'—'))}\n${esc((e.after_json||'—'))}</code></td>`+
+        `<td>${esc(e.author)}</td>`+
+        `<td><button class="rowbtn" data-id="${e.id}">Откатить</button></td></tr>`;
+    }
   }
   $('#grid').innerHTML = h + '</tbody>';
   $('#grid').querySelectorAll('button[data-id]').forEach(b => b.onclick = () => revert(b.dataset.id));
+  $('#grid').querySelectorAll('button[data-batch]').forEach(b => b.onclick = () => revertBatch(b.dataset.batch));
 }
 async function revert(id){
   if(!confirm('Откатить это изменение?')) return;
   const r = await (await fetch(`/api/admin/history/${id}/revert`, {method:'POST', headers:hdr(), body:'{}'})).json();
   if(r.status==='success'){ loadHistory(); loadRP(); } else alert(r.message||'Ошибка');
+}
+async function revertBatch(bid){
+  if(!confirm('Откатить весь пакет изменений?')) return;
+  const r = await (await fetch(`/api/admin/history/batch/${bid}/revert`, {method:'POST', headers:hdr(), body:'{}'})).json();
+  if(r.status==='success'){ alert(r.message); loadHistory(); loadRP(); } else alert(r.message||'Ошибка');
 }
 async function loadRP(){
   const rp = await (await fetch('/api/admin/restore-points')).json();
