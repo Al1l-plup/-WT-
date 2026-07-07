@@ -99,7 +99,7 @@ const author = $('#author');
 author.value = localStorage.getItem('wt-author') || '';
 author.oninput = () => localStorage.setItem('wt-author', author.value);
 const hdr = () => ({'Content-Type':'application/json','X-Author':author.value||'anonymous'});
-const jget = async u => (await fetch(u)).json();
+const jget = async u => { const r = await fetch(u); if(!r.ok) throw new Error(`${u} → HTTP ${r.status}`); return r.json(); };
 
 let mode='doc', cur=null, primary=null, childCfg=null, childPointId=null;
 let sheet=null, childSheet=null, page=0, pageSize=200, sort='', dir='asc', fkCache={};
@@ -116,12 +116,16 @@ function guard(){ const dirty=(sheet&&sheet.dirtyCount())||(childSheet&&childShe
 function setCnt(){ $('#cnt').textContent = sheet&&sheet.dirtyCount()? `(${sheet.dirtyCount()})`:''; }
 
 async function init(){
-  const docs = await jget('/api/admin/docs');
-  $('#tabs').innerHTML = docs.map(d=>`<div class="tab" data-doc="${d.id}">${d.title}</div>`).join('')
-    + `<div class="tab" data-raw="1">Все таблицы (админ)</div>`;
-  $('#tabs').querySelectorAll('.tab').forEach(t=>t.onclick=()=>{ if(!guard())return;
-    if(t.dataset.raw) openRaw(); else openDoc(t.dataset.doc, t); });
-  openDoc(docs[0].id, $('#tabs .tab'));
+  try {
+    const docs = await jget('/api/admin/docs');
+    $('#tabs').innerHTML = docs.map(d=>`<div class="tab" data-doc="${d.id}">${d.title}</div>`).join('')
+      + `<div class="tab" data-raw="1">Все таблицы (админ)</div>`;
+    $('#tabs').querySelectorAll('.tab').forEach(t=>t.onclick=()=>{ if(!guard())return;
+      if(t.dataset.raw) openRaw(); else openDoc(t.dataset.doc, t); });
+    openDoc(docs[0].id, $('#tabs .tab'));
+  } catch(e){
+    $('#tabs').innerHTML = `<div style="color:var(--danger,#c0392b);padding:8px 0">Не удалось загрузить редактор (${e.message}).<br>Обновите страницу; если не помогло — перезапустите сервер (обновилась версия кода).</div>`;
+  }
 }
 function markTab(el){ $('#tabs').querySelectorAll('.tab').forEach(x=>x.classList.remove('on')); if(el) el.classList.add('on'); }
 
