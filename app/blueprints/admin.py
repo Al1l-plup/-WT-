@@ -243,10 +243,13 @@ def _doc_read(db, cfg, args):
     base = cfg['base']
 
     q = args.get('q', '').strip()
-    where, params = '', []
+    conds, params = [], []
+    if cfg.get('where'):
+        conds.append(f"({cfg['where']})")
     if q:
-        where = ' WHERE (' + ' OR '.join(f'({c["expr"]}) || \'\' LIKE ?' for c in cols) + ')'
-        params = [f'%{q}%'] * len(cols)
+        conds.append('(' + ' OR '.join(f'({c["expr"]}) || \'\' LIKE ?' for c in cols) + ')')
+        params += [f'%{q}%'] * len(cols)
+    where = ' WHERE ' + ' AND '.join(conds) if conds else ''
 
     sort = args.get('sort', '').strip()
     direction = 'DESC' if args.get('dir', 'asc').lower() == 'desc' else 'ASC'

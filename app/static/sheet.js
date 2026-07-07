@@ -82,7 +82,13 @@ class Sheet {
     for (const c of this.cols)
       h += `<th data-c-name="${c.name}">${this._esc(c.label)}${c.fk ? ' 🔗' : ''}${c.pk ? ' 🔑' : ''}${!c.editable ? ' 🔒' : ''}</th>`;
     h += '<th class="rownum"></th></tr><tr class="filter"><th></th>';
-    for (const c of this.cols) h += `<th><input data-f="${c.name}" placeholder="фильтр"></th>`;
+    this.cols.forEach((c, ci) => {
+      // выпадающий список уникальных значений колонки (можно выбрать или ввести по названию)
+      const vals = [...new Set(this.rows.map(r => this._dispRaw(r, c)).filter(v => v !== ''))].sort().slice(0, 1000);
+      const dl = `dl_${ci}_${Math.random().toString(36).slice(2, 7)}`;
+      h += `<th><input data-f="${c.name}" list="${dl}" placeholder="фильтр ▾">` +
+           `<datalist id="${dl}">${vals.map(v => `<option value="${this._esc(v)}"></option>`).join('')}</datalist></th>`;
+    });
     h += '<th></th></tr></thead><tbody>';
     this.rows.forEach((row, r) => {
       h += `<tr data-r="${r}" class="${this.state[r]}"><td class="rownum">${r + 1}</td>`;
@@ -95,11 +101,12 @@ class Sheet {
     this._applyFilter(); this._paint();
   }
   _esc(v) { return v === null || v === undefined ? '' : String(v).replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m])); }
-  _disp(row, c) {
+  _dispRaw(row, c) {
     let v = row[c.name];
     if (c.fk && this.fkMaps[c.name] && this.fkMaps[c.name].has(String(v))) v = this.fkMaps[c.name].get(String(v));
-    return this._esc(v);
+    return v === null || v === undefined ? '' : String(v);
   }
+  _disp(row, c) { return this._esc(this._dispRaw(row, c)); }
   _dirtyCell(r, ci) {
     if (this.state[r] !== 'clean') return false;
     const n = this.cols[ci].name;
@@ -239,7 +246,7 @@ class Sheet {
     this.el.querySelectorAll('input[data-f]').forEach(i => { if (i.value.trim()) filters[i.dataset.f] = i.value.trim().toLowerCase(); });
     this.el.querySelectorAll('tbody tr').forEach(tr => {
       const r = +tr.dataset.r;
-      const show = Object.entries(filters).every(([col, val]) => this._disp(this.rows[r], this.cols.find(c => c.name === col)).toLowerCase().includes(val));
+      const show = Object.entries(filters).every(([col, val]) => this._dispRaw(this.rows[r], this.cols.find(c => c.name === col)).toLowerCase().includes(val));
       tr.style.display = show ? '' : 'none';
     });
   }

@@ -54,6 +54,11 @@ HEADER_CHECK = {7: 'ПИСТОЛЕТА', 9: 'ТОЧКИ', 13: 'МАТЕР', 49: 
 # ('CS655' в имени содержит подстроку 'CS65'); P01 в БД имеет код 'P01G'.
 FILE_TOKENS = [('A13T', 'A13T'), ('A01', 'A01'), ('P01', 'P01G'), ('CS55', 'CS55'), ('CS65', 'CS65')]
 
+# Некорректные файлы — пропускаем при импорте. Файл changan «cs65» оказался полной копией «cs55»
+# (дубликат), поэтому импортируем только cs55. Точный маркер 'cs65.xlsm' не задевает 'cs55.xlsm'
+# и платформенный код 'CS655'. Удалите отсюда, когда появится корректный отдельный файл cs65.
+SKIP_FILES = ['cs65.xlsm']
+
 WELD_POINT_COLS = [
     'model_id', 'model_variant', 'source_file', 'sh_num', 'zone', 'wb_station', 'process_no',
     'operation_name', 'stage_no', 'welding_type', 'side', 'joint_type', 'gun_type', 'gun_mntc',
@@ -193,6 +198,10 @@ def ensure_cs65(db, apply: bool) -> int | None:
 def run(directory: str, db_path: str, apply: bool) -> None:
     files = sorted(glob.glob(os.path.join(directory, '*.xlsm')) +
                    glob.glob(os.path.join(directory, '*.xlsx')))
+    skipped = [f for f in files if any(s.upper() in os.path.basename(f).upper() for s in SKIP_FILES)]
+    files = [f for f in files if f not in skipped]
+    for f in skipped:
+        print(f'ПРОПУЩЕН (некорректный): {os.path.basename(f)}')
     if not files:
         sys.exit(f'Нет .xlsm/.xlsx в {directory}')
 

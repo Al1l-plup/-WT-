@@ -4,7 +4,8 @@ import sqlite3
 
 def test_docs_list(client):
     ids = [d['id'] for d in client.get('/api/admin/docs').get_json()]
-    assert ids == ['equipment', 'weld_balance', 'parameters']
+    assert ids == ['equipment', 'weld_balance_a01', 'weld_balance_p01',
+                   'weld_balance_a13t', 'weld_balance_cs55', 'parameters']
 
 
 def test_equipment_linked_edit(client, app):
@@ -44,22 +45,34 @@ def test_parameters_doc_edit(client, app):
 
 def test_weld_balance_doc_and_child(client, app):
     db = sqlite3.connect(app.config['DB_PATH'])
-    db.execute("INSERT INTO weld_point (id, source_file, spot_number) VALUES (1,'x','5')")
+    # source_file с 'A13T' попадает в документ weld_balance_a13t
+    db.execute("INSERT INTO weld_point (id, source_file, spot_number) VALUES (1,'Weld_Balance_Table_A13T test','5')")
     db.execute("INSERT INTO weld_point_part (weld_point_id, layer_no, part_name) VALUES (1,1,'A')")
     db.execute("INSERT INTO weld_point_part (weld_point_id, layer_no, part_name) VALUES (1,2,'B')")
     db.commit()
 
-    wb = client.get('/api/admin/doc/weld_balance?limit=10').get_json()
+    wb = client.get('/api/admin/doc/weld_balance_a13t?limit=10').get_json()
     assert wb['child']['table'] == 'weld_point_part' and wb['child']['fk_col'] == 'weld_point_id'
     assert any(c['label'] == '№ точки' for c in wb['columns'])
+    assert any(r['__pk_weld_point'] == 1 for r in wb['rows'])  # фильтр по модели пропустил A13T-строку
 
-    res = client.post('/api/admin/doc/weld_balance/batch', json={'changes': [
+    res = client.post('/api/admin/doc/weld_balance_a13t/batch', json={'changes': [
         {'op': 'update', 'field': 'zone', 'value': 'ZONE1', 'row_pks': {'weld_point': 1}}]}).get_json()
     assert res['status'] == 'success'
     assert db.execute("SELECT zone FROM weld_point WHERE id=1").fetchone()[0] == 'ZONE1'
 
     parts = client.get('/api/admin/table/weld_point_part?filter_col=weld_point_id&filter_val=1').get_json()
     assert parts['total'] == 2
+
+
+def test_weld_balance_model_filter(client, app):
+    db = sqlite3.connect(app.config['DB_PATH'])
+    db.execute("INSERT INTO weld_point (id, source_file, zone) VALUES (10,'Weld_Balance_Table_A01 julion','a01')")
+    db.execute("INSERT INTO weld_point (id, source_file, zone) VALUES (11,'Weld_Balance_Table_P01 tank','p01')")
+    db.commit()
+    a01 = client.get('/api/admin/doc/weld_balance_a01?limit=100').get_json()['rows']
+    ids = {r['__pk_weld_point'] for r in a01}
+    assert 10 in ids and 11 not in ids  # A01-документ не содержит P01-строк
 
 
 def test_unknown_doc(client):
