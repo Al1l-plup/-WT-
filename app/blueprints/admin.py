@@ -81,7 +81,7 @@ def read_table(name):
         return jsonify({'status': 'error', 'message': 'Таблица недоступна'}), 404
     pk, cols = meta
     fks = _fk_map(db, name)
-    limit = min(int(request.args.get('limit', DEFAULT_LIMIT)), 1000)
+    limit = min(int(request.args.get('limit', DEFAULT_LIMIT)), 100000)
     offset = int(request.args.get('offset', 0))
     q = request.args.get('q', '').strip()
     sort = request.args.get('sort', '').strip()
@@ -256,7 +256,7 @@ def _doc_read(db, cfg, args):
     sort_expr = next((c['expr'] for c in cols if c['field'] == sort), None)
     order = f' ORDER BY {sort_expr} {direction}' if sort_expr else f' ORDER BY {cfg["order"]}'
 
-    limit = min(int(args.get('limit', 200)), 1000)
+    limit = min(int(args.get('limit', 200)), 100000)
     offset = int(args.get('offset', 0))
     total = db.execute(f'SELECT COUNT(*) {base}{where}', params).fetchone()[0]
     rows = db.execute(f'SELECT {", ".join(pk_sel + col_sel)} {base}{where}{order} LIMIT ? OFFSET ?',

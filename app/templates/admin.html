@@ -28,6 +28,9 @@
     table.sheet thead tr.filter th{top:27px;padding:2px}
     table.sheet thead tr.filter input{width:100%;box-sizing:border-box;padding:2px 5px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:inherit;font-size:11px}
     table.sheet td.rownum,table.sheet th.rownum{position:sticky;left:0;background:var(--card);color:var(--muted,#888);text-align:center;z-index:1;cursor:default}
+    /* Виртуальный скролл: фиксированная высота строки */
+    table.sheet tbody tr{height:23px}
+    table.sheet tbody td{height:23px;box-sizing:border-box}
     table.sheet td{cursor:cell}
     table.sheet td.ro{opacity:.6;cursor:default}
     table.sheet td.sel{background:color-mix(in srgb,var(--accent) 18%,transparent)}
@@ -102,7 +105,8 @@ const hdr = () => ({'Content-Type':'application/json','X-Author':author.value||'
 const jget = async u => { const r = await fetch(u); if(!r.ok) throw new Error(`${u} → HTTP ${r.status}`); return r.json(); };
 
 let mode='doc', cur=null, primary=null, childCfg=null, childPointId=null;
-let sheet=null, childSheet=null, page=0, pageSize=200, sort='', dir='asc', fkCache={};
+// грузим таблицу целиком (не выборку) — фильтр/выпадающий список работают по всем строкам
+let sheet=null, childSheet=null, page=0, pageSize=100000, sort='', dir='asc', fkCache={};
 
 async function fkLoader(tbl){
   if(!fkCache[tbl]){
