@@ -40,6 +40,14 @@
     table.sheet tr.deleted td{text-decoration:line-through;opacity:.5}
     table.sheet input.celledit,table.sheet select.celledit{width:100%;box-sizing:border-box;border:none;background:var(--bg);color:inherit;font-size:12px;padding:2px 4px}
     .delrow{border:none;background:none;cursor:pointer;color:var(--muted,#888)}
+    /* Excel-операции */
+    table.sheet tr.cut td{outline:1px dashed var(--accent);outline-offset:-1px;opacity:.75}
+    table.sheet td.mergedown{border-bottom-color:transparent}
+    #sheetmenu{position:fixed;z-index:99;min-width:240px;background:var(--card);border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.25);padding:4px;font-size:13px}
+    #sheetmenu .mi{padding:6px 12px;border-radius:5px;cursor:pointer;white-space:nowrap}
+    #sheetmenu .mi:hover{background:var(--accent);color:#fff}
+    #sheetmenu hr{border:none;border-top:1px solid var(--border);margin:4px 0}
+    .bar button:disabled{opacity:.4;cursor:default}
     #childWrap{margin-top:12px;display:none}
     h3.sub{margin:0 0 6px;font-size:14px}
   </style>
@@ -62,7 +70,7 @@
 
 <div class="page">
   <div class="page-head" style="display:flex;justify-content:space-between;align-items:center">
-    <div><h1>Редактор данных</h1><p class="badge">Правьте ячейки как в Excel · стрелки/Tab/Enter · Ctrl+C/Ctrl+V · 🔒 — только чтение · «Сохранить» пишет пакет в журнал (откат на «Журнал»).</p></div>
+    <div><h1>Редактор данных</h1><p class="badge">Как в Excel: правка в ячейках · <b>правая кнопка</b> — вставка/удаление/перемещение строк · Ctrl+C/V копипаст · Ctrl+Z/Y отмена/повтор · Ctrl+D заливка вниз · Ctrl+Enter — залить выделение · Alt+↑/↓ сдвиг строк · клик по № — выделить строку · 🔒 только чтение · «Сохранить» пишет пакет в Журнал (там же откат).</p></div>
     <div>Автор: <input id="author" placeholder="имя" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit"></div>
   </div>
 
@@ -75,6 +83,9 @@
         <strong id="title"></strong>
         <input id="q" placeholder="поиск…" style="flex:1;min-width:120px">
         <button id="addBtn">+ строка</button>
+        <button id="undoBtn" title="Отменить (Ctrl+Z)" disabled>↶</button>
+        <button id="redoBtn" title="Вернуть (Ctrl+Y)" disabled>↷</button>
+        <label class="badge" style="cursor:pointer"><input type="checkbox" id="mergeChk"> объединять одинаковые</label>
         <button id="saveBtn" class="primary">Сохранить <span id="cnt"></span></button>
         <button id="cancelBtn">Отменить</button>
         <span class="badge" id="pageInfo"></span>
@@ -101,7 +112,7 @@ const $ = s => document.querySelector(s);
 const author = $('#author');
 author.value = localStorage.getItem('wt-author') || '';
 author.oninput = () => localStorage.setItem('wt-author', author.value);
-const hdr = () => ({'Content-Type':'application/json','X-Author':author.value||'anonymous'});
+const hdr = () => ({'Content-Type':'application/json','X-Author':encodeURIComponent(author.value||'anonymous')});
 const jget = async u => { const r = await fetch(u); if(!r.ok) throw new Error(`${u} → HTTP ${r.status}`); return r.json(); };
 
 let mode='doc', cur=null, primary=null, childCfg=null, childPointId=null;
@@ -118,6 +129,11 @@ async function fkLoader(tbl){
 }
 function guard(){ const dirty=(sheet&&sheet.dirtyCount())||(childSheet&&childSheet.dirtyCount()); return !dirty || confirm('Есть несохранённые изменения. Отменить их?'); }
 function setCnt(){ $('#cnt').textContent = sheet&&sheet.dirtyCount()? `(${sheet.dirtyCount()})`:''; }
+function wireSheet(s){
+  s.onUndoState = (u,r)=>{ $('#undoBtn').disabled=!u; $('#redoBtn').disabled=!r; };
+  $('#undoBtn').disabled = true; $('#redoBtn').disabled = true;
+  s.setMergeView($('#mergeChk').checked);
+}
 
 async function init(){
   try {
@@ -150,6 +166,7 @@ async function loadDoc(){
   sheet.onChange=setCnt;
   sheet.onSort=col=>{ if(!guard())return; if(sort===col){dir=dir==='asc'?'desc':'asc';}else{sort=col;dir='asc';} page=0; loadDoc(); };
   sheet.onSelect = childCfg ? (r,row)=>selectPoint(row) : null;
+  wireSheet(sheet);
   $('#title').textContent=d.title;
   pageBar(d);
   // под-таблица деталей
@@ -208,6 +225,7 @@ async function loadRaw(){
   sheet = new Sheet($('#sheet'), {pk:d.pk, columns:d.columns.map(c=>({name:c.name,label:c.name,pk:c.pk,fk:c.fk?c.fk.table:null})), rows:d.rows, fkLoader, fkMaps});
   sheet.onChange=setCnt;
   sheet.onSort=col=>{ if(!guard())return; if(sort===col){dir=dir==='asc'?'desc':'asc';}else{sort=col;dir='asc';} page=0; loadRaw(); };
+  wireSheet(sheet);
   $('#title').textContent=cur; pageBar(d);
 }
 async function saveRaw(){
@@ -221,6 +239,9 @@ async function saveRaw(){
 function pageBar(d){ const from=d.total?page*pageSize+1:0, to=Math.min((page+1)*pageSize,d.total); $('#pageInfo').textContent=`${from}–${to} из ${d.total}`; $('#cnt').textContent=''; }
 const reload = ()=> mode==='doc'?loadDoc():loadRaw();
 $('#addBtn').onclick=()=>sheet&&sheet.addRow();
+$('#undoBtn').onclick=()=>sheet&&sheet.undo();
+$('#redoBtn').onclick=()=>sheet&&sheet.redo();
+$('#mergeChk').onchange=e=>{ sheet&&sheet.setMergeView(e.target.checked); childSheet&&childSheet.setMergeView(e.target.checked); };
 $('#saveBtn').onclick=()=> mode==='doc'?saveDoc():saveRaw();
 $('#cancelBtn').onclick=()=>{ if(guard()) reload(); };
 $('#prev').onclick=()=>{ if(page>0&&guard()){page--; reload();} };

@@ -77,3 +77,18 @@ def test_weld_balance_model_filter(client, app):
 
 def test_unknown_doc(client):
     assert client.get('/api/admin/doc/nope').status_code == 404
+
+
+def test_field_labels(client):
+    d = client.get('/api/admin/field-labels').get_json()
+    assert d['fields']['weld_point']['zone'] == 'Зона'
+    assert d['fields']['gun']['gun_type'] == 'Тип клещей'
+    assert d['tables']['weld_point'] == 'Weld Balance'
+
+
+def test_history_author_filter(client):
+    client.put('/api/admin/table/gun/1', json={'values': {'gun_type': 'AF1'}, 'author': 'филтр-тест'})
+    hits = client.get('/api/admin/history?author=филтр-тест').get_json()
+    assert hits['total'] >= 1 and all(e['author'] == 'филтр-тест' for e in hits['entries'])
+    miss = client.get('/api/admin/history?author=нет-такого').get_json()
+    assert miss['total'] == 0

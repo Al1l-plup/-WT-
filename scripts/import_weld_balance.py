@@ -65,7 +65,7 @@ WELD_POINT_COLS = [
     'gun_id', 'station_id', 'spot_number', 'spot_id', 'spot_number_op', 'std_thickness', 'coating',
     'lme_hold', 'nugget', 'check_mark', 'important', 'chisel_access', 'spec', 'change_index',
     'wp_stack_info', 'variant_1', 'variant_2', 'variant_3', 'variant_4', 'coord_x', 'coord_y',
-    'coord_z', 'raw_extra',
+    'coord_z', 'raw_extra', 'row_order',
 ]
 
 
@@ -140,6 +140,7 @@ def parse_file(path: str) -> dict:
             if val is not None:
                 extra[keyname] = val
         rec['raw_extra'] = json.dumps(extra, ensure_ascii=False) if extra else None
+        rec['row_order'] = float(len(rows) + 1)  # порядок строки листа Excel
         rows.append(rec)
 
     wb.close()

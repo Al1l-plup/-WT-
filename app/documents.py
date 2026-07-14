@@ -58,27 +58,34 @@ _WB_COLUMNS = [
     {'label': 'Служебн. 1', 'field': 'x_m1', 'expr': "json_extract(wp.raw_extra,'$.mark1')", 'edit': False},
     {'label': 'Служебн. 2', 'field': 'x_m2', 'expr': "json_extract(wp.raw_extra,'$.mark2')", 'edit': False},
     {'label': 'Служебн. 3', 'field': 'x_m3', 'expr': "json_extract(wp.raw_extra,'$.mark3')", 'edit': False},
+    # Порядок строки в документе (как в листе Excel). Скрыт в UI, но редактируем —
+    # вставка/перемещение строк в гриде меняет его через обычный batch.
+    {'label': '#', 'field': 'row_order', 'expr': 'wp.row_order', 'edit': True,
+     'table': 'weld_point', 'col': 'row_order', 'hidden': True},
 ]
 
 # Отдельный Weld Balance на каждую базовую модель (фильтр по файлу-источнику).
 # Внутри A01 — модификации 2WD/4WD, внутри P01 — ToD/NOT-ToD (столбцы «Вариант 1-4»).
+# Третий элемент — source_file для строк, СОЗДАННЫХ в редакторе (попадает под фильтр документа).
 _WB_MODELS = [
-    ('weld_balance_a01', 'WB · A01 (Jolion 2WD/4WD)', "wp.source_file LIKE '%A01%'"),
-    ('weld_balance_p01', 'WB · P01 (Tank ToD)', "wp.source_file LIKE '%P01%'"),
-    ('weld_balance_a13t', 'WB · A13T (Tiggo2)', "wp.source_file LIKE '%A13T%'"),
-    ('weld_balance_cs55', 'WB · CS55 (Changan)', "wp.source_file LIKE '%cs55%'"),
+    ('weld_balance_a01', 'WB · A01 (Jolion 2WD/4WD)', "wp.source_file LIKE '%A01%'", 'manual A01'),
+    ('weld_balance_p01', 'WB · P01 (Tank ToD)', "wp.source_file LIKE '%P01%'", 'manual P01'),
+    ('weld_balance_a13t', 'WB · A13T (Tiggo2)', "wp.source_file LIKE '%A13T%'", 'manual A13T'),
+    ('weld_balance_cs55', 'WB · CS55 (Changan)', "wp.source_file LIKE '%cs55%'", 'manual cs55'),
 ]
 
 
-def _wb_doc(title, where):
+def _wb_doc(title, where, manual_src):
     return {
         'title': title,
         'base': 'FROM weld_point wp LEFT JOIN model m ON wp.model_id=m.UniqueID',
         'where': where,
         'pks': {'weld_point': 'wp.id'},
         'primary': 'weld_point',
-        'order': 'wp.id',
+        'order': 'wp.row_order, wp.id',
         'child': {'table': 'weld_point_part', 'fk_col': 'weld_point_id', 'title': 'Детали точки'},
+        # значения по умолчанию для строк, создаваемых через редактор (NOT NULL + фильтр документа)
+        'insert_defaults': {'source_file': manual_src},
         'columns': _WB_COLUMNS,
     }
 
@@ -108,8 +115,8 @@ DOCUMENTS['equipment'] = {
 }
 
 # ── Weld Balance — 4 документа по моделям ──
-for _did, _title, _where in _WB_MODELS:
-    DOCUMENTS[_did] = _wb_doc(_title, _where)
+for _did, _title, _where, _src in _WB_MODELS:
+    DOCUMENTS[_did] = _wb_doc(_title, _where, _src)
 
 # ── Параметры сварки (программы) ──
 DOCUMENTS['parameters'] = {

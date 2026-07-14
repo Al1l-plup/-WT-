@@ -7,19 +7,26 @@
   <script src="/static/theme.js"></script>
   <link rel="stylesheet" href="/static/style.css">
   <style>
-    table.grid{width:100%;border-collapse:collapse;font-size:12px}
-    table.grid th,table.grid td{border:1px solid var(--border);padding:4px 7px;text-align:left;vertical-align:top}
-    table.grid th{background:var(--card);position:sticky;top:0}
-    .gridwrap{max-height:60vh;overflow:auto;border:1px solid var(--border);border-radius:8px}
-    .rowbtn{cursor:pointer;padding:2px 8px;border:1px solid var(--border);border-radius:5px;background:var(--card);font-size:12px}
-    .primary{background:var(--accent);color:#fff;border:none;padding:7px 14px;border-radius:6px;cursor:pointer}
     .bar{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
     .bar input,.bar select{padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit}
-    .op{padding:1px 6px;border-radius:4px;font-size:11px}
-    .op.INSERT{background:#2e7d32;color:#fff}.op.UPDATE{background:#1565c0;color:#fff}.op.DELETE{background:#c0392b;color:#fff}
+    .rowbtn{cursor:pointer;padding:3px 10px;border:1px solid var(--border);border-radius:6px;background:var(--card);font-size:12px}
+    .primary{background:var(--accent);color:#fff;border:none;padding:7px 14px;border-radius:6px;cursor:pointer}
     .card{border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:16px}
-    code{font-size:11px;opacity:.8;white-space:pre-wrap;word-break:break-all}
-    .muted{opacity:.6;font-size:12px}
+    .muted{opacity:.65;font-size:12px}
+    /* карточка пакета изменений */
+    .batch{border:1px solid var(--border);border-radius:10px;margin-bottom:10px;overflow:hidden}
+    .batch>header{display:flex;gap:10px;align-items:center;padding:8px 12px;background:var(--card);flex-wrap:wrap}
+    .batch>header .who{font-weight:600}
+    .batch .op{padding:1px 7px;border-radius:4px;font-size:11px;color:#fff}
+    .op.INSERT{background:#2e7d32}.op.UPDATE{background:#1565c0}.op.DELETE{background:#c0392b}
+    .entry{padding:7px 12px;border-top:1px solid var(--border);font-size:13px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+    .entry .what{flex:1;min-width:260px}
+    .chg{display:inline-block;margin:1px 10px 1px 0}
+    .chg .fld{opacity:.75}
+    .old{color:#c0392b;text-decoration:line-through;margin:0 4px}
+    .new{color:#2e7d32;font-weight:600;margin-left:4px}
+    .kv{opacity:.85}
+    .revmark{opacity:.6;font-size:11px}
   </style>
 </head>
 <body>
@@ -39,7 +46,7 @@
 </nav>
 
 <div class="page">
-  <div class="page-head"><h1>Журнал версий</h1><p class="muted">Все изменения БД. Любую правку можно откатить; точки восстановления возвращают состояние целиком.</p></div>
+  <div class="page-head"><h1>Журнал изменений</h1><p class="muted">Кто, когда и что поменял. Любую правку или целый пакет можно откатить; точка восстановления возвращает всю базу к моменту.</p></div>
 
   <div class="card">
     <strong>Точки восстановления</strong>
@@ -51,48 +58,96 @@
   </div>
 
   <div class="bar">
-    <label>Таблица: <select id="fltTable"><option value="">все</option></select></label>
+    <select id="fltTable"><option value="">— все документы —</option></select>
+    <input id="fltAuthor" list="dlAuthors" placeholder="автор">
+    <datalist id="dlAuthors"></datalist>
+    <label class="muted">с <input type="date" id="fltFrom"></label>
+    <label class="muted">по <input type="date" id="fltTo"></label>
     <button class="rowbtn" id="refresh">Обновить</button>
     <span class="muted" id="count"></span>
   </div>
-  <div class="gridwrap"><table class="grid" id="grid"></table></div>
+  <div id="feed"></div>
 </div>
 
 <script>
 const $ = s => document.querySelector(s);
 const author = () => localStorage.getItem('wt-author') || 'anonymous';
-const hdr = () => ({'Content-Type':'application/json','X-Author':author()});
-function esc(v){ return v===null||v===undefined ? '' : String(v).replace(/[&<>]/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); }
+const hdr = () => ({'Content-Type':'application/json','X-Author':encodeURIComponent(author())});
+const esc = v => v===null||v===undefined ? '' : String(v).replace(/[&<>]/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));
+let LBL = {fields:{}, tables:{}};
 
+const tableTitle = t => LBL.tables[t] || t;
+const fieldLabel = (t, f) => (LBL.fields[t]||{})[f] || f;
+const fmtVal = v => (v===null||v===undefined||v==='') ? '—' : String(v);
+// служебные поля не показываем в диффе создания/удаления
+const SKIP = new Set(['raw_extra','row_order']);
+
+function diffHtml(e){
+  const before = e.before_json ? JSON.parse(e.before_json) : null;
+  const after  = e.after_json  ? JSON.parse(e.after_json)  : null;
+  if(e.op === 'UPDATE'){
+    const parts = [];
+    for(const k in after){
+      if(String(before?.[k] ?? '') === String(after[k] ?? '')) continue;
+      const lbl = k==='row_order' ? 'порядок строки' : fieldLabel(e.table_name, k);
+      parts.push(`<span class="chg"><span class="fld">${esc(lbl)}:</span><span class="old">${esc(fmtVal(before?.[k]))}</span>→<span class="new">${esc(fmtVal(after[k]))}</span></span>`);
+    }
+    return parts.length ? parts.join('') : '<span class="muted">без изменения значений</span>';
+  }
+  const row = after || before || {};
+  const kv = [];
+  for(const k in row){
+    if(SKIP.has(k) || row[k]===null || row[k]==='') continue;
+    kv.push(`<span class="chg kv"><span class="fld">${esc(fieldLabel(e.table_name,k))}:</span> ${esc(String(row[k]).slice(0,40))}</span>`);
+    if(kv.length >= 4) break;
+  }
+  const what = e.op==='INSERT' ? 'создана строка' : 'удалена строка';
+  return `<span class="muted">${what} · </span>` + (kv.join('') || '<span class="muted">пустая</span>');
+}
+
+async function loadLabels(){ LBL = await (await fetch('/api/admin/field-labels')).json(); }
 async function loadTables(){
   const t = await (await fetch('/api/admin/tables')).json();
-  $('#fltTable').innerHTML = '<option value="">все</option>' + t.map(x=>`<option>${x.name}</option>`).join('');
+  $('#fltTable').innerHTML = '<option value="">— все документы —</option>' +
+    t.map(x=>`<option value="${x.name}">${esc(tableTitle(x.name))}</option>`).join('');
 }
+function fmtTs(ts){ return (ts||'').replace('T',' ').slice(0,16); }
+
 async function loadHistory(){
-  const tbl = $('#fltTable').value;
-  const d = await (await fetch(`/api/admin/history?limit=300&table=${encodeURIComponent(tbl)}`)).json();
+  const p = new URLSearchParams({limit:300, table:$('#fltTable').value, author:$('#fltAuthor').value.trim(),
+                                 date_from:$('#fltFrom').value, date_to:$('#fltTo').value});
+  const d = await (await fetch('/api/admin/history?'+p)).json();
   $('#count').textContent = `${d.entries.length} из ${d.total}`;
-  // группируем по batch_id (записи уже по убыванию id)
+  // авторы в datalist
+  const authors = [...new Set(d.entries.map(e=>e.author).filter(Boolean))];
+  $('#dlAuthors').innerHTML = authors.map(a=>`<option value="${esc(a)}"></option>`).join('');
+  // группировка по batch_id
   const groups = new Map();
-  for(const e of d.entries){ const k=e.batch_id||('single-'+e.id); if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(e); }
-  let h = '<thead><tr><th>#</th><th>время</th><th>таблица</th><th>PK</th><th>оп.</th><th>было→стало</th><th>автор</th><th></th></tr></thead><tbody>';
+  for(const e of d.entries){ const k = e.batch_id || ('single-'+e.id); if(!groups.has(k)) groups.set(k, []); groups.get(k).push(e); }
+  let h = '';
   for(const [bid, es] of groups){
-    if(es.length>1 && !bid.startsWith('single-')){
-      h += `<tr style="background:var(--card)"><td colspan="8"><strong>Пакет · ${es.length} изм.</strong> `+
-        `<span class="muted">${esc(es[0].ts)} · ${esc(es[0].author)}</span> `+
-        `<button class="rowbtn" data-batch="${bid}">Откатить пакет</button></td></tr>`;
-    }
+    const first = es[0];
+    const tbls = [...new Set(es.map(x=>tableTitle(x.table_name)))].join(', ');
+    const isBatch = es.length > 1 && !bid.startsWith('single-');
+    h += `<div class="batch"><header>` +
+      `<span class="who">${esc(first.author || '—')}</span>` +
+      `<span class="muted">${fmtTs(first.ts)}</span>` +
+      `<span>${esc(tbls)}</span>` +
+      `<span class="muted">${es.length} изм.${first.is_revert ? ' · ↩ откат' : ''}</span>` +
+      (isBatch ? `<button class="rowbtn" data-batch="${bid}" style="margin-left:auto">Откатить пакет</button>` : '') +
+      `</header>`;
     for(const e of es){
-      h += `<tr><td>${e.id}</td><td>${esc(e.ts)}</td><td>${esc(e.table_name)}</td><td>${esc(e.row_pk)}</td>`+
-        `<td><span class="op ${e.op}">${e.op}</span>${e.is_revert?' ↩':''}</td>`+
-        `<td><code>${esc((e.before_json||'—'))}\n${esc((e.after_json||'—'))}</code></td>`+
-        `<td>${esc(e.author)}</td>`+
-        `<td><button class="rowbtn" data-id="${e.id}">Откатить</button></td></tr>`;
+      h += `<div class="entry">` +
+        `<span class="op ${e.op}">${e.op==='UPDATE'?'изменение':e.op==='INSERT'?'создание':'удаление'}</span>` +
+        `<span class="muted">${esc(tableTitle(e.table_name))} #${esc(e.row_pk)}</span>` +
+        `<span class="what">${diffHtml(e)}</span>` +
+        `<button class="rowbtn" data-id="${e.id}">Откатить</button></div>`;
     }
+    h += '</div>';
   }
-  $('#grid').innerHTML = h + '</tbody>';
-  $('#grid').querySelectorAll('button[data-id]').forEach(b => b.onclick = () => revert(b.dataset.id));
-  $('#grid').querySelectorAll('button[data-batch]').forEach(b => b.onclick = () => revertBatch(b.dataset.batch));
+  $('#feed').innerHTML = h || '<p class="muted">Записей нет — измените фильтры или сделайте правку в Редакторе.</p>';
+  $('#feed').querySelectorAll('button[data-id]').forEach(b => b.onclick = () => revert(b.dataset.id));
+  $('#feed').querySelectorAll('button[data-batch]').forEach(b => b.onclick = () => revertBatch(b.dataset.batch));
 }
 async function revert(id){
   if(!confirm('Откатить это изменение?')) return;
@@ -108,7 +163,7 @@ async function loadRP(){
   const rp = await (await fetch('/api/admin/restore-points')).json();
   $('#rpList').innerHTML = rp.length ? rp.map(p =>
     `<div style="display:flex;gap:10px;align-items:center;padding:4px 0">
-       <strong>${esc(p.name)}</strong><span class="muted">${esc(p.created_at)} · ${esc(p.author)}</span>
+       <strong>${esc(p.name)}</strong><span class="muted">${fmtTs(p.created_at)} · ${esc(p.author)}</span>
        <button class="rowbtn" data-rp="${p.id}">Откатить к точке</button></div>`).join('')
     : '<span class="muted">Пока нет точек восстановления.</span>';
   $('#rpList').querySelectorAll('button[data-rp]').forEach(b => b.onclick = () => rollback(b.dataset.rp));
@@ -125,7 +180,10 @@ $('#rpCreate').onclick = async () => {
 };
 $('#refresh').onclick = loadHistory;
 $('#fltTable').onchange = loadHistory;
-loadTables(); loadHistory(); loadRP();
+$('#fltAuthor').onchange = loadHistory;
+$('#fltFrom').onchange = loadHistory;
+$('#fltTo').onchange = loadHistory;
+(async () => { await loadLabels(); await loadTables(); loadHistory(); loadRP(); })();
 </script>
 </body>
 </html>

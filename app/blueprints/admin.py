@@ -32,8 +32,11 @@ def _q(ident: str) -> str:
 
 
 def _author() -> str:
+    from urllib.parse import unquote
     data = request.get_json(silent=True) or {}
-    return request.headers.get('X-Author') or data.get('author') or 'anonymous'
+    hdr = request.headers.get('X-Author')
+    # фронт кодирует кириллицу через encodeURIComponent (HTTP-заголовки — только latin-1)
+    return (unquote(hdr) if hdr else None) or data.get('author') or 'anonymous'
 
 
 def _require_table(db, name: str):
@@ -261,7 +264,8 @@ def _doc_read(db, cfg, args):
     total = db.execute(f'SELECT COUNT(*) {base}{where}', params).fetchone()[0]
     rows = db.execute(f'SELECT {", ".join(pk_sel + col_sel)} {base}{where}{order} LIMIT ? OFFSET ?',
                       params + [limit, offset]).fetchall()
-    columns = [{'field': c['field'], 'label': c['label'], 'editable': bool(c.get('edit')), 'fk': c.get('fk')}
+    columns = [{'field': c['field'], 'label': c['label'], 'editable': bool(c.get('edit')),
+                'fk': c.get('fk'), 'hidden': bool(c.get('hidden'))}
                for c in cols]
     return {'title': cfg['title'], 'columns': columns, 'rows': [dict(r) for r in rows],
             'total': total, 'primary': cfg['primary'], 'child': cfg.get('child'),
@@ -301,6 +305,9 @@ def batch_doc(doc_id):
             elif op == 'insert':
                 vals = {editable[f]['col']: v for f, v in (ch.get('values') or {}).items()
                         if f in editable and editable[f]['table'] == primary}
+                # обязательные значения по умолчанию (напр. source_file WB-документа)
+                for k, v in (cfg.get('insert_defaults') or {}).items():
+                    vals.setdefault(k, v)
                 keys = list(vals)
                 if keys:
                     db.execute(f'INSERT INTO {_q(primary)} ({", ".join(_q(k) for k in keys)}) '
@@ -323,16 +330,43 @@ def batch_doc(doc_id):
 
 
 # ── журнал изменений ─────────────────────────────────────────────────────────
+# Русские названия таблиц для журнала (остальные показываются техническим именем).
+TABLE_TITLES = {
+    'weld_point': 'Weld Balance', 'weld_point_part': 'Детали точки', 'wb_material': 'Материалы',
+    'gun': 'Клещи', 'parameters': 'Параметры сварки', 'station': 'Станции', 'brand': 'Линии',
+    'model': 'Модели', 'spot': 'Точки', 'trans': 'Трансформаторы', 'worker': 'Сотрудники',
+    'transformer_station_assignment': 'Привязка станции', 'gun_transformer_assignment': 'Привязка клещей',
+    'welding_setup': 'Уставки (связки)', 'maintenance': 'Записи ТО', 'defects': 'Дефекты',
+    'maintenance_schedule': 'План ТО', 'maintenance_daily_task': 'Задачи ТО', 'defect_code': 'Коды дефектов',
+}
+
+
+@bp.route('/api/admin/field-labels')
+def field_labels():
+    """Русские метки полей (из конфигурации документов) + названия таблиц — для журнала."""
+    labels = {}
+    for cfg in DOCUMENTS.values():
+        for c in cfg['columns']:
+            if c.get('table') and c.get('col'):
+                labels.setdefault(c['table'], {})[c['col']] = c['label']
+    return jsonify({'fields': labels, 'tables': TABLE_TITLES})
+
+
 @bp.route('/api/admin/history')
 def history():
     db = get_db()
-    table = request.args.get('table', '').strip()
-    limit = min(int(request.args.get('limit', 100)), 500)
+    limit = min(int(request.args.get('limit', 100)), 1000)
     offset = int(request.args.get('offset', 0))
-    cond, params = '', []
-    if table:
-        cond = ' WHERE table_name=?'
-        params = [table]
+    conds, params = [], []
+    if request.args.get('table', '').strip():
+        conds.append('table_name=?'); params.append(request.args['table'].strip())
+    if request.args.get('author', '').strip():
+        conds.append('author LIKE ?'); params.append(f"%{request.args['author'].strip()}%")
+    if request.args.get('date_from', '').strip():
+        conds.append('ts >= ?'); params.append(request.args['date_from'].strip())
+    if request.args.get('date_to', '').strip():
+        conds.append('ts <= ?'); params.append(request.args['date_to'].strip() + ' 23:59:59')
+    cond = ' WHERE ' + ' AND '.join(conds) if conds else ''
     total = db.execute(f'SELECT COUNT(*) FROM change_log{cond}', params).fetchone()[0]
     rows = db.execute(
         f'SELECT id, ts, table_name, row_pk, op, before_json, after_json, author, is_revert, batch_id '
