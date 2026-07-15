@@ -22,8 +22,8 @@
     .primary{background:var(--accent);color:#fff;border:none!important}
     .badge{font-size:12px;opacity:.75}
     .grid{max-height:56vh;overflow:auto;border:1px solid var(--border);border-radius:8px;outline:none}
-    table.sheet{border-collapse:separate;border-spacing:0;font-size:12px;width:max-content;min-width:100%}
-    table.sheet th,table.sheet td{border-right:1px solid var(--border);border-bottom:1px solid var(--border);padding:3px 8px;white-space:nowrap;max-width:340px;overflow:hidden;text-overflow:ellipsis}
+    table.sheet{border-collapse:separate;border-spacing:0;font-size:12px;table-layout:fixed;min-width:100%}
+    table.sheet th,table.sheet td{border-right:1px solid var(--border);border-bottom:1px solid var(--border);padding:3px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     table.sheet thead th{position:sticky;top:0;z-index:2;background:var(--card);cursor:pointer;user-select:none}
     table.sheet thead tr.filter th{top:27px;padding:2px}
     table.sheet thead tr.filter input{width:100%;box-sizing:border-box;padding:2px 5px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:inherit;font-size:11px}
@@ -46,8 +46,28 @@
     #sheetmenu{position:fixed;z-index:99;min-width:240px;background:var(--card);border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.25);padding:4px;font-size:13px}
     #sheetmenu .mi{padding:6px 12px;border-radius:5px;cursor:pointer;white-space:nowrap}
     #sheetmenu .mi:hover{background:var(--accent);color:#fff}
+    #sheetmenu .mi.dis{opacity:.4;cursor:not-allowed}
+    #sheetmenu .mi.dis:hover{background:none;color:inherit}
     #sheetmenu hr{border:none;border-top:1px solid var(--border);margin:4px 0}
     .bar button:disabled{opacity:.4;cursor:default}
+    /* буквы колонок A/B/C + resize-ручки */
+    table.sheet thead tr.letters th{position:sticky;top:0;z-index:3;background:var(--card);text-align:center;color:var(--muted,#888);font-weight:400;font-size:11px;padding:1px 4px;cursor:pointer;user-select:none}
+    table.sheet thead tr:nth-child(2) th{top:19px}
+    table.sheet thead tr.filter th{top:46px}
+    table.sheet th{position:relative}
+    .colresize{position:absolute;top:0;right:-3px;width:7px;height:100%;cursor:col-resize;z-index:5}
+    /* маркер автозаполнения */
+    .fillhandle{position:absolute;width:8px;height:8px;background:var(--accent);border:1px solid var(--bg);cursor:crosshair;z-index:4}
+    /* строка адреса (formula bar) */
+    #fxbar{display:flex;gap:0;align-items:stretch;margin-bottom:6px;border:1px solid var(--border);border-radius:6px;overflow:hidden}
+    #fxaddr{min-width:64px;display:flex;align-items:center;justify-content:center;background:var(--card);border-right:1px solid var(--border);font-size:12px;font-weight:600;padding:0 8px}
+    #fxval{flex:1;border:none;background:var(--bg);color:inherit;padding:6px 10px;font-size:13px;outline:none}
+    #fxval:disabled{opacity:.5}
+    /* инструкция */
+    #helpDlg{border:1px solid var(--border);border-radius:12px;background:var(--card);color:inherit;max-width:760px;width:94%;max-height:84vh}
+    #helpDlg h3{margin:14px 0 4px;font-size:14px}
+    #helpDlg p,#helpDlg li{font-size:13px;line-height:1.5;margin:4px 0}
+    #helpDlg kbd{background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:0 5px;font-size:12px}
     #childWrap{margin-top:12px;display:none}
     h3.sub{margin:0 0 6px;font-size:14px}
   </style>
@@ -90,7 +110,9 @@
         <button id="cancelBtn">Отменить</button>
         <span class="badge" id="pageInfo"></span>
         <button id="prev">←</button><button id="next">→</button>
+        <button id="helpBtn" title="Инструкция">?</button>
       </div>
+      <div id="fxbar"><span id="fxaddr">—</span><input id="fxval" placeholder="значение активной ячейки (Enter — применить)" disabled></div>
       <div class="grid" id="sheet"></div>
 
       <div id="childWrap">
@@ -106,7 +128,67 @@
   </div>
 </div>
 
-<script src="/static/sheet.js"></script>
+<dialog id="helpDlg">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <h2 style="margin:6px 0">Инструкция: редактор данных</h2>
+    <button class="rowbtn" onclick="document.getElementById('helpDlg').close()" style="padding:4px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit;cursor:pointer">✕ Закрыть (Esc)</button>
+  </div>
+  <p>Редактор работает как Excel: выбираете документ во вкладке сверху, правите ячейки, затем нажимаете
+     <b>«Сохранить»</b> — все правки уходят одним пакетом в <b>Журнал</b>, где их можно откатить.</p>
+
+  <h3>Навигация и выделение</h3>
+  <ul>
+    <li>Стрелки, <kbd>Tab</kbd>, <kbd>Enter</kbd>, <kbd>PageUp/PageDown</kbd> — перемещение по ячейкам.</li>
+    <li><b>Зажать мышь и повести</b> — выделение диапазона; <kbd>Shift</kbd>+клик — расширить выделение.</li>
+    <li><kbd>Ctrl</kbd>+клик — добавить <b>несмежные</b> ячейки/области к выделению (как в Excel).</li>
+    <li>Клик по <b>номеру строки</b> — выделить строку; по <b>букве колонки</b> (A, B, C…) — выделить колонку.</li>
+  </ul>
+
+  <h3>Правка</h3>
+  <ul>
+    <li>Двойной клик, <kbd>Enter</kbd>, <kbd>F2</kbd> или просто начните печатать — правка ячейки.</li>
+    <li><b>Строка адреса</b> над таблицей: показывает адрес (B7) и содержимое активной ячейки; длинный текст удобно править там (Enter — применить).</li>
+    <li>Поля со значком 🔗 — выбор из списка (например, Станция, Модель); 🔑 — ключ (не меняется); 🔒 — только чтение.</li>
+    <li>Изменённые ячейки подсвечиваются жёлтым, новые строки — зелёным, удалённые — зачёркнуты.</li>
+  </ul>
+
+  <h3>Копирование и вставка</h3>
+  <ul>
+    <li><kbd>Ctrl+C</kbd> / <kbd>Ctrl+V</kbd> — работает с Excel в обе стороны (диапазоны).</li>
+    <li><kbd>Delete</kbd> — очистить выделенное (все выделенные области).</li>
+  </ul>
+
+  <h3>Строки (правая кнопка мыши)</h3>
+  <ul>
+    <li>Вставить строку выше/ниже, удалить/вернуть, <b>вырезать и вставить в другое место</b>.</li>
+    <li><kbd>Alt+↑</kbd>/<kbd>Alt+↓</kbd> — сдвинуть выделенные строки. Порядок строк сохраняется в базе.</li>
+    <li>Вставка между строками доступна, когда нет фильтра и сортировки (иначе позиция неоднозначна — пункт серый).</li>
+  </ul>
+
+  <h3>Заливка и автозаполнение</h3>
+  <ul>
+    <li><kbd>Ctrl+D</kbd> — протянуть значение верхней ячейки вниз по выделению.</li>
+    <li><kbd>Ctrl+Enter</kbd> при правке — записать значение во всё выделение.</li>
+    <li><b>Зелёный квадратик</b> в углу выделения — потяните вниз: копирование, а для чисел (1,2 → 3,4,5) — продолжение ряда.</li>
+  </ul>
+
+  <h3>Отмена</h3>
+  <ul>
+    <li><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd> (кнопки ↶/↷) — отмена/повтор до сохранения.</li>
+    <li>После сохранения — вкладка <b>Журнал</b>: «Откатить» правку, пакет или всю базу к точке восстановления.</li>
+  </ul>
+
+  <h3>Прочее</h3>
+  <ul>
+    <li><b>Ширина колонок</b>: тяните правую границу заголовка; двойной клик по границе — автоширина. Запоминается.</li>
+    <li><b>Фильтр</b> под заголовком: выберите из выпадающего списка или введите текст. Поиск слева ищет по всей таблице.</li>
+    <li><b>Сортировка</b>: клик по заголовку — по возрастанию ↑, ещё раз — по убыванию ↓, ещё раз — сброс.</li>
+    <li><b>«Объединять одинаковые»</b> — визуально сливает одинаковые соседние ячейки (данные в базе не меняются).</li>
+    <li>В Weld Balance выберите строку — снизу появятся <b>детали точки</b> (правятся отдельно).</li>
+  </ul>
+</dialog>
+
+<script src="/static/sheet.js?v=3"></script>
 <script>
 const $ = s => document.querySelector(s);
 const author = $('#author');
@@ -133,6 +215,13 @@ function wireSheet(s){
   s.onUndoState = (u,r)=>{ $('#undoBtn').disabled=!u; $('#redoBtn').disabled=!r; };
   $('#undoBtn').disabled = true; $('#redoBtn').disabled = true;
   s.setMergeView($('#mergeChk').checked);
+  // строка адреса (formula bar)
+  s.onActive = (addr, val, editable) => {
+    $('#fxaddr').textContent = addr;
+    if (document.activeElement !== $('#fxval')) $('#fxval').value = val ?? '';
+    $('#fxval').disabled = !editable;
+  };
+  s._emitActive();
 }
 
 async function init(){
@@ -162,9 +251,10 @@ async function loadDoc(){
   primary=d.primary; childCfg=d.child;
   const fkMaps={};
   for(const c of d.columns) if(c.fk){ const fo=await fkLoader(c.fk); fkMaps[c.field]=new Map(fo.options.map(o=>[String(o.id), o.label])); }
-  sheet = new Sheet($('#sheet'), {columns:d.columns, rows:d.rows, fkLoader, fkMaps});
+  sheet = new Sheet($('#sheet'), {columns:d.columns, rows:d.rows, fkLoader, fkMaps,
+                                  naturalOrder: sort==='', storageKey: cur, sortField: sort, sortDir: dir});
   sheet.onChange=setCnt;
-  sheet.onSort=col=>{ if(!guard())return; if(sort===col){dir=dir==='asc'?'desc':'asc';}else{sort=col;dir='asc';} page=0; loadDoc(); };
+  sheet.onSort=col=>{ if(!guard())return; if(sort===col){ if(dir==='asc'){dir='desc';} else {sort=''; dir='asc';} }else{sort=col;dir='asc';} page=0; loadDoc(); };
   sheet.onSelect = childCfg ? (r,row)=>selectPoint(row) : null;
   wireSheet(sheet);
   $('#title').textContent=d.title;
@@ -222,9 +312,10 @@ async function loadRaw(){
   const d = await jget(`/api/admin/table/${cur}?limit=${pageSize}&offset=${page*pageSize}&q=${q}${s}`);
   const fkMaps={};
   for(const c of d.columns) if(c.fk){ const fo=await fkLoader(c.fk.table); fkMaps[c.name]=new Map(fo.options.map(o=>[String(o.id), o.label])); }
-  sheet = new Sheet($('#sheet'), {pk:d.pk, columns:d.columns.map(c=>({name:c.name,label:c.name,pk:c.pk,fk:c.fk?c.fk.table:null})), rows:d.rows, fkLoader, fkMaps});
+  sheet = new Sheet($('#sheet'), {pk:d.pk, columns:d.columns.map(c=>({name:c.name,label:c.name,pk:c.pk,fk:c.fk?c.fk.table:null})), rows:d.rows, fkLoader, fkMaps,
+                                  naturalOrder: sort==='', storageKey: 'raw-'+cur, sortField: sort, sortDir: dir});
   sheet.onChange=setCnt;
-  sheet.onSort=col=>{ if(!guard())return; if(sort===col){dir=dir==='asc'?'desc':'asc';}else{sort=col;dir='asc';} page=0; loadRaw(); };
+  sheet.onSort=col=>{ if(!guard())return; if(sort===col){ if(dir==='asc'){dir='desc';} else {sort=''; dir='asc';} }else{sort=col;dir='asc';} page=0; loadRaw(); };
   wireSheet(sheet);
   $('#title').textContent=cur; pageBar(d);
 }
@@ -248,6 +339,11 @@ $('#prev').onclick=()=>{ if(page>0&&guard()){page--; reload();} };
 $('#next').onclick=()=>{ if(guard()){page++; reload();} };
 $('#childAdd').onclick=()=>{ if(childSheet&&childPointId!=null) childSheet.addRow({[childCfg.fk_col]:childPointId}); };
 $('#childSave').onclick=saveChild;
+$('#fxval').addEventListener('keydown', e=>{
+  if(e.key==='Enter'){ e.preventDefault(); if(sheet){ sheet.setActiveValue($('#fxval').value); sheet.el.focus(); } }
+  if(e.key==='Escape'){ e.preventDefault(); sheet && sheet._emitActive(); sheet && sheet.el.focus(); }
+});
+$('#helpBtn').onclick=()=>document.getElementById('helpDlg').showModal();
 let qt; $('#q').oninput=()=>{ clearTimeout(qt); qt=setTimeout(()=>{ if(guard()){page=0; reload();} },400); };
 window.onbeforeunload=()=> ((sheet&&sheet.dirtyCount())||(childSheet&&childSheet.dirtyCount()))?'Есть несохранённые изменения':undefined;
 init();

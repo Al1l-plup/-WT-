@@ -86,6 +86,17 @@ def test_field_labels(client):
     assert d['tables']['weld_point'] == 'Weld Balance'
 
 
+def test_natural_sort(client, app):
+    db = sqlite3.connect(app.config['DB_PATH'])
+    for i, sn in enumerate(['10', '9', '100', '2']):
+        db.execute("INSERT INTO weld_point (source_file, spot_number, row_order) VALUES ('A13T ns', ?, ?)",
+                   (sn, 1000 + i))
+    db.commit()
+    rows = client.get('/api/admin/doc/weld_balance_a13t?sort=spot_number&dir=asc&limit=10').get_json()['rows']
+    nums = [r['spot_number'] for r in rows if r['spot_number'] in ('2', '9', '10', '100')]
+    assert nums == ['2', '9', '10', '100']  # числа как числа, а не как текст
+
+
 def test_history_author_filter(client):
     client.put('/api/admin/table/gun/1', json={'values': {'gun_type': 'AF1'}, 'author': 'филтр-тест'})
     hits = client.get('/api/admin/history?author=филтр-тест').get_json()

@@ -31,6 +31,12 @@ def _q(ident: str) -> str:
     return '"' + ident.replace('"', '""') + '"'
 
 
+def _natural_order(expr: str, direction: str) -> str:
+    """Натуральная сортировка: числовые значения — как числа (9 < 10), затем текст."""
+    return (f"ORDER BY (CASE WHEN ({expr}) GLOB '[0-9]*' OR ({expr}) GLOB '-[0-9]*' THEN 0 ELSE 1 END) {direction}, "
+            f"CAST(({expr}) AS REAL) {direction}, ({expr}) {direction}")
+
+
 def _author() -> str:
     from urllib.parse import unquote
     data = request.get_json(silent=True) or {}
@@ -100,7 +106,7 @@ def read_table(name):
         params.append(request.args.get('filter_val', ''))
     where = ' WHERE ' + ' AND '.join(conds) if conds else ''
 
-    order = f' ORDER BY {_q(sort)} {direction}' if sort in cols else ''
+    order = ' ' + _natural_order(_q(sort), direction) if sort in cols else ''
     total = db.execute(f'SELECT COUNT(*) FROM {_q(name)}{where}', params).fetchone()[0]
     rows = db.execute(
         f'SELECT * FROM {_q(name)}{where}{order} LIMIT ? OFFSET ?', params + [limit, offset]
@@ -257,7 +263,7 @@ def _doc_read(db, cfg, args):
     sort = args.get('sort', '').strip()
     direction = 'DESC' if args.get('dir', 'asc').lower() == 'desc' else 'ASC'
     sort_expr = next((c['expr'] for c in cols if c['field'] == sort), None)
-    order = f' ORDER BY {sort_expr} {direction}' if sort_expr else f' ORDER BY {cfg["order"]}'
+    order = ' ' + _natural_order(sort_expr, direction) if sort_expr else f' ORDER BY {cfg["order"]}'
 
     limit = min(int(args.get('limit', 200)), 100000)
     offset = int(args.get('offset', 0))
