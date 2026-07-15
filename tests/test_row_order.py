@@ -1,6 +1,8 @@
 """Порядок строк Weld Balance (row_order): миграция, сортировка документа, вставка «между»."""
 import sqlite3
 
+from tests.test_admin_docs import wb_doc
+
 
 def _ins(db, id_, zone, order):
     db.execute("INSERT INTO weld_point (id, source_file, zone, row_order) VALUES (?,?,?,?)",
@@ -23,7 +25,7 @@ def test_document_sorted_by_row_order(client, app):
     _ins(db, 2, 'третья', 30.0)
     _ins(db, 3, 'вторая', 20.0)
     db.commit()
-    rows = client.get('/api/admin/doc/weld_balance_a13t?limit=10').get_json()['rows']
+    rows = client.get(f'/api/admin/doc/{wb_doc(client, "A13T")}?limit=10').get_json()['rows']
     assert [r['zone'] for r in rows] == ['первая', 'вторая', 'третья']
 
 
@@ -33,10 +35,10 @@ def test_reorder_via_batch(client, app):
     _ins(db, 2, 'B', 2.0)
     db.commit()
     # переместим B выше A: row_order = 0.5 (fractional ordering, как делает грид)
-    res = client.post('/api/admin/doc/weld_balance_a13t/batch', json={'changes': [
+    res = client.post(f'/api/admin/doc/{wb_doc(client, "A13T")}/batch', json={'changes': [
         {'op': 'update', 'field': 'row_order', 'value': 0.5, 'row_pks': {'weld_point': 2}}]}).get_json()
     assert res['status'] == 'success'
-    rows = client.get('/api/admin/doc/weld_balance_a13t?limit=10').get_json()['rows']
+    rows = client.get(f'/api/admin/doc/{wb_doc(client, "A13T")}?limit=10').get_json()['rows']
     assert [r['zone'] for r in rows] == ['B', 'A']
 
 
@@ -45,18 +47,18 @@ def test_insert_between_via_batch(client, app):
     _ins(db, 1, 'A', 1.0)
     _ins(db, 2, 'C', 2.0)
     db.commit()
-    res = client.post('/api/admin/doc/weld_balance_a13t/batch', json={'changes': [
+    res = client.post(f'/api/admin/doc/{wb_doc(client, "A13T")}/batch', json={'changes': [
         {'op': 'insert', 'values': {'zone': 'B', 'row_order': 1.5,
                                     'wb_station': 's', 'spot_number': '9'}}]}).get_json()
     assert res['status'] == 'success'
     # insert_defaults проставил source_file → строка попала в свой документ и встала МЕЖДУ A и C
-    rows = client.get('/api/admin/doc/weld_balance_a13t?limit=10').get_json()['rows']
+    rows = client.get(f'/api/admin/doc/{wb_doc(client, "A13T")}?limit=10').get_json()['rows']
     assert [r['zone'] for r in rows] == ['A', 'B', 'C']
     b = next(r for r in rows if r['zone'] == 'B')
     assert b['source_file'] == 'manual A13T' and b['row_order'] == 1.5
 
 
 def test_row_order_hidden_column_exposed(client):
-    cols = client.get('/api/admin/doc/weld_balance_a13t?limit=1').get_json()['columns']
+    cols = client.get(f'/api/admin/doc/{wb_doc(client, "A13T")}?limit=1').get_json()['columns']
     ro = next(c for c in cols if c['field'] == 'row_order')
     assert ro['hidden'] is True and ro['editable'] is True

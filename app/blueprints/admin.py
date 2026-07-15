@@ -19,7 +19,7 @@ from app.audit import (
     table_meta,
 )
 from app.db import get_db
-from app.documents import DOCUMENTS, doc_list
+from app.documents import TOKEN_RE, doc_list, get_documents, resolve_weld_point_links
 from app.errors import api_error
 
 bp = Blueprint('admin', __name__)
@@ -39,6 +39,10 @@ def _natural_order(expr: str, direction: str) -> str:
 
 def _author() -> str:
     from urllib.parse import unquote
+
+    from flask import session
+    if session.get('uname'):  # авторизованный пользователь — автор из входа
+        return session['uname']
     data = request.get_json(silent=True) or {}
     hdr = request.headers.get('X-Author')
     # фронт кодирует кириллицу через encodeURIComponent (HTTP-заголовки — только latin-1)
@@ -242,7 +246,72 @@ def batch_apply(name):
 # ── документы (Перечень оборудования / Weld Balance / Параметры) ─────────────
 @bp.route('/api/admin/docs')
 def list_docs():
-    return jsonify(doc_list())
+    return jsonify(doc_list(get_db()))
+
+
+@bp.route('/api/admin/wb-tabs', methods=['POST'])
+def create_wb_tab():
+    """Создать новую вкладку Weld Balance (для новой модели)."""
+    db = get_db()
+    data = request.get_json(silent=True) or {}
+    title = (data.get('title') or '').strip()
+    token = (data.get('token') or '').strip()
+    if not title or not token:
+        return jsonify({'status': 'error', 'message': 'Укажите название и код модели'}), 400
+    if not TOKEN_RE.match(token):
+        return jsonify({'status': 'error', 'message': 'Код модели: только буквы/цифры/точка/дефис/подчёркивание'}), 400
+    if db.execute('SELECT 1 FROM wb_tab WHERE match_token=?', (token,)).fetchone():
+        return jsonify({'status': 'error', 'message': f'Вкладка с кодом {token} уже есть'}), 400
+    try:
+        pos = db.execute('SELECT COALESCE(MAX(position),0)+1 FROM wb_tab').fetchone()[0]
+        cur = db.execute('INSERT INTO wb_tab (title, match_token, manual_src, position) VALUES (?,?,?,?)',
+                         (title, token, f'manual {token}', pos))
+        db.commit()
+        return jsonify({'status': 'success', 'id': cur.lastrowid, 'doc_id': f'weld_balance_{cur.lastrowid}'})
+    except Exception as e:
+        db.rollback()
+        return api_error(e)
+
+
+@bp.route('/api/admin/wb-tabs/<int:tab_id>', methods=['DELETE'])
+def delete_wb_tab(tab_id):
+    """Удалить вкладку WB (только пустую — без строк под её фильтром)."""
+    db = get_db()
+    row = db.execute('SELECT match_token FROM wb_tab WHERE id=?', (tab_id,)).fetchone()
+    if not row:
+        return jsonify({'status': 'error', 'message': 'Вкладка не найдена'}), 404
+    n = db.execute("SELECT COUNT(*) FROM weld_point WHERE source_file LIKE ?",
+                   (f'%{row[0]}%',)).fetchone()[0]
+    if n:
+        return jsonify({'status': 'error', 'message': f'Во вкладке {n} строк — сначала удалите/перенесите их'}), 400
+    try:
+        db.execute('DELETE FROM wb_tab WHERE id=?', (tab_id,))
+        db.commit()
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        db.rollback()
+        return api_error(e)
+
+
+def sync_parameter_guns(db, parameter_id, value):
+    """Синхронизировать привязку параметра к клещам (M:N через welding_setup) по списку G-номеров."""
+    import re as _re
+    from datetime import date as _date
+    nums = [int(x) for x in _re.findall(r'\d+', str(value or ''))]
+    missing = [n for n in nums
+               if not db.execute('SELECT 1 FROM gun WHERE g_num=?', (n,)).fetchone()]
+    if missing:
+        raise ValueError(f'Клещи не найдены: {", ".join("G." + str(n) for n in missing)}')
+    want = {db.execute('SELECT UniqueID FROM gun WHERE g_num=?', (n,)).fetchone()[0] for n in nums}
+    have = {r[0] for r in db.execute(
+        'SELECT DISTINCT gun_id FROM welding_setup WHERE parameter_id=? AND is_active=1', (parameter_id,))}
+    today = _date.today().isoformat()
+    for gun_id in want - have:
+        db.execute("INSERT INTO welding_setup (comments, start_date, is_active, auto_created, spot_id, gun_id, parameter_id) "
+                   "VALUES ('привязка из редактора', ?, 1, 1, NULL, ?, ?)", (today, gun_id, parameter_id))
+    for gun_id in have - want:
+        db.execute("UPDATE welding_setup SET is_active=0, end_date=? WHERE parameter_id=? AND gun_id=? AND is_active=1",
+                   (today, parameter_id, gun_id))
 
 
 def _doc_read(db, cfg, args):
@@ -280,46 +349,58 @@ def _doc_read(db, cfg, args):
 
 @bp.route('/api/admin/doc/<doc_id>')
 def read_doc(doc_id):
-    cfg = DOCUMENTS.get(doc_id)
+    db = get_db()
+    cfg = get_documents(db).get(doc_id)
     if not cfg:
         return jsonify({'status': 'error', 'message': 'Документ не найден'}), 404
-    return jsonify(_doc_read(get_db(), cfg, request.args))
+    return jsonify(_doc_read(db, cfg, request.args))
 
 
 @bp.route('/api/admin/doc/<doc_id>/batch', methods=['POST'])
 def batch_doc(doc_id):
-    cfg = DOCUMENTS.get(doc_id)
+    db = get_db()
+    cfg = get_documents(db).get(doc_id)
     if not cfg:
         return jsonify({'status': 'error', 'message': 'Документ не найден'}), 404
-    db = get_db()
     editable = {c['field']: c for c in cfg['columns'] if c.get('edit')}
     primary = cfg['primary']
     changes = (request.get_json(silent=True) or {}).get('changes', [])
     try:
         since, batch = max_change_id(db), uuid.uuid4().hex
-        updates = {}  # (table, pk_value) -> {col: value}
+        updates = {}      # (table, pk_value) -> {col: value}
+        wp_touched = []   # затронутые weld_point.id — для авто-привязки gun_id/spot_id
         for ch in changes:
             op = ch.get('op')
             if op == 'update':
                 c = editable.get(ch.get('field'))
                 if not c:
                     continue
+                if c.get('setter'):  # виртуальная колонка со спец-логикой записи
+                    if c['setter'] == 'parameter_guns':
+                        pid = (ch.get('row_pks') or {}).get('parameters')
+                        if pid not in (None, ''):
+                            sync_parameter_guns(db, pid, ch.get('value'))
+                    continue
                 pkval = (ch.get('row_pks') or {}).get(c['table'])
                 if pkval in (None, ''):
                     continue  # связанной строки нет (напр. станция не назначена) — пропускаем
                 updates.setdefault((c['table'], pkval), {})[c['col']] = ch.get('value')
+                if c['table'] == 'weld_point':
+                    wp_touched.append(pkval)
             elif op == 'insert':
                 vals = {editable[f]['col']: v for f, v in (ch.get('values') or {}).items()
-                        if f in editable and editable[f]['table'] == primary}
+                        if f in editable and editable[f].get('table') == primary}
                 # обязательные значения по умолчанию (напр. source_file WB-документа)
                 for k, v in (cfg.get('insert_defaults') or {}).items():
                     vals.setdefault(k, v)
                 keys = list(vals)
                 if keys:
-                    db.execute(f'INSERT INTO {_q(primary)} ({", ".join(_q(k) for k in keys)}) '
-                               f'VALUES ({", ".join("?" * len(keys))})', [vals[k] for k in keys])
+                    cur = db.execute(f'INSERT INTO {_q(primary)} ({", ".join(_q(k) for k in keys)}) '
+                                     f'VALUES ({", ".join("?" * len(keys))})', [vals[k] for k in keys])
                 else:
-                    db.execute(f'INSERT INTO {_q(primary)} DEFAULT VALUES')
+                    cur = db.execute(f'INSERT INTO {_q(primary)} DEFAULT VALUES')
+                if primary == 'weld_point':
+                    wp_touched.append(cur.lastrowid)
             elif op == 'delete':
                 pkcol, _ = table_meta(db, primary)
                 db.execute(f'DELETE FROM {_q(primary)} WHERE {_q(pkcol)}=?', (ch.get('pk'),))
@@ -327,9 +408,15 @@ def batch_doc(doc_id):
             pkcol, _ = table_meta(db, tbl)
             sets = ', '.join(f'{_q(k)}=?' for k in colvals)
             db.execute(f'UPDATE {_q(tbl)} SET {sets} WHERE {_q(pkcol)}=?', list(colvals.values()) + [pkval])
+        # авто-привязка созданных/изменённых точек WB к клещам и точкам (как импортёр)
+        if wp_touched:
+            resolve_weld_point_links(db, set(wp_touched))
         stamp_audit(db, _author(), batch, since)
         db.commit()
         return jsonify({'status': 'success', 'batch_id': batch, 'rows_updated': len(updates)})
+    except ValueError as e:
+        db.rollback()
+        return jsonify({'status': 'error', 'message': str(e)}), 400
     except Exception as e:
         db.rollback()
         return api_error(e)
@@ -351,7 +438,7 @@ TABLE_TITLES = {
 def field_labels():
     """Русские метки полей (из конфигурации документов) + названия таблиц — для журнала."""
     labels = {}
-    for cfg in DOCUMENTS.values():
+    for cfg in get_documents(get_db()).values():
         for c in cfg['columns']:
             if c.get('table') and c.get('col'):
                 labels.setdefault(c['table'], {})[c['col']] = c['label']

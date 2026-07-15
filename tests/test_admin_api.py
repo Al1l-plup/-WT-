@@ -19,7 +19,7 @@ def test_update_logs_and_revert(client):
     assert _gun1(client) == 'EDIT'
 
     hist = client.get('/api/admin/history?table=gun').get_json()
-    assert hist['total'] >= 1 and hist['entries'][0]['author'] == 'alibek'
+    assert hist['total'] >= 1 and hist['entries'][0]['author'] == 'Тестов Т.'  # автор — из сессии входа
     cid = hist['entries'][0]['id']
 
     assert client.post(f'/api/admin/history/{cid}/revert', json={}).get_json()['status'] == 'success'

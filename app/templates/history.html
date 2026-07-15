@@ -71,8 +71,8 @@
 
 <script>
 const $ = s => document.querySelector(s);
-const author = () => localStorage.getItem('wt-author') || 'anonymous';
-const hdr = () => ({'Content-Type':'application/json','X-Author':encodeURIComponent(author())});
+// автор действий определяется на сервере по сессии входа
+const hdr = () => ({'Content-Type':'application/json'});
 const esc = v => v===null||v===undefined ? '' : String(v).replace(/[&<>]/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));
 let LBL = {fields:{}, tables:{}};
 

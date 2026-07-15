@@ -39,6 +39,19 @@ def app(template_db, tmp_path):
     yield create_app(_Config)
 
 
+TEST_USER = {'surname': 'Тестов', 'name': 'Тест', 'department': 'ИТО',
+             'login': 'testuser', 'password': 'test1234', 'password2': 'test1234'}
+
+
+@pytest.fixture()
+def anon_client(app):
+    """Клиент без входа (для проверки щита аутентификации)."""
+    return app.test_client()
+
+
 @pytest.fixture()
 def client(app):
-    return app.test_client()
+    """Клиент с выполненным входом (вход обязателен на весь сайт)."""
+    c = app.test_client()
+    c.post('/register', data=TEST_USER)
+    return c

@@ -28,7 +28,7 @@
   <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:1.25rem">
     <div class="page-head" style="margin-bottom:0">
       <h1>Управление сотрудниками</h1>
-      <p>ОТК · WeldTeam · Производство</p>
+      <p>ИТО · ОТК · WeldTeam · Производство</p>
     </div>
     <button class="btn btn-primary" id="addBtn">+ Добавить</button>
   </div>
@@ -46,6 +46,8 @@
       <label class="lbl">Отдел *</label>
       <div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-top:.25rem">
         <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:13px">
+          <input type="radio" name="f_dept" value="ИТО"> ИТО</label>
+        <label class="radio-opt">
           <input type="radio" name="f_dept" value="ОТК"> ОТК</label>
         <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:13px">
           <input type="radio" name="f_dept" value="WeldTeam" checked> WeldTeam</label>
@@ -63,6 +65,7 @@
   <!-- ── ФИЛЬТР ПО ОТДЕЛАМ ── -->
   <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.75rem">
     <button class="view-btn active" data-dept="">Все</button>
+    <button class="view-btn" data-dept="ИТО">ИТО</button>
     <button class="view-btn" data-dept="ОТК">ОТК</button>
     <button class="view-btn" data-dept="WeldTeam">WeldTeam</button>
     <button class="view-btn" data-dept="Производство">Производство</button>

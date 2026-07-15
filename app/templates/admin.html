@@ -10,6 +10,8 @@
     .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
     .tab{padding:8px 14px;border:1px solid var(--border);border-radius:8px 8px 0 0;cursor:pointer;background:var(--bg);font-size:14px}
     .tab.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+    .tab .tabdel{margin-left:8px;opacity:.45;font-size:11px;cursor:pointer}
+    .tab .tabdel:hover{opacity:1;color:var(--danger,#c0392b)}
     .wrap{display:flex;gap:14px;align-items:flex-start}
     .side{flex:0 0 200px;max-height:74vh;overflow:auto;border:1px solid var(--border);border-radius:8px}
     .side a{display:flex;justify-content:space-between;padding:7px 12px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px}
@@ -90,8 +92,7 @@
 
 <div class="page">
   <div class="page-head" style="display:flex;justify-content:space-between;align-items:center">
-    <div><h1>Редактор данных</h1><p class="badge">Как в Excel: правка в ячейках · <b>правая кнопка</b> — вставка/удаление/перемещение строк · Ctrl+C/V копипаст · Ctrl+Z/Y отмена/повтор · Ctrl+D заливка вниз · Ctrl+Enter — залить выделение · Alt+↑/↓ сдвиг строк · клик по № — выделить строку · 🔒 только чтение · «Сохранить» пишет пакет в Журнал (там же откат).</p></div>
-    <div>Автор: <input id="author" placeholder="имя" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit"></div>
+    <div><h1>Редактор данных</h1><p class="badge">Как в Excel: правка в ячейках · <b>правая кнопка</b> — вставка/удаление/перемещение строк · Ctrl+C/V копипаст · Ctrl+Z/Y отмена/повтор · Ctrl+D заливка вниз · Ctrl+Enter — залить выделение · Alt+↑/↓ сдвиг строк · клик по № — выделить строку · 🔒 только чтение · «Сохранить» пишет пакет в Журнал (там же откат). Автор правок — ваш вход.</p></div>
   </div>
 
   <div class="tabs" id="tabs"></div>
@@ -191,10 +192,8 @@
 <script src="/static/sheet.js?v=3"></script>
 <script>
 const $ = s => document.querySelector(s);
-const author = $('#author');
-author.value = localStorage.getItem('wt-author') || '';
-author.oninput = () => localStorage.setItem('wt-author', author.value);
-const hdr = () => ({'Content-Type':'application/json','X-Author':encodeURIComponent(author.value||'anonymous')});
+// автор правок определяется на сервере по сессии входа
+const hdr = () => ({'Content-Type':'application/json'});
 const jget = async u => { const r = await fetch(u); if(!r.ok) throw new Error(`${u} → HTTP ${r.status}`); return r.json(); };
 
 let mode='doc', cur=null, primary=null, childCfg=null, childPointId=null;
@@ -224,17 +223,37 @@ function wireSheet(s){
   s._emitActive();
 }
 
-async function init(){
+async function init(openId){
   try {
     const docs = await jget('/api/admin/docs');
-    $('#tabs').innerHTML = docs.map(d=>`<div class="tab" data-doc="${d.id}">${d.title}</div>`).join('')
+    $('#tabs').innerHTML = docs.map(d=>`<div class="tab" data-doc="${d.id}">${d.title}`+
+        (d.wb_tab_id?`<span class="tabdel" data-del="${d.wb_tab_id}" title="Удалить пустую вкладку">✕</span>`:'')+`</div>`).join('')
+      + `<div class="tab" data-add="1" title="Новая вкладка Weld Balance для модели">+ вкладка</div>`
       + `<div class="tab" data-raw="1">Все таблицы (админ)</div>`;
-    $('#tabs').querySelectorAll('.tab').forEach(t=>t.onclick=()=>{ if(!guard())return;
-      if(t.dataset.raw) openRaw(); else openDoc(t.dataset.doc, t); });
-    openDoc(docs[0].id, $('#tabs .tab'));
+    $('#tabs').querySelectorAll('.tab').forEach(t=>t.onclick=(e)=>{
+      const del=e.target.closest('.tabdel');
+      if(del){ e.stopPropagation(); deleteTab(del.dataset.del); return; }
+      if(!guard())return;
+      if(t.dataset.add) addTab();
+      else if(t.dataset.raw) openRaw();
+      else openDoc(t.dataset.doc, t);
+    });
+    const start = openId && docs.find(d=>d.id===openId) ? openId : docs[0].id;
+    openDoc(start, [...$('#tabs').querySelectorAll('.tab')].find(t=>t.dataset.doc===start));
   } catch(e){
     $('#tabs').innerHTML = `<div style="color:var(--danger,#c0392b);padding:8px 0">Не удалось загрузить редактор (${e.message}).<br>Обновите страницу; если не помогло — перезапустите сервер (обновилась версия кода).</div>`;
   }
+}
+async function addTab(){
+  const title = prompt('Название вкладки (например: WB · CS65 (Changan)):'); if(!title) return;
+  const token = prompt('Код модели — что содержится в имени файла/строк (например: CS65):'); if(!token) return;
+  const r = await (await fetch('/api/admin/wb-tabs',{method:'POST',headers:hdr(),body:JSON.stringify({title,token})})).json();
+  if(r.status==='success') init(r.doc_id); else alert(r.message||'Ошибка');
+}
+async function deleteTab(tabId){
+  if(!confirm('Удалить эту вкладку? (возможно только для пустой)')) return;
+  const r = await (await fetch(`/api/admin/wb-tabs/${tabId}`,{method:'DELETE',headers:hdr()})).json();
+  if(r.status==='success') init(); else alert(r.message||'Ошибка');
 }
 function markTab(el){ $('#tabs').querySelectorAll('.tab').forEach(x=>x.classList.remove('on')); if(el) el.classList.add('on'); }
 

@@ -8,6 +8,7 @@ from flask import Flask
 from app.blueprints import (
     admin,
     analytics,
+    auth,
     catalog,
     defects,
     explorer,
@@ -17,6 +18,7 @@ from app.blueprints import (
 )
 
 _BLUEPRINTS = (
+    auth.bp,
     pages.bp,
     catalog.bp,
     maintenance.bp,

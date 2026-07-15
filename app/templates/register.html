@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Регистрация · WeldTeam MES</title>
+  <script src="/static/theme.js"></script>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    .authbox{max-width:420px;margin:6vh auto;border:1px solid var(--border);border-radius:14px;padding:26px;background:var(--card)}
+    .authbox h1{margin:0 0 4px;font-size:22px}
+    .authbox p.sub{margin:0 0 18px;opacity:.65;font-size:13px}
+    .fld{display:flex;flex-direction:column;gap:5px;margin-bottom:11px}
+    .fld label{font-size:12px;opacity:.75}
+    .fld input,.fld select{padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:inherit;font-size:14px}
+    .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .btn{width:100%;padding:10px;border:none;border-radius:8px;background:var(--accent);color:#fff;font-size:15px;cursor:pointer;margin-top:4px}
+    .err{background:color-mix(in srgb,#c0392b 15%,transparent);border:1px solid #c0392b;border-radius:8px;padding:8px 12px;font-size:13px;margin-bottom:12px}
+    .alt{text-align:center;margin-top:14px;font-size:13px}
+    .alt a{color:var(--accent)}
+  </style>
+</head>
+<body>
+<div class="authbox">
+  <h1>Регистрация</h1>
+  <p class="sub">WeldTeam MES · создайте учётную запись и выберите свой отдел</p>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  <form method="post">
+    <div class="row2">
+      <div class="fld"><label>Фамилия *</label><input name="surname" required value="{{ (form or {}).get('surname','') }}"></div>
+      <div class="fld"><label>Имя *</label><input name="name" required value="{{ (form or {}).get('name','') }}"></div>
+    </div>
+    <div class="row2">
+      <div class="fld"><label>Отчество</label><input name="father_name" value="{{ (form or {}).get('father_name','') }}"></div>
+      <div class="fld"><label>Должность</label><input name="position" value="{{ (form or {}).get('position','') }}"></div>
+    </div>
+    <div class="fld"><label>Отдел *</label>
+      <select name="department" required>
+        {% for d in departments %}<option value="{{ d }}" {{ 'selected' if (form or {}).get('department')==d }}>{{ d }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="fld"><label>Логин * (мин. 3 символа)</label><input name="login" required minlength="3" autocomplete="username" value="{{ (form or {}).get('login','') }}"></div>
+    <div class="row2">
+      <div class="fld"><label>Пароль * (мин. 4)</label><input name="password" type="password" required minlength="4" autocomplete="new-password"></div>
+      <div class="fld"><label>Повтор пароля *</label><input name="password2" type="password" required autocomplete="new-password"></div>
+    </div>
+    <button class="btn">Зарегистрироваться и войти</button>
+  </form>
+  <div class="alt">Уже есть учётная запись? <a href="/login">Войти</a></div>
+</div>
+</body>
+</html>

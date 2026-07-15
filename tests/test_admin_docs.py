@@ -2,10 +2,19 @@
 import sqlite3
 
 
+def wb_doc(client, token_part):
+    """Найти id WB-документа по фрагменту названия (вкладки теперь динамические, из wb_tab)."""
+    docs = client.get('/api/admin/docs').get_json()
+    return next(d['id'] for d in docs if token_part in d['title'])
+
+
 def test_docs_list(client):
-    ids = [d['id'] for d in client.get('/api/admin/docs').get_json()]
-    assert ids == ['equipment', 'weld_balance_a01', 'weld_balance_p01',
-                   'weld_balance_a13t', 'weld_balance_cs55', 'parameters']
+    docs = client.get('/api/admin/docs').get_json()
+    ids = [d['id'] for d in docs]
+    assert ids[0] == 'equipment' and ids[-1] == 'parameters'
+    titles = ' '.join(d['title'] for d in docs)
+    for t in ('A01', 'P01', 'A13T', 'CS55'):
+        assert t in titles  # 4 вкладки WB из wb_tab
 
 
 def test_equipment_linked_edit(client, app):
@@ -51,12 +60,12 @@ def test_weld_balance_doc_and_child(client, app):
     db.execute("INSERT INTO weld_point_part (weld_point_id, layer_no, part_name) VALUES (1,2,'B')")
     db.commit()
 
-    wb = client.get('/api/admin/doc/weld_balance_a13t?limit=10').get_json()
+    wb = client.get(f'/api/admin/doc/{wb_doc(client, "A13T")}?limit=10').get_json()
     assert wb['child']['table'] == 'weld_point_part' and wb['child']['fk_col'] == 'weld_point_id'
     assert any(c['label'] == '№ точки' for c in wb['columns'])
     assert any(r['__pk_weld_point'] == 1 for r in wb['rows'])  # фильтр по модели пропустил A13T-строку
 
-    res = client.post('/api/admin/doc/weld_balance_a13t/batch', json={'changes': [
+    res = client.post(f'/api/admin/doc/{wb_doc(client, "A13T")}/batch', json={'changes': [
         {'op': 'update', 'field': 'zone', 'value': 'ZONE1', 'row_pks': {'weld_point': 1}}]}).get_json()
     assert res['status'] == 'success'
     assert db.execute("SELECT zone FROM weld_point WHERE id=1").fetchone()[0] == 'ZONE1'
@@ -70,7 +79,7 @@ def test_weld_balance_model_filter(client, app):
     db.execute("INSERT INTO weld_point (id, source_file, zone) VALUES (10,'Weld_Balance_Table_A01 julion','a01')")
     db.execute("INSERT INTO weld_point (id, source_file, zone) VALUES (11,'Weld_Balance_Table_P01 tank','p01')")
     db.commit()
-    a01 = client.get('/api/admin/doc/weld_balance_a01?limit=100').get_json()['rows']
+    a01 = client.get(f'/api/admin/doc/{wb_doc(client, "A01")}?limit=100').get_json()['rows']
     ids = {r['__pk_weld_point'] for r in a01}
     assert 10 in ids and 11 not in ids  # A01-документ не содержит P01-строк
 
@@ -92,14 +101,14 @@ def test_natural_sort(client, app):
         db.execute("INSERT INTO weld_point (source_file, spot_number, row_order) VALUES ('A13T ns', ?, ?)",
                    (sn, 1000 + i))
     db.commit()
-    rows = client.get('/api/admin/doc/weld_balance_a13t?sort=spot_number&dir=asc&limit=10').get_json()['rows']
+    rows = client.get(f'/api/admin/doc/{wb_doc(client, "A13T")}?sort=spot_number&dir=asc&limit=10').get_json()['rows']
     nums = [r['spot_number'] for r in rows if r['spot_number'] in ('2', '9', '10', '100')]
     assert nums == ['2', '9', '10', '100']  # числа как числа, а не как текст
 
 
 def test_history_author_filter(client):
-    client.put('/api/admin/table/gun/1', json={'values': {'gun_type': 'AF1'}, 'author': 'филтр-тест'})
-    hits = client.get('/api/admin/history?author=филтр-тест').get_json()
-    assert hits['total'] >= 1 and all(e['author'] == 'филтр-тест' for e in hits['entries'])
+    client.put('/api/admin/table/gun/1', json={'values': {'gun_type': 'AF1'}})
+    hits = client.get('/api/admin/history?author=Тестов').get_json()  # автор — из сессии входа
+    assert hits['total'] >= 1 and all('Тестов' in e['author'] for e in hits['entries'])
     miss = client.get('/api/admin/history?author=нет-такого').get_json()
     assert miss['total'] == 0

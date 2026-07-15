@@ -10,7 +10,10 @@
   fk      — имя связанной таблицы (для выпадающего списка)
 `pks` — выражения первичных ключей участвующих таблиц (алиасятся как __pk_<table>).
 `where` — доп. постоянное условие (напр. фильтр Weld Balance по модели/файлу).
+Вкладки Weld Balance хранятся в таблице wb_tab (создаются кнопкой «+ вкладка») —
+документы собираются функцией get_documents(db).
 """
+import re
 
 # ── общие колонки Weld Balance (показываем ВСЕ колонки Excel; ничего не теряем) ──
 # Реальные поля weld_point — редактируемые; «прочие» колонки Excel лежат в raw_extra (JSON) —
@@ -64,17 +67,6 @@ _WB_COLUMNS = [
      'table': 'weld_point', 'col': 'row_order', 'hidden': True},
 ]
 
-# Отдельный Weld Balance на каждую базовую модель (фильтр по файлу-источнику).
-# Внутри A01 — модификации 2WD/4WD, внутри P01 — ToD/NOT-ToD (столбцы «Вариант 1-4»).
-# Третий элемент — source_file для строк, СОЗДАННЫХ в редакторе (попадает под фильтр документа).
-_WB_MODELS = [
-    ('weld_balance_a01', 'WB · A01 (Jolion 2WD/4WD)', "wp.source_file LIKE '%A01%'", 'manual A01'),
-    ('weld_balance_p01', 'WB · P01 (Tank ToD)', "wp.source_file LIKE '%P01%'", 'manual P01'),
-    ('weld_balance_a13t', 'WB · A13T (Tiggo2)', "wp.source_file LIKE '%A13T%'", 'manual A13T'),
-    ('weld_balance_cs55', 'WB · CS55 (Changan)', "wp.source_file LIKE '%cs55%'", 'manual cs55'),
-]
-
-
 def _wb_doc(title, where, manual_src):
     return {
         'title': title,
@@ -90,10 +82,8 @@ def _wb_doc(title, where, manual_src):
     }
 
 
-DOCUMENTS = {}
-
-# ── Перечень оборудования ──
-DOCUMENTS['equipment'] = {
+# ── статические документы ──
+_EQUIPMENT_DOC = {
     'title': 'Перечень оборудования',
     'base': """FROM gun g
         LEFT JOIN gun_transformer_assignment gta ON g.UniqueID=gta.gun_id AND gta.is_active=1
@@ -114,12 +104,7 @@ DOCUMENTS['equipment'] = {
     ],
 }
 
-# ── Weld Balance — 4 документа по моделям ──
-for _did, _title, _where, _src in _WB_MODELS:
-    DOCUMENTS[_did] = _wb_doc(_title, _where, _src)
-
-# ── Параметры сварки (программы) ──
-DOCUMENTS['parameters'] = {
+_PARAMETERS_DOC = {
     'title': 'Параметры сварки',
     'base': 'FROM parameters p',
     'pks': {'parameters': 'p.UniqueID'},
@@ -137,12 +122,57 @@ DOCUMENTS['parameters'] = {
         {'label': 'Ток 2', 'field': 'heat_2', 'expr': 'p.heat_2', 'edit': True, 'table': 'parameters', 'col': 'heat_2'},
         {'label': 'Проковка', 'field': 'hold', 'expr': 'p.hold', 'edit': True, 'table': 'parameters', 'col': 'hold'},
         {'label': 'Поворот R', 'field': 'turn_R', 'expr': 'p.turn_R', 'edit': True, 'table': 'parameters', 'col': 'turn_R'},
-        {'label': 'Клещи (G)', 'field': 'guns', 'edit': False,
+        # Виртуальная редактируемая колонка: список G-номеров через запятую.
+        # Запись идёт не в колонку, а через setter — синхронизацию welding_setup (см. admin.batch_doc).
+        {'label': 'Клещи (G)', 'field': 'guns', 'edit': True, 'setter': 'parameter_guns',
          'expr': "(SELECT GROUP_CONCAT(DISTINCT g.g_num) FROM welding_setup ws "
                  "JOIN gun g ON ws.gun_id=g.UniqueID WHERE ws.parameter_id=p.UniqueID AND ws.is_active=1)"},
     ],
 }
 
+# Токен вкладки WB: только буквы/цифры/._- (защита от SQL-инъекции в LIKE-фильтре).
+TOKEN_RE = re.compile(r'^[A-Za-z0-9_.\-]+$')
 
-def doc_list():
-    return [{'id': k, 'title': v['title']} for k, v in DOCUMENTS.items()]
+
+def get_documents(db) -> dict:
+    """Собрать документы: Перечень оборудования + WB-вкладки из таблицы wb_tab + Параметры."""
+    docs = {'equipment': _EQUIPMENT_DOC}
+    for tab_id, title, token, manual in db.execute(
+            'SELECT id, title, match_token, manual_src FROM wb_tab ORDER BY position, id'):
+        if not TOKEN_RE.match(token or ''):
+            continue  # некорректный токен не должен попадать в SQL
+        docs[f'weld_balance_{tab_id}'] = _wb_doc(
+            title, f"wp.source_file LIKE '%{token}%'", manual) | {'wb_tab_id': tab_id}
+    docs['parameters'] = _PARAMETERS_DOC
+    return docs
+
+
+def doc_list(db):
+    return [{'id': k, 'title': v['title'], 'wb_tab_id': v.get('wb_tab_id')}
+            for k, v in get_documents(db).items()]
+
+
+def resolve_weld_point_links(db, wp_ids) -> None:
+    """Авто-привязка строк Weld Balance к справочникам (как делает импортёр):
+    'Клещи (G)' G.NNN → gun.g_num → gun_id;  (model_id, № точки) → spot → spot_id.
+    Не нашли — оставляем NULL (не ошибка)."""
+    for wp_id in wp_ids:
+        row = db.execute('SELECT gun_mntc, model_id, spot_number FROM weld_point WHERE id=?',
+                         (wp_id,)).fetchone()
+        if not row:
+            continue
+        gun_mntc, model_id, spot_number = row[0], row[1], row[2]
+        gun_id = None
+        m = re.search(r'G[.\s]*0*(\d+)', gun_mntc or '')
+        if m:
+            g = db.execute('SELECT UniqueID FROM gun WHERE g_num=?', (int(m.group(1)),)).fetchone()
+            gun_id = g[0] if g else None
+        spot_id = None
+        if model_id is not None and spot_number not in (None, ''):
+            try:
+                s = db.execute('SELECT UniqueID FROM spot WHERE model_id=? AND spot_number=?',
+                               (model_id, int(float(spot_number)))).fetchone()
+                spot_id = s[0] if s else None
+            except (ValueError, TypeError):
+                pass
+        db.execute('UPDATE weld_point SET gun_id=?, spot_id=? WHERE id=?', (gun_id, spot_id, wp_id))

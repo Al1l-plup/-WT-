@@ -18,7 +18,7 @@ OUT = ROOT / 'db' / 'seed.sql'
 CATALOG_TABLES = [
     'brand', 'trans', 'station', 'model', 'gun', 'spot', 'parameters',
     'welding_setup', 'gun_transformer_assignment', 'transformer_station_assignment',
-    'worker', 'maintenance_schedule', 'defect_code',
+    'worker', 'maintenance_schedule', 'defect_code', 'wb_tab',
 ]
 
 
@@ -49,9 +49,11 @@ def main() -> None:
             collist = ', '.join(f'"{c}"' for c in cols)
             rows = con.execute(f'SELECT * FROM "{table}"').fetchall()
             f.write(f'\n-- {table}: {len(rows)} rows\n')
+            # wb_tab также наполняется миграцией 0006 — OR IGNORE исключает дубли при init_db
+            verb = 'INSERT OR IGNORE' if table == 'wb_tab' else 'INSERT'
             for row in rows:
                 values = ', '.join(_sql_value(row[c]) for c in cols)
-                f.write(f'INSERT INTO "{table}" ({collist}) VALUES ({values});\n')
+                f.write(f'{verb} INTO "{table}" ({collist}) VALUES ({values});\n')
         f.write('\nCOMMIT;\nPRAGMA foreign_keys=ON;\n')
     con.close()
     print(f'seed → {OUT}')
