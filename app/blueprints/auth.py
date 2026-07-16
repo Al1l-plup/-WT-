@@ -4,12 +4,17 @@
 (werkzeug). Пользователь = запись в worker (login, password=hash, department из DEPARTMENTS).
 Сессия: uid / uname («Фамилия И.») / dept — автор правок в журнале берётся из неё.
 """
+import re
+
 from flask import Blueprint, jsonify, redirect, render_template, request, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.constants import DEPARTMENTS
 from app.db import get_db
 from app.errors import api_error
+
+# Логин — рабочая почта (планируется рассылка уведомлений об изменениях).
+EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]{2,}$')
 
 bp = Blueprint('auth', __name__)
 
@@ -36,7 +41,7 @@ def login():
     if request.method == 'GET':
         return render_template('login.html')
     data = request.form
-    login_ = (data.get('login') or '').strip()
+    login_ = (data.get('login') or '').strip().lower()
     password = data.get('password') or ''
     db = get_db()
     row = db.execute('SELECT UniqueID, surname, name, department, password, is_active '
@@ -72,8 +77,9 @@ def register():
         return err('Укажите фамилию и имя')
     if dept not in DEPARTMENTS:
         return err('Выберите отдел из списка')
-    if len(login_) < 3:
-        return err('Логин — минимум 3 символа')
+    login_ = login_.lower()
+    if not EMAIL_RE.match(login_):
+        return err('Логин должен быть адресом почты (например, name@company.com) — на неё будут приходить уведомления')
     if len(pw1) < 4:
         return err('Пароль — минимум 4 символа')
     if pw1 != pw2:
@@ -85,8 +91,9 @@ def register():
     try:
         cur = db.execute(
             "INSERT INTO worker (surname, name, father_name, position, department, email, password, "
-            "start_date, is_active, login) VALUES (?,?,?,?,?,'',?,DATE('now'),1,?)",
+            "start_date, is_active, login) VALUES (?,?,?,?,?,?,?,DATE('now'),1,?)",
             (surname, name, father, data.get('position', ''), dept,
+             login_,  # почта дублируется в email — для будущей рассылки
              generate_password_hash(pw1), login_))
         db.commit()
     except Exception as e:

@@ -10,9 +10,10 @@
     .authbox{max-width:420px;margin:6vh auto;border:1px solid var(--border);border-radius:14px;padding:26px;background:var(--card)}
     .authbox h1{margin:0 0 4px;font-size:22px}
     .authbox p.sub{margin:0 0 18px;opacity:.65;font-size:13px}
-    .fld{display:flex;flex-direction:column;gap:5px;margin-bottom:11px}
+    .fld{display:flex;flex-direction:column;gap:5px;margin-bottom:11px;min-width:0}
     .fld label{font-size:12px;opacity:.75}
-    .fld input,.fld select{padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:inherit;font-size:14px}
+    /* box-sizing обязателен: иначе padding выталкивает поля за сетку («плывёт» вёрстка) */
+    .fld input,.fld select{box-sizing:border-box;width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:inherit;font-size:14px}
     .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
     .btn{width:100%;padding:10px;border:none;border-radius:8px;background:var(--accent);color:#fff;font-size:15px;cursor:pointer;margin-top:4px}
     .err{background:color-mix(in srgb,#c0392b 15%,transparent);border:1px solid #c0392b;border-radius:8px;padding:8px 12px;font-size:13px;margin-bottom:12px}
@@ -39,7 +40,8 @@
         {% for d in departments %}<option value="{{ d }}" {{ 'selected' if (form or {}).get('department')==d }}>{{ d }}</option>{% endfor %}
       </select>
     </div>
-    <div class="fld"><label>Логин * (мин. 3 символа)</label><input name="login" required minlength="3" autocomplete="username" value="{{ (form or {}).get('login','') }}"></div>
+    <div class="fld"><label>Логин — рабочая почта * <span title="На эту почту будут приходить уведомления об изменениях (рассылка)." style="cursor:help;opacity:.7">❓</span></label>
+      <input name="login" type="email" required placeholder="name@company.com" autocomplete="username" value="{{ (form or {}).get('login','') }}"></div>
     <div class="row2">
       <div class="fld"><label>Пароль * (мин. 4)</label><input name="password" type="password" required minlength="4" autocomplete="new-password"></div>
       <div class="fld"><label>Повтор пароля *</label><input name="password2" type="password" required autocomplete="new-password"></div>

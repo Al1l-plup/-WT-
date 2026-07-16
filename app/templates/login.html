@@ -10,9 +10,9 @@
     .authbox{max-width:380px;margin:9vh auto;border:1px solid var(--border);border-radius:14px;padding:26px;background:var(--card)}
     .authbox h1{margin:0 0 4px;font-size:22px}
     .authbox p.sub{margin:0 0 18px;opacity:.65;font-size:13px}
-    .fld{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
+    .fld{display:flex;flex-direction:column;gap:5px;margin-bottom:12px;min-width:0}
     .fld label{font-size:12px;opacity:.75}
-    .fld input,.fld select{padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:inherit;font-size:14px}
+    .fld input,.fld select{box-sizing:border-box;width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:inherit;font-size:14px}
     .btn{width:100%;padding:10px;border:none;border-radius:8px;background:var(--accent);color:#fff;font-size:15px;cursor:pointer;margin-top:4px}
     .err{background:color-mix(in srgb,#c0392b 15%,transparent);border:1px solid #c0392b;border-radius:8px;padding:8px 12px;font-size:13px;margin-bottom:12px}
     .alt{text-align:center;margin-top:14px;font-size:13px}
@@ -25,7 +25,7 @@
   <p class="sub">Цех BS · вход в систему</p>
   {% if error %}<div class="err">{{ error }}</div>{% endif %}
   <form method="post">
-    <div class="fld"><label>Логин</label><input name="login" required autofocus autocomplete="username"></div>
+    <div class="fld"><label>Логин (почта)</label><input name="login" type="email" required autofocus placeholder="name@company.com" autocomplete="username"></div>
     <div class="fld"><label>Пароль</label><input name="password" type="password" required autocomplete="current-password"></div>
     <button class="btn">Войти</button>
   </form>

@@ -26,6 +26,7 @@ class Sheet {
       fk: c.fk || null,
       pk: !!c.pk,
       hidden: !!c.hidden,
+      hint: c.hint || null,
       editable: c.editable !== undefined ? c.editable : !c.pk,
     }));
     this.cols = this.allCols.filter(c => !c.hidden);
@@ -349,7 +350,8 @@ class Sheet {
     for (const c of this.cols) {
       const ci = this.cols.indexOf(c);
       const mark = this.sortField === c.name ? (this.sortDir === 'desc' ? ' ↓' : ' ↑') : '';
-      head += `<th data-c-name="${c.name}" title="клик — сортировка">${this._esc(c.label)}${c.fk ? ' 🔗' : ''}${c.pk ? ' 🔑' : ''}${!c.editable ? ' 🔒' : ''}${mark}<span class="colresize" data-rs="${ci}"></span></th>`;
+      const hint = c.hint ? `<span class="colhint" data-hint="${this._esc(c.hint)}" title="${this._esc(c.hint)}">❓</span>` : '';
+      head += `<th data-c-name="${c.name}" title="клик — сортировка">${this._esc(c.label)}${c.fk ? ' 🔗' : ''}${c.pk ? ' 🔑' : ''}${!c.editable ? ' 🔒' : ''}${mark}${hint}<span class="colresize" data-rs="${ci}"></span></th>`;
     }
     head += '<th class="rownum"></th></tr>';
     // фильтры
@@ -699,6 +701,8 @@ class Sheet {
     }, sig);
     this.el.addEventListener('click', (e) => {
       if (e.target.closest('.colresize')) return;
+      const hintEl = e.target.closest('.colhint');
+      if (hintEl) { alert(hintEl.dataset.hint); return; }   // подсказка колонки, не сортировка
       const th = e.target.closest('th[data-c-name]'); if (th && this.onSort) this.onSort(th.dataset.cName);
     }, sig);
     this.el.addEventListener('contextmenu', (e) => {

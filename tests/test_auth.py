@@ -46,6 +46,29 @@ def test_wrong_password_and_duplicate_login(app):
     assert 'уже занят'.encode() in r.data
 
 
+def test_register_login_must_be_email(app):
+    c = app.test_client()
+    r = c.post('/register', data={**TEST_USER, 'login': 'abc'})
+    assert 'адресом почты'.encode() in r.data
+    r = c.post('/register', data={**TEST_USER, 'login': 'нет@пробел в домене'})
+    assert 'адресом почты'.encode() in r.data
+
+
+def test_register_fills_email_and_lowercases(app):
+    c = app.test_client()
+    r = c.post('/register', data={**TEST_USER, 'login': 'User@Weldteam.KZ'})
+    assert r.status_code == 302
+    with app.app_context():
+        from app.db import get_db
+        row = get_db().execute("SELECT login, email FROM worker WHERE login=?",
+                               ('user@weldteam.kz',)).fetchone()
+    assert row is not None and row['email'] == 'user@weldteam.kz'
+    # вход не зависит от регистра букв в почте
+    c.get('/logout')
+    r = c.post('/login', data={'login': 'USER@weldteam.kz', 'password': TEST_USER['password']})
+    assert r.status_code == 302
+
+
 def test_author_from_session(client):
     client.put('/api/admin/table/gun/1', json={'values': {'gun_type': 'AUTHTEST'}})
     e = client.get('/api/admin/history?limit=1').get_json()['entries'][0]

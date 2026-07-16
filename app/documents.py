@@ -28,10 +28,13 @@ _WB_COLUMNS = [
     {'label': 'Этап', 'field': 'stage_no', 'expr': 'wp.stage_no', 'edit': True, 'table': 'weld_point', 'col': 'stage_no'},
     {'label': 'Тип сварки', 'field': 'welding_type', 'expr': 'wp.welding_type', 'edit': True, 'table': 'weld_point', 'col': 'welding_type'},
     {'label': 'Тип клещей', 'field': 'gun_type', 'expr': 'wp.gun_type', 'edit': True, 'table': 'weld_point', 'col': 'gun_type'},
-    {'label': 'Клещи (G)', 'field': 'gun_mntc', 'expr': 'wp.gun_mntc', 'edit': True, 'table': 'weld_point', 'col': 'gun_mntc'},
-    {'label': '№ точки', 'field': 'spot_number', 'expr': 'wp.spot_number', 'edit': True, 'table': 'weld_point', 'col': 'spot_number'},
+    {'label': 'Клещи (G)', 'field': 'gun_mntc', 'expr': 'wp.gun_mntc', 'edit': True, 'table': 'weld_point', 'col': 'gun_mntc',
+     'hint': 'Формат G.043 — по номеру точка автоматически привяжется к клещам. СМЕНА номера = ПЕРЕНОС точки: старая связка закроется датой, создастся новая.'},
+    {'label': '№ точки', 'field': 'spot_number', 'expr': 'wp.spot_number', 'edit': True, 'table': 'weld_point', 'col': 'spot_number',
+     'hint': 'Номер уникален в пределах модели. Вместе с «Модель» создаёт/находит карточку точки для Обзора и Дефектов.'},
     {'label': 'Сторона', 'field': 'side', 'expr': 'wp.side', 'edit': True, 'table': 'weld_point', 'col': 'side'},
-    {'label': 'Модель', 'field': 'model_id', 'expr': 'wp.model_id', 'edit': True, 'table': 'weld_point', 'col': 'model_id', 'fk': 'model'},
+    {'label': 'Модель', 'field': 'model_id', 'expr': 'wp.model_id', 'edit': True, 'table': 'weld_point', 'col': 'model_id', 'fk': 'model',
+     'hint': 'Обязательна для авто-привязки: Модель + № точки → карточка точки (создаётся, если её нет).'},
     {'label': 'Вариант (Models)', 'field': 'model_variant', 'expr': 'wp.model_variant', 'edit': True, 'table': 'weld_point', 'col': 'model_variant'},
     {'label': 'Ст. толщина', 'field': 'std_thickness', 'expr': 'wp.std_thickness', 'edit': True, 'table': 'weld_point', 'col': 'std_thickness'},
     {'label': 'Покрытие', 'field': 'coating', 'expr': 'wp.coating', 'edit': True, 'table': 'weld_point', 'col': 'coating'},
@@ -91,16 +94,21 @@ _EQUIPMENT_DOC = {
         LEFT JOIN transformer_station_assignment tsa ON t.UniqueID=tsa.transformer_id AND tsa.is_active=1
         LEFT JOIN station st ON tsa.station_id=st.UniqueID
         LEFT JOIN brand b ON st.brand_id=b.UniqueID""",
-    'pks': {'gun': 'g.UniqueID', 'transformer_station_assignment': 'tsa.UniqueID'},
+    'pks': {'gun': 'g.UniqueID'},
     'primary': 'gun',
     'order': 'g.g_num',
     'columns': [
-        {'label': 'Номер (G)', 'field': 'g_num', 'expr': 'g.g_num', 'edit': True, 'table': 'gun', 'col': 'g_num'},
+        {'label': 'Номер (G)', 'field': 'g_num', 'expr': 'g.g_num', 'edit': True, 'table': 'gun', 'col': 'g_num',
+         'hint': 'Уникальный номер клещей. Дубликаты запрещены.'},
         {'label': 'Тип клещей', 'field': 'gun_type', 'expr': 'g.gun_type', 'edit': True, 'table': 'gun', 'col': 'gun_type'},
-        {'label': 'Станция', 'field': 'station_id', 'expr': 'tsa.station_id', 'edit': True,
-         'table': 'transformer_station_assignment', 'col': 'station_id', 'fk': 'station'},
+        # ПЕРЕНОС ГАНА: выбираете трансформатор (в т.ч. другой станции) — старая привязка
+        # закрывается датой, создаётся новая; станция/линия пересчитываются, точки едут с ганом.
+        {'label': 'Трансформатор', 'field': 'transformer_id', 'expr': 'gta.transformer_id', 'edit': True,
+         'fk': 'trans', 'setter': 'gun_transformer',
+         'hint': 'Перенос гана: выберите трансформатор (можно другой станции) — старая привязка закроется датой, точки переедут вместе с ганом.'},
+        {'label': 'Станция', 'field': 'station_name', 'expr': "COALESCE(st.station_name,'—')", 'edit': False,
+         'hint': 'Вычисляется по трансформатору. Для переноса гана меняйте «Трансформатор».'},
         {'label': 'Линия', 'field': 'brand', 'expr': "COALESCE(b.brand,'—')", 'edit': False},
-        {'label': 'Трансформатор', 'field': 'transID', 'expr': "COALESCE(t.transID,'—')", 'edit': False},
     ],
 }
 
@@ -125,6 +133,7 @@ _PARAMETERS_DOC = {
         # Виртуальная редактируемая колонка: список G-номеров через запятую.
         # Запись идёт не в колонку, а через setter — синхронизацию welding_setup (см. admin.batch_doc).
         {'label': 'Клещи (G)', 'field': 'guns', 'edit': True, 'setter': 'parameter_guns',
+         'hint': 'Номера клещей через запятую (5, 6 или G.5 G.6). Добавленные привяжутся к программе, убранные — отвяжутся (с датой).',
          'expr': "(SELECT GROUP_CONCAT(DISTINCT g.g_num) FROM welding_setup ws "
                  "JOIN gun g ON ws.gun_id=g.UniqueID WHERE ws.parameter_id=p.UniqueID AND ws.is_active=1)"},
     ],
@@ -167,11 +176,11 @@ def resolve_weld_point_links(db, wp_ids) -> None:
     from datetime import date
     today = date.today().isoformat()
     for wp_id in wp_ids:
-        row = db.execute('SELECT gun_mntc, model_id, spot_number, welding_type '
+        row = db.execute('SELECT gun_mntc, model_id, spot_number, welding_type, gun_id '
                          'FROM weld_point WHERE id=?', (wp_id,)).fetchone()
         if not row:
             continue
-        gun_mntc, model_id, spot_number, welding_type = row[0], row[1], row[2], row[3]
+        gun_mntc, model_id, spot_number, welding_type, old_gun_id = row[0], row[1], row[2], row[3], row[4]
         # 1) клещи
         gun_id = None
         m = re.search(r'G[.\s]*0*(\d+)', gun_mntc or '')
@@ -193,7 +202,14 @@ def resolve_weld_point_links(db, wp_ids) -> None:
                     spot_id = cur.lastrowid
             except (ValueError, TypeError):
                 pass
-        # 3) связка точка↔клещи (её видят Обзор/Дефекты)
+        # 3) ПЕРЕНОС: клещи в строке сменились → старая связка точки с прежними клещами
+        #    закрывается датой (история сохраняется в welding_setup и в Журнале)
+        if (spot_id is not None and old_gun_id is not None
+                and gun_id is not None and old_gun_id != gun_id):
+            db.execute("UPDATE welding_setup SET is_active=0, end_date=? "
+                       "WHERE spot_id=? AND gun_id=? AND is_active=1",
+                       (today, spot_id, old_gun_id))
+        # 4) связка точка↔клещи (её видят Обзор/Дефекты)
         if spot_id is not None and gun_id is not None:
             has = db.execute('SELECT 1 FROM welding_setup WHERE spot_id=? AND gun_id=? AND is_active=1',
                              (spot_id, gun_id)).fetchone()

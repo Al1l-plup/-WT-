@@ -48,7 +48,7 @@ migrations/             # Alembic: env.py + versions/ (0001 baseline, 0002 drop-
 alembic.ini             # конфигурация Alembic
 db/                     # schema.sql, seed.sql (справочники), ERD (.drawio), SQL-скрипты
 data/welding_shop.db    # БД (SQLite) — НЕ в git, собирается scripts/init_db.py
-scripts/                # init_db, dump_seed, reset_facts, import_weld_balance, merge …
+scripts/                # init_db, dump_seed, import_weld_balance …
 docs/                   # документация (BEST_PRACTICES.md, презентации)
 tests/                  # pytest: smoke + инвариантные (self-contained)
 .github/workflows/      # CI (ruff + pytest)
@@ -184,7 +184,7 @@ python scripts/import_weld_balance.py "путь/к/Weld balance 3 brands" --appl
 - Все изменения фиксируются в `change_log` через триггеры SQLite (миграция `0004`,
   триггеры создаются приложением из текущей схемы — `app/audit.py`).
 - **Откат:** отдельной правки (`revert`) или к именованной **точке восстановления** (rollback).
-- Bulk-скрипты (`import_weld_balance`, `reset_facts`) снимают триггеры на время загрузки, чтобы
+- Bulk-скрипты (`import_weld_balance`) снимают триггеры на время загрузки, чтобы
   не засорять журнал. Аутентификации пока нет — доступ открыт (журнал+откат страхуют), auth — отдельный этап.
 
 ## Как участвовать в разработке

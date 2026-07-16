@@ -40,7 +40,7 @@ def app(template_db, tmp_path):
 
 
 TEST_USER = {'surname': 'Тестов', 'name': 'Тест', 'department': 'ИТО',
-             'login': 'testuser', 'password': 'test1234', 'password2': 'test1234'}
+             'login': 'test@weldteam.kz', 'password': 'test1234', 'password2': 'test1234'}
 
 
 @pytest.fixture()

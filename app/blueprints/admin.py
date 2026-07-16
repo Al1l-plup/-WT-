@@ -140,6 +140,7 @@ def insert_row(name):
         return jsonify({'status': 'error', 'message': f'Неизвестные колонки: {bad}'}), 400
     keys = list(values)
     try:
+        _validate_business(db, name, values)
         since, batch = max_change_id(db), uuid.uuid4().hex
         if keys:
             sql = (f'INSERT INTO {_q(name)} ({", ".join(_q(k) for k in keys)}) '
@@ -149,6 +150,9 @@ def insert_row(name):
             cur = db.execute(f'INSERT INTO {_q(name)} DEFAULT VALUES')
         _stamp_commit(db, since, batch)
         return jsonify({'status': 'success', 'id': cur.lastrowid})
+    except ValueError as e:
+        db.rollback()
+        return jsonify({'status': 'error', 'message': str(e)}), 400
     except Exception as e:
         db.rollback()
         return api_error(e)
@@ -169,12 +173,16 @@ def update_row(name, pk_val):
     if not values:
         return jsonify({'status': 'error', 'message': 'Нет полей для обновления'}), 400
     try:
+        _validate_business(db, name, values, exclude_pk=pk_val)
         since, batch = max_change_id(db), uuid.uuid4().hex
         sets = ', '.join(f'{_q(k)}=?' for k in values)
         db.execute(f'UPDATE {_q(name)} SET {sets} WHERE {_q(pk)}=?',
                    list(values.values()) + [pk_val])
         _stamp_commit(db, since, batch)
         return jsonify({'status': 'success'})
+    except ValueError as e:
+        db.rollback()
+        return jsonify({'status': 'error', 'message': str(e)}), 400
     except Exception as e:
         db.rollback()
         return api_error(e)
@@ -219,11 +227,13 @@ def batch_apply(name):
                 vals = {k: v for k, v in ch.get('values', {}).items() if k != pk}
                 if not vals:
                     continue
+                _validate_business(db, name, vals, exclude_pk=ch.get('pk'))
                 sets = ', '.join(f'{_q(k)}=?' for k in vals)
                 db.execute(f'UPDATE {_q(name)} SET {sets} WHERE {_q(pk)}=?',
                            list(vals.values()) + [ch.get('pk')])
             elif op == 'insert':
                 vals = ch.get('values', {})
+                _validate_business(db, name, vals)
                 keys = list(vals)
                 if keys:
                     db.execute(f'INSERT INTO {_q(name)} ({", ".join(_q(k) for k in keys)}) '
@@ -238,6 +248,9 @@ def batch_apply(name):
         stamp_audit(db, _author(), batch, since)
         db.commit()
         return jsonify({'status': 'success', 'batch_id': batch, **counts})
+    except ValueError as e:
+        db.rollback()
+        return jsonify({'status': 'error', 'message': str(e)}), 400
     except Exception as e:
         db.rollback()
         return api_error(e)
@@ -293,6 +306,54 @@ def delete_wb_tab(tab_id):
         return api_error(e)
 
 
+def _validate_business(db, table, values, exclude_pk=None):
+    """Доменная валидация перед записью. Ошибка → ValueError (уйдёт клиенту как 400)."""
+    if table == 'gun' and 'g_num' in values and values['g_num'] not in (None, ''):
+        try:
+            gnum = int(values['g_num'])
+        except (TypeError, ValueError):
+            raise ValueError('Номер клещей (G) должен быть целым числом')
+        q = 'SELECT UniqueID FROM gun WHERE g_num=?'
+        p = [gnum]
+        if exclude_pk is not None:
+            q += ' AND UniqueID!=?'
+            p.append(exclude_pk)
+        if db.execute(q, p).fetchone():
+            raise ValueError(f'Клещи G.{gnum} уже существуют — номер должен быть уникальным')
+    if table == 'spot':
+        cur = {}
+        if exclude_pk is not None:
+            r = db.execute('SELECT model_id, spot_number FROM spot WHERE UniqueID=?', (exclude_pk,)).fetchone()
+            if r:
+                cur = {'model_id': r[0], 'spot_number': r[1]}
+        model_id = values.get('model_id', cur.get('model_id'))
+        spot_number = values.get('spot_number', cur.get('spot_number'))
+        if model_id not in (None, '') and spot_number not in (None, ''):
+            q = 'SELECT UniqueID FROM spot WHERE model_id=? AND spot_number=?'
+            p = [model_id, spot_number]
+            if exclude_pk is not None:
+                q += ' AND UniqueID!=?'
+                p.append(exclude_pk)
+            if db.execute(q, p).fetchone():
+                raise ValueError(f'Точка №{spot_number} уже есть в этой модели — номер уникален в пределах модели')
+
+
+def sync_gun_transformer(db, gun_id, transformer_id):
+    """Перенос гана: закрыть текущую привязку к трансформатору, создать новую.
+    Точки гана (welding_setup) автоматически «переезжают» — станция вычисляется через трансформатор."""
+    from datetime import date as _date
+    if transformer_id in (None, ''):
+        raise ValueError('Выберите трансформатор')
+    if not db.execute('SELECT 1 FROM trans WHERE UniqueID=?', (transformer_id,)).fetchone():
+        raise ValueError('Трансформатор не найден')
+    today = _date.today().isoformat()
+    db.execute("UPDATE gun_transformer_assignment SET is_active=0, end_date=? "
+               "WHERE gun_id=? AND is_active=1", (today, gun_id))
+    db.execute("INSERT INTO gun_transformer_assignment (start_date, end_date, is_active, comments, "
+               "gun_id, transformer_id) VALUES (?, NULL, 1, 'перенос из редактора', ?, ?)",
+               (today, gun_id, transformer_id))
+
+
 def sync_parameter_guns(db, parameter_id, value):
     """Синхронизировать привязку параметра к клещам (M:N через welding_setup) по списку G-номеров."""
     import re as _re
@@ -340,7 +401,7 @@ def _doc_read(db, cfg, args):
     rows = db.execute(f'SELECT {", ".join(pk_sel + col_sel)} {base}{where}{order} LIMIT ? OFFSET ?',
                       params + [limit, offset]).fetchall()
     columns = [{'field': c['field'], 'label': c['label'], 'editable': bool(c.get('edit')),
-                'fk': c.get('fk'), 'hidden': bool(c.get('hidden'))}
+                'fk': c.get('fk'), 'hidden': bool(c.get('hidden')), 'hint': c.get('hint')}
                for c in cols]
     return {'title': cfg['title'], 'columns': columns, 'rows': [dict(r) for r in rows],
             'total': total, 'primary': cfg['primary'], 'child': cfg.get('child'),
@@ -380,6 +441,10 @@ def batch_doc(doc_id):
                         pid = (ch.get('row_pks') or {}).get('parameters')
                         if pid not in (None, ''):
                             sync_parameter_guns(db, pid, ch.get('value'))
+                    elif c['setter'] == 'gun_transformer':
+                        gid = (ch.get('row_pks') or {}).get('gun')
+                        if gid not in (None, ''):
+                            sync_gun_transformer(db, gid, ch.get('value'))
                     continue
                 pkval = (ch.get('row_pks') or {}).get(c['table'])
                 if pkval in (None, ''):
@@ -393,6 +458,7 @@ def batch_doc(doc_id):
                 # обязательные значения по умолчанию (напр. source_file WB-документа)
                 for k, v in (cfg.get('insert_defaults') or {}).items():
                     vals.setdefault(k, v)
+                _validate_business(db, primary, vals)
                 keys = list(vals)
                 if keys:
                     cur = db.execute(f'INSERT INTO {_q(primary)} ({", ".join(_q(k) for k in keys)}) '
@@ -405,6 +471,7 @@ def batch_doc(doc_id):
                 pkcol, _ = table_meta(db, primary)
                 db.execute(f'DELETE FROM {_q(primary)} WHERE {_q(pkcol)}=?', (ch.get('pk'),))
         for (tbl, pkval), colvals in updates.items():
+            _validate_business(db, tbl, colvals, exclude_pk=pkval)
             pkcol, _ = table_meta(db, tbl)
             sets = ', '.join(f'{_q(k)}=?' for k in colvals)
             db.execute(f'UPDATE {_q(tbl)} SET {sets} WHERE {_q(pkcol)}=?', list(colvals.values()) + [pkval])

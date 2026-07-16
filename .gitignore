@@ -23,6 +23,7 @@ data/welding_shop.db
 
 # Локальные бэкапы БД (не коммитим — только страховка на машине)
 data/backups/
+backups/
 
 # IDE / ОС
 .idea/
@@ -33,3 +34,4 @@ Thumbs.db
 # Node (наследие прежней версии, если появится снова)
 node_modules/
 dist/
+.claude/
