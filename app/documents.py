@@ -153,26 +153,52 @@ def doc_list(db):
 
 
 def resolve_weld_point_links(db, wp_ids) -> None:
-    """Авто-привязка строк Weld Balance к справочникам (как делает импортёр):
-    'Клещи (G)' G.NNN → gun.g_num → gun_id;  (model_id, № точки) → spot → spot_id.
-    Не нашли — оставляем NULL (не ошибка)."""
+    """Авто-привязка строки Weld Balance к «карточкам» БД, чтобы точка работала во всех
+    вкладках сайта (Обзор, Дефекты, поиск), а не только в документе WB:
+
+    1. 'Клещи (G)' G.NNN → карточка клещей (gun.g_num) → gun_id.
+    2. (Модель, № точки) → карточка точки (spot); если карточки НЕТ — создаём её
+       (как делает «обогащение» дефекта) → spot_id.
+    3. Если известны и точка, и клещи, но нет активной связки welding_setup —
+       создаём связку (auto_created=1). Именно её видят Обзор/Дефекты/уставки.
+
+    Клещи с несуществующим номером не создаём (опечатка вероятнее) — остаётся NULL.
+    """
+    from datetime import date
+    today = date.today().isoformat()
     for wp_id in wp_ids:
-        row = db.execute('SELECT gun_mntc, model_id, spot_number FROM weld_point WHERE id=?',
-                         (wp_id,)).fetchone()
+        row = db.execute('SELECT gun_mntc, model_id, spot_number, welding_type '
+                         'FROM weld_point WHERE id=?', (wp_id,)).fetchone()
         if not row:
             continue
-        gun_mntc, model_id, spot_number = row[0], row[1], row[2]
+        gun_mntc, model_id, spot_number, welding_type = row[0], row[1], row[2], row[3]
+        # 1) клещи
         gun_id = None
         m = re.search(r'G[.\s]*0*(\d+)', gun_mntc or '')
         if m:
             g = db.execute('SELECT UniqueID FROM gun WHERE g_num=?', (int(m.group(1)),)).fetchone()
             gun_id = g[0] if g else None
+        # 2) точка: найти или создать карточку
         spot_id = None
         if model_id is not None and spot_number not in (None, ''):
             try:
+                num = int(float(spot_number))
                 s = db.execute('SELECT UniqueID FROM spot WHERE model_id=? AND spot_number=?',
-                               (model_id, int(float(spot_number)))).fetchone()
-                spot_id = s[0] if s else None
+                               (model_id, num)).fetchone()
+                if s:
+                    spot_id = s[0]
+                else:
+                    cur = db.execute('INSERT INTO spot (spot_number, model_id, welding_type) VALUES (?,?,?)',
+                                     (num, model_id, welding_type))
+                    spot_id = cur.lastrowid
             except (ValueError, TypeError):
                 pass
+        # 3) связка точка↔клещи (её видят Обзор/Дефекты)
+        if spot_id is not None and gun_id is not None:
+            has = db.execute('SELECT 1 FROM welding_setup WHERE spot_id=? AND gun_id=? AND is_active=1',
+                             (spot_id, gun_id)).fetchone()
+            if not has:
+                db.execute("INSERT INTO welding_setup (comments, start_date, is_active, auto_created, "
+                           "spot_id, gun_id, parameter_id) VALUES ('создано из Weld Balance', ?, 1, 1, ?, ?, NULL)",
+                           (today, spot_id, gun_id))
         db.execute('UPDATE weld_point SET gun_id=?, spot_id=? WHERE id=?', (gun_id, spot_id, wp_id))
