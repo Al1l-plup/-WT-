@@ -62,9 +62,9 @@ def test_import_weld_balance(tmp_path):
     assert con.execute("SELECT COUNT(*) FROM wb_material").fetchone()[0] == 2      # Steel 1/2 (dedup)
 
     linked = con.execute("SELECT * FROM weld_point WHERE spot_number='17'").fetchone()
-    assert linked['model_id'] == 1
+    assert linked['model_code'] == 'A13T'
     assert linked['gun_id'] == 43        # по MNTC G.043
-    assert linked['spot_id'] == 14       # по (model_id, spot_number)
+    assert linked['spot_id'] == 14       # по (модель кода, spot_number)
     assert linked['coord_x'] == '100' and linked['coord_z'] == '300'
 
     parts = con.execute("SELECT layer_no, part_name, thickness FROM weld_point_part "

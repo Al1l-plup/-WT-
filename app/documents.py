@@ -33,8 +33,9 @@ _WB_COLUMNS = [
     {'label': '№ точки', 'field': 'spot_number', 'expr': 'wp.spot_number', 'edit': True, 'table': 'weld_point', 'col': 'spot_number',
      'hint': 'Номер уникален в пределах модели. Вместе с «Модель» создаёт/находит карточку точки для Обзора и Дефектов.'},
     {'label': 'Сторона', 'field': 'side', 'expr': 'wp.side', 'edit': True, 'table': 'weld_point', 'col': 'side'},
-    {'label': 'Модель', 'field': 'model_id', 'expr': 'wp.model_id', 'edit': True, 'table': 'weld_point', 'col': 'model_id', 'fk': 'model',
-     'hint': 'Обязательна для авто-привязки: Модель + № точки → карточка точки (создаётся, если её нет).'},
+    {'label': 'Модель (код)', 'field': 'model_code', 'expr': 'wp.model_code', 'edit': True, 'table': 'weld_point', 'col': 'model_code',
+     'hint': 'Код модели: A13T, A01, P01G, CS55, CS65. Код + № точки → карточка точки (создаётся, если её нет). '
+             'Коды с двумя модификациями (A01 — Jolion 2WD/4WD, P01G — Tank ToD/NOT ToD) привязывают точку к ОБЕИМ.'},
     {'label': 'Вариант (Models)', 'field': 'model_variant', 'expr': 'wp.model_variant', 'edit': True, 'table': 'weld_point', 'col': 'model_variant'},
     {'label': 'Ст. толщина', 'field': 'std_thickness', 'expr': 'wp.std_thickness', 'edit': True, 'table': 'weld_point', 'col': 'std_thickness'},
     {'label': 'Покрытие', 'field': 'coating', 'expr': 'wp.coating', 'edit': True, 'table': 'weld_point', 'col': 'coating'},
@@ -73,7 +74,7 @@ _WB_COLUMNS = [
 def _wb_doc(title, where, manual_src):
     return {
         'title': title,
-        'base': 'FROM weld_point wp LEFT JOIN model m ON wp.model_id=m.UniqueID',
+        'base': 'FROM weld_point wp',
         'where': where,
         'pks': {'weld_point': 'wp.id'},
         'primary': 'weld_point',
@@ -161,60 +162,136 @@ def doc_list(db):
             for k, v in get_documents(db).items()]
 
 
+def _parse_spot_num(spot_number):
+    """'17' / '17.0' → 17; мусор → None."""
+    try:
+        return int(float(spot_number))
+    except (ValueError, TypeError):
+        return None
+
+
+def _model_ids_for_code(db, code):
+    """Код модели → id всех её модификаций (A01 → Jolion 2WD и 4WD)."""
+    if not code:
+        return []
+    return [r[0] for r in db.execute(
+        'SELECT UniqueID FROM model WHERE UPPER(model_code)=UPPER(?)', (code,))]
+
+
+def _identity_spots(db, spot_id):
+    """Все карточки этой «точки» во всех модификациях кода (по образцу spot_id).
+
+    Идентичность точки = (код модели, № точки): A01-строка описывает точку сразу
+    в Jolion 2WD и 4WD, поэтому проверять/закрывать связки надо в обеих."""
+    if spot_id is None:
+        return []
+    row = db.execute('SELECT spot_number, model_id FROM spot WHERE UniqueID=?', (spot_id,)).fetchone()
+    if not row:
+        return []
+    siblings = [r[0] for r in db.execute(
+        """SELECT s.UniqueID FROM spot s
+           JOIN model m1 ON s.model_id=m1.UniqueID
+           JOIN model m2 ON m1.model_code=m2.model_code
+           WHERE m2.UniqueID=(SELECT model_id FROM spot WHERE UniqueID=?) AND s.spot_number=?""",
+        (spot_id, row[0]))]
+    return siblings or [spot_id]
+
+
+def _pair_backed_by_wb(db, spot_id, gun_id):
+    """Пара (точка, клещи) подтверждена, если ХОТЬ ОДНА строка WB этой точки
+    (по коду модели и номеру) указывает на эти клещи."""
+    return db.execute(
+        """SELECT 1 FROM weld_point wp
+           JOIN spot s ON s.UniqueID=?
+           JOIN model m ON s.model_id=m.UniqueID
+           WHERE UPPER(wp.model_code)=UPPER(m.model_code) AND wp.gun_id=?
+             AND CAST(wp.spot_number AS REAL)=CAST(s.spot_number AS REAL)
+           LIMIT 1""", (spot_id, gun_id)).fetchone() is not None
+
+
+def _close_if_unbacked(db, spot_id, gun_id, today):
+    """Закрыть активную связку датой, если Weld Balance её больше не подтверждает."""
+    if spot_id is None or gun_id is None or _pair_backed_by_wb(db, spot_id, gun_id):
+        return
+    db.execute('UPDATE welding_setup SET is_active=0, end_date=? '
+               'WHERE spot_id=? AND gun_id=? AND is_active=1', (today, spot_id, gun_id))
+
+
+def close_removed_wb_rows(db, removed) -> None:
+    """После УДАЛЕНИЯ строк WB закрыть связки, которые больше ничем не подтверждены.
+
+    removed — кортежи (model_code, spot_number, gun_id), снятые ДО удаления строк."""
+    from datetime import date
+    today = date.today().isoformat()
+    for code, spot_number, gun_id in removed:
+        num = _parse_spot_num(spot_number)
+        if gun_id is None or num is None:
+            continue
+        for mid in _model_ids_for_code(db, code):
+            s = db.execute('SELECT UniqueID FROM spot WHERE model_id=? AND spot_number=?',
+                           (mid, num)).fetchone()
+            if s:
+                _close_if_unbacked(db, s[0], gun_id, today)
+
+
 def resolve_weld_point_links(db, wp_ids) -> None:
-    """Авто-привязка строки Weld Balance к «карточкам» БД, чтобы точка работала во всех
-    вкладках сайта (Обзор, Дефекты, поиск), а не только в документе WB:
+    """Синхронизация строки Weld Balance с «карточками» БД — WB является источником
+    правды для привязок точка↔клещи (их видят Обзор, Дефекты, уставки):
 
     1. 'Клещи (G)' G.NNN → карточка клещей (gun.g_num) → gun_id.
-    2. (Модель, № точки) → карточка точки (spot); если карточки НЕТ — создаём её
-       (как делает «обогащение» дефекта) → spot_id.
-    3. Если известны и точка, и клещи, но нет активной связки welding_setup —
-       создаём связку (auto_created=1). Именно её видят Обзор/Дефекты/уставки.
+    2. (Код модели, № точки) → карточка точки в КАЖДОЙ модификации кода
+       (A01 → Jolion 2WD и 4WD); нет карточки — создаётся.
+    3. Активная связка welding_setup создаётся для каждой карточки точки.
+    4. Прежние связки этой точки (старые клещи, старый номер/модель, очищенный G),
+       не подтверждённые больше ни одной строкой WB, закрываются датой —
+       история сохраняется в welding_setup и в Журнале.
 
     Клещи с несуществующим номером не создаём (опечатка вероятнее) — остаётся NULL.
     """
     from datetime import date
     today = date.today().isoformat()
     for wp_id in wp_ids:
-        row = db.execute('SELECT gun_mntc, model_id, spot_number, welding_type, gun_id '
+        row = db.execute('SELECT gun_mntc, model_code, spot_number, welding_type, gun_id, spot_id '
                          'FROM weld_point WHERE id=?', (wp_id,)).fetchone()
         if not row:
             continue
-        gun_mntc, model_id, spot_number, welding_type, old_gun_id = row[0], row[1], row[2], row[3], row[4]
+        gun_mntc, code, spot_number, welding_type = row[0], row[1], row[2], row[3]
+        old_gun_id, old_spot_id = row[4], row[5]
         # 1) клещи
         gun_id = None
         m = re.search(r'G[.\s]*0*(\d+)', gun_mntc or '')
         if m:
             g = db.execute('SELECT UniqueID FROM gun WHERE g_num=?', (int(m.group(1)),)).fetchone()
             gun_id = g[0] if g else None
-        # 2) точка: найти или создать карточку
-        spot_id = None
-        if model_id is not None and spot_number not in (None, ''):
-            try:
-                num = int(float(spot_number))
+        # 2) карточки точки во всех модификациях кода: найти или создать
+        new_spots = []
+        num = _parse_spot_num(spot_number)
+        if num is not None:
+            for mid in _model_ids_for_code(db, code):
                 s = db.execute('SELECT UniqueID FROM spot WHERE model_id=? AND spot_number=?',
-                               (model_id, num)).fetchone()
+                               (mid, num)).fetchone()
                 if s:
-                    spot_id = s[0]
+                    new_spots.append(s[0])
                 else:
                     cur = db.execute('INSERT INTO spot (spot_number, model_id, welding_type) VALUES (?,?,?)',
-                                     (num, model_id, welding_type))
-                    spot_id = cur.lastrowid
-            except (ValueError, TypeError):
-                pass
-        # 3) ПЕРЕНОС: клещи в строке сменились → старая связка точки с прежними клещами
-        #    закрывается датой (история сохраняется в welding_setup и в Журнале)
-        if (spot_id is not None and old_gun_id is not None
-                and gun_id is not None and old_gun_id != gun_id):
-            db.execute("UPDATE welding_setup SET is_active=0, end_date=? "
-                       "WHERE spot_id=? AND gun_id=? AND is_active=1",
-                       (today, spot_id, old_gun_id))
-        # 4) связка точка↔клещи (её видят Обзор/Дефекты)
-        if spot_id is not None and gun_id is not None:
-            has = db.execute('SELECT 1 FROM welding_setup WHERE spot_id=? AND gun_id=? AND is_active=1',
-                             (spot_id, gun_id)).fetchone()
-            if not has:
-                db.execute("INSERT INTO welding_setup (comments, start_date, is_active, auto_created, "
-                           "spot_id, gun_id, parameter_id) VALUES ('создано из Weld Balance', ?, 1, 1, ?, ?, NULL)",
-                           (today, spot_id, gun_id))
-        db.execute('UPDATE weld_point SET gun_id=?, spot_id=? WHERE id=?', (gun_id, spot_id, wp_id))
+                                     (num, mid, welding_type))
+                    new_spots.append(cur.lastrowid)
+        # 3) активные связки точка↔клещи (их видят Обзор/Дефекты)
+        if gun_id is not None:
+            for sid in new_spots:
+                has = db.execute('SELECT 1 FROM welding_setup WHERE spot_id=? AND gun_id=? AND is_active=1',
+                                 (sid, gun_id)).fetchone()
+                if not has:
+                    db.execute("INSERT INTO welding_setup (comments, start_date, is_active, auto_created, "
+                               "spot_id, gun_id, parameter_id) VALUES ('создано из Weld Balance', ?, 1, 1, ?, ?, NULL)",
+                               (today, sid, gun_id))
+        db.execute('UPDATE weld_point SET gun_id=?, spot_id=? WHERE id=?',
+                   (gun_id, new_spots[0] if new_spots else None, wp_id))
+        # 4) закрыть осиротевшие пары: старые/новые карточки × старые/новые клещи.
+        #    Проверка «подтверждена ли пара» идёт по УЖЕ обновлённой строке, поэтому
+        #    смена G, номера, модели или очистка G закрывают ровно то, что устарело.
+        candidates = set(_identity_spots(db, old_spot_id)) | set(new_spots)
+        for sid in candidates:
+            for g in {old_gun_id, gun_id}:
+                if g is not None:
+                    _close_if_unbacked(db, sid, g, today)

@@ -19,7 +19,7 @@ from app.audit import (
     table_meta,
 )
 from app.db import get_db
-from app.documents import TOKEN_RE, doc_list, get_documents, resolve_weld_point_links
+from app.documents import TOKEN_RE, close_removed_wb_rows, doc_list, get_documents, resolve_weld_point_links
 from app.errors import api_error
 
 bp = Blueprint('admin', __name__)
@@ -148,6 +148,8 @@ def insert_row(name):
             cur = db.execute(sql, [values[k] for k in keys])
         else:
             cur = db.execute(f'INSERT INTO {_q(name)} DEFAULT VALUES')
+        if name == 'weld_point':
+            resolve_weld_point_links(db, {cur.lastrowid})
         _stamp_commit(db, since, batch)
         return jsonify({'status': 'success', 'id': cur.lastrowid})
     except ValueError as e:
@@ -178,6 +180,8 @@ def update_row(name, pk_val):
         sets = ', '.join(f'{_q(k)}=?' for k in values)
         db.execute(f'UPDATE {_q(name)} SET {sets} WHERE {_q(pk)}=?',
                    list(values.values()) + [pk_val])
+        if name == 'weld_point':
+            resolve_weld_point_links(db, {pk_val})
         _stamp_commit(db, since, batch)
         return jsonify({'status': 'success'})
     except ValueError as e:
@@ -197,7 +201,15 @@ def delete_row(name, pk_val):
     pk, _cols = meta
     try:
         since, batch = max_change_id(db), uuid.uuid4().hex
+        removed = []
+        if name == 'weld_point':
+            r = db.execute('SELECT model_code, spot_number, gun_id FROM weld_point WHERE id=?',
+                           (pk_val,)).fetchone()
+            if r:
+                removed.append(tuple(r))
         db.execute(f'DELETE FROM {_q(name)} WHERE {_q(pk)}=?', (pk_val,))
+        if removed:
+            close_removed_wb_rows(db, removed)
         _stamp_commit(db, since, batch)
         return jsonify({'status': 'success'})
     except Exception as e:
@@ -221,6 +233,7 @@ def batch_apply(name):
     try:
         since, batch = max_change_id(db), uuid.uuid4().hex
         counts = {'insert': 0, 'update': 0, 'delete': 0}
+        wp_touched, wp_removed = [], []
         for ch in changes:
             op = ch.get('op')
             if op == 'update':
@@ -231,20 +244,33 @@ def batch_apply(name):
                 sets = ', '.join(f'{_q(k)}=?' for k in vals)
                 db.execute(f'UPDATE {_q(name)} SET {sets} WHERE {_q(pk)}=?',
                            list(vals.values()) + [ch.get('pk')])
+                if name == 'weld_point':
+                    wp_touched.append(ch.get('pk'))
             elif op == 'insert':
                 vals = ch.get('values', {})
                 _validate_business(db, name, vals)
                 keys = list(vals)
                 if keys:
-                    db.execute(f'INSERT INTO {_q(name)} ({", ".join(_q(k) for k in keys)}) '
-                               f'VALUES ({", ".join("?" * len(keys))})', [vals[k] for k in keys])
+                    cur = db.execute(f'INSERT INTO {_q(name)} ({", ".join(_q(k) for k in keys)}) '
+                                     f'VALUES ({", ".join("?" * len(keys))})', [vals[k] for k in keys])
                 else:
-                    db.execute(f'INSERT INTO {_q(name)} DEFAULT VALUES')
+                    cur = db.execute(f'INSERT INTO {_q(name)} DEFAULT VALUES')
+                if name == 'weld_point':
+                    wp_touched.append(cur.lastrowid)
             elif op == 'delete':
+                if name == 'weld_point':
+                    r = db.execute('SELECT model_code, spot_number, gun_id FROM weld_point WHERE id=?',
+                                   (ch.get('pk'),)).fetchone()
+                    if r:
+                        wp_removed.append(tuple(r))
                 db.execute(f'DELETE FROM {_q(name)} WHERE {_q(pk)}=?', (ch.get('pk'),))
             else:
                 continue
             counts[op] += 1
+        if wp_touched:
+            resolve_weld_point_links(db, set(wp_touched))
+        if wp_removed:
+            close_removed_wb_rows(db, wp_removed)
         stamp_audit(db, _author(), batch, since)
         db.commit()
         return jsonify({'status': 'success', 'batch_id': batch, **counts})
@@ -336,6 +362,10 @@ def _validate_business(db, table, values, exclude_pk=None):
                 p.append(exclude_pk)
             if db.execute(q, p).fetchone():
                 raise ValueError(f'Точка №{spot_number} уже есть в этой модели — номер уникален в пределах модели')
+    if table == 'weld_point' and values.get('model_code') not in (None, ''):
+        codes = [r[0] for r in db.execute('SELECT DISTINCT model_code FROM model')]
+        if str(values['model_code']).upper() not in {c.upper() for c in codes}:
+            raise ValueError(f'Неизвестный код модели «{values["model_code"]}». Допустимые: {", ".join(sorted(codes))}')
 
 
 def sync_gun_transformer(db, gun_id, transformer_id):
@@ -430,6 +460,7 @@ def batch_doc(doc_id):
         since, batch = max_change_id(db), uuid.uuid4().hex
         updates = {}      # (table, pk_value) -> {col: value}
         wp_touched = []   # затронутые weld_point.id — для авто-привязки gun_id/spot_id
+        wp_removed = []   # (model_code, spot_number, gun_id) удалённых строк WB
         for ch in changes:
             op = ch.get('op')
             if op == 'update':
@@ -469,6 +500,11 @@ def batch_doc(doc_id):
                     wp_touched.append(cur.lastrowid)
             elif op == 'delete':
                 pkcol, _ = table_meta(db, primary)
+                if primary == 'weld_point':
+                    r = db.execute('SELECT model_code, spot_number, gun_id FROM weld_point WHERE id=?',
+                                   (ch.get('pk'),)).fetchone()
+                    if r:
+                        wp_removed.append(tuple(r))
                 db.execute(f'DELETE FROM {_q(primary)} WHERE {_q(pkcol)}=?', (ch.get('pk'),))
         for (tbl, pkval), colvals in updates.items():
             _validate_business(db, tbl, colvals, exclude_pk=pkval)
@@ -478,6 +514,8 @@ def batch_doc(doc_id):
         # авто-привязка созданных/изменённых точек WB к клещам и точкам (как импортёр)
         if wp_touched:
             resolve_weld_point_links(db, set(wp_touched))
+        if wp_removed:
+            close_removed_wb_rows(db, wp_removed)
         stamp_audit(db, _author(), batch, since)
         db.commit()
         return jsonify({'status': 'success', 'batch_id': batch, 'rows_updated': len(updates)})

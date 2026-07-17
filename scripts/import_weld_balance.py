@@ -54,13 +54,14 @@ HEADER_CHECK = {7: 'ПИСТОЛЕТА', 9: 'ТОЧКИ', 13: 'МАТЕР', 49: 
 # ('CS655' в имени содержит подстроку 'CS65'); P01 в БД имеет код 'P01G'.
 FILE_TOKENS = [('A13T', 'A13T'), ('A01', 'A01'), ('P01', 'P01G'), ('CS55', 'CS55'), ('CS65', 'CS65')]
 
-# Некорректные файлы — пропускаем при импорте. Файл changan «cs65» оказался полной копией «cs55»
-# (дубликат), поэтому импортируем только cs55. Точный маркер 'cs65.xlsm' не задевает 'cs55.xlsm'
-# и платформенный код 'CS655'. Удалите отсюда, когда появится корректный отдельный файл cs65.
-SKIP_FILES = ['cs65.xlsm']
+# Некорректные файлы — пропускаем при импорте. Оба changan-файла оказались копиями ЧУЖИХ
+# данных: «cs65» — копия «cs55», а «CS655 … changan cs55» — копия Jolion (A01): внутри
+# GW-0A01-процессы, те же точки и клещи (проверено построчно 2026-07-17). Настоящего
+# Weld Balance для CS55/CS65 нет — уберите маркеры, когда появятся корректные файлы.
+SKIP_FILES = ['cs65.xlsm', 'CS655 V1.0 changan cs55']
 
 WELD_POINT_COLS = [
-    'model_id', 'model_variant', 'source_file', 'sh_num', 'zone', 'wb_station', 'process_no',
+    'model_code', 'model_variant', 'source_file', 'sh_num', 'zone', 'wb_station', 'process_no',
     'operation_name', 'stage_no', 'welding_type', 'side', 'joint_type', 'gun_type', 'gun_mntc',
     'gun_id', 'station_id', 'spot_number', 'spot_id', 'spot_number_op', 'std_thickness', 'coating',
     'lme_hold', 'nugget', 'check_mark', 'important', 'chisel_access', 'spec', 'change_index',
@@ -156,20 +157,21 @@ def resolve_model_map(db):
     return m
 
 
-def link_row(db, rec, model_ids, gun_cache, spot_cache):
-    # model_id: если у кода одна модель — ставим; если несколько (A01/P01) — оставляем NULL (+variant)
-    rec['model_id'] = model_ids[0] if len(model_ids) == 1 else None
+def link_row(db, rec, code, model_ids, gun_cache, spot_cache):
+    # model_code — код модели файла; охватывает ВСЕ модификации кода (A01 → 2WD и 4WD).
+    rec['model_code'] = code
     # gun по MNTC G.NNN -> g_num
     mntc = rec.get('gun_mntc') or ''
     mm = re.search(r'G[.\s]*0*(\d+)', mntc)
     if mm:
         gnum = int(mm.group(1))
         rec['gun_id'] = gun_cache.get(gnum)
-    # spot по (model_id, spot_number)
+    # spot по (первая модель кода, spot_number) — карточки остальных модификаций
+    # и связки создаёт scripts/sync_wb_links.py после импорта
     sn = rec.get('spot_number')
-    if rec['model_id'] is not None and sn is not None:
+    if model_ids and sn is not None:
         try:
-            rec['spot_id'] = spot_cache.get((rec['model_id'], int(float(sn))))
+            rec['spot_id'] = spot_cache.get((model_ids[0], int(float(sn))))
         except (ValueError, TypeError):
             pass
 
@@ -228,7 +230,7 @@ def run(directory: str, db_path: str, apply: bool) -> None:
         gmatch = smatch = 0
         variants = {}
         for rec in rows:
-            link_row(db, rec, model_ids, gun_cache, spot_cache)
+            link_row(db, rec, code, model_ids, gun_cache, spot_cache)
             if rec['gun_id']:
                 gmatch += 1
             if rec['spot_id']:

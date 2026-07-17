@@ -54,6 +54,15 @@ def test_doc_batch_insert_validated(client):
     assert 'уже существуют' in r.get_json()['message']
 
 
+def test_unknown_model_code_rejected(client):
+    from tests.test_admin_docs import wb_doc
+    doc = wb_doc(client, 'A13T')
+    r = client.post(f'/api/admin/doc/{doc}/batch', json={'changes': [
+        {'op': 'insert', 'values': {'spot_number': '77100', 'model_code': 'XXX'}}]})
+    assert r.status_code == 400
+    assert 'Неизвестный код модели' in r.get_json()['message']
+
+
 def test_doc_batch_update_validated(client, app):
     m1, _ = _models(app)
     client.post('/api/admin/table/spot', json={'values': {'spot_number': 77002, 'model_id': m1}})

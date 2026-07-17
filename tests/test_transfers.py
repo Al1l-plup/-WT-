@@ -52,12 +52,11 @@ def test_point_transfer_via_g_change(client, app):
     # два свежих гана с уникальными G-номерами
     g1 = client.post('/api/admin/table/gun', json={'values': {'g_num': 91001, 'gun_type': 'X'}}).get_json()['id']
     g2 = client.post('/api/admin/table/gun', json={'values': {'g_num': 91002, 'gun_type': 'X'}}).get_json()['id']
-    m1 = _db(app).execute('SELECT UniqueID FROM model LIMIT 1').fetchone()[0]
     doc = wb_doc(client, 'A13T')
 
     # строка WB c G.91001 → авто-создание карточки точки + активной связки welding_setup
     r = client.post(f'/api/admin/doc/{doc}/batch', json={'changes': [
-        {'op': 'insert', 'values': {'gun_mntc': 'G.91001', 'spot_number': '88001', 'model_id': m1}}]})
+        {'op': 'insert', 'values': {'gun_mntc': 'G.91001', 'spot_number': '88001', 'model_code': 'A13T'}}]})
     assert r.get_json()['status'] == 'success'
 
     db = _db(app)
@@ -79,3 +78,94 @@ def test_point_transfer_via_g_change(client, app):
     assert db.execute('SELECT 1 FROM welding_setup WHERE spot_id=? AND gun_id=? AND is_active=1',
                       (spot_id, g2)).fetchone()  # новая активна
     assert db.execute('SELECT gun_id FROM weld_point WHERE id=?', (wp_id,)).fetchone()[0] == g2
+
+
+def _active(db, spot_id, gun_id):
+    return db.execute('SELECT COUNT(*) FROM welding_setup WHERE spot_id=? AND gun_id=? AND is_active=1',
+                      (spot_id, gun_id)).fetchone()[0]
+
+
+def test_point_clear_g_closes_link(client, app):
+    """Очистили «Клещи (G)» у точки → связка закрывается датой, в Обзоре точки на гане меньше."""
+    g1 = client.post('/api/admin/table/gun', json={'values': {'g_num': 91003, 'gun_type': 'X'}}).get_json()['id']
+    doc = wb_doc(client, 'A13T')
+    client.post(f'/api/admin/doc/{doc}/batch', json={'changes': [
+        {'op': 'insert', 'values': {'gun_mntc': 'G.91003', 'spot_number': '88002', 'model_code': 'A13T'}}]})
+    db = _db(app)
+    wp_id, spot_id = db.execute("SELECT id, spot_id FROM weld_point WHERE spot_number='88002'").fetchone()
+    assert _active(db, spot_id, g1) == 1
+
+    r = client.post(f'/api/admin/doc/{doc}/batch', json={'changes': [
+        {'op': 'update', 'field': 'gun_mntc', 'value': '', 'row_pks': {'weld_point': wp_id}}]})
+    assert r.get_json()['status'] == 'success'
+    db = _db(app)
+    assert _active(db, spot_id, g1) == 0
+    old = db.execute('SELECT is_active, end_date FROM welding_setup WHERE spot_id=? AND gun_id=?',
+                     (spot_id, g1)).fetchone()
+    assert old[0] == 0 and old[1] is not None
+    assert db.execute('SELECT gun_id FROM weld_point WHERE id=?', (wp_id,)).fetchone()[0] is None
+
+
+def test_row_delete_closes_link(client, app):
+    """Удалили строку WB → неподтверждённая связка закрывается датой."""
+    g1 = client.post('/api/admin/table/gun', json={'values': {'g_num': 91004, 'gun_type': 'X'}}).get_json()['id']
+    doc = wb_doc(client, 'A13T')
+    client.post(f'/api/admin/doc/{doc}/batch', json={'changes': [
+        {'op': 'insert', 'values': {'gun_mntc': 'G.91004', 'spot_number': '88003', 'model_code': 'A13T'}}]})
+    db = _db(app)
+    wp_id, spot_id = db.execute("SELECT id, spot_id FROM weld_point WHERE spot_number='88003'").fetchone()
+    assert _active(db, spot_id, g1) == 1
+
+    r = client.post(f'/api/admin/doc/{doc}/batch', json={'changes': [{'op': 'delete', 'pk': wp_id}]})
+    assert r.get_json()['status'] == 'success'
+    db = _db(app)
+    assert _active(db, spot_id, g1) == 0
+
+
+def test_duplicate_wb_rows_keep_link(client, app):
+    """Две строки WB на одну точку+клещи: правка одной не закрывает связку, пока живёт вторая."""
+    g1 = client.post('/api/admin/table/gun', json={'values': {'g_num': 91005, 'gun_type': 'X'}}).get_json()['id']
+    doc = wb_doc(client, 'A13T')
+    for _ in range(2):
+        client.post(f'/api/admin/doc/{doc}/batch', json={'changes': [
+            {'op': 'insert', 'values': {'gun_mntc': 'G.91005', 'spot_number': '88004', 'model_code': 'A13T'}}]})
+    db = _db(app)
+    rows = db.execute("SELECT id, spot_id FROM weld_point WHERE spot_number='88004'").fetchall()
+    assert len(rows) == 2
+    spot_id = rows[0][1]
+    assert _active(db, spot_id, g1) == 1  # связка одна, не дублируется
+
+    # очистили G только в ПЕРВОЙ строке — вторая всё ещё подтверждает пару
+    client.post(f'/api/admin/doc/{doc}/batch', json={'changes': [
+        {'op': 'update', 'field': 'gun_mntc', 'value': '', 'row_pks': {'weld_point': rows[0][0]}}]})
+    assert _active(_db(app), spot_id, g1) == 1
+
+    # удалили и вторую строку — теперь пара не подтверждена, связка закрыта
+    client.post(f'/api/admin/doc/{doc}/batch', json={'changes': [{'op': 'delete', 'pk': rows[1][0]}]})
+    assert _active(_db(app), spot_id, g1) == 0
+
+
+def test_multi_model_code_links_both_modifications(client, app):
+    """Код A01 = Jolion 2WD и 4WD: строка WB создаёт карточку и связку в ОБЕИХ модификациях,
+    перенос на другие клещи тоже отрабатывает в обеих."""
+    g1 = client.post('/api/admin/table/gun', json={'values': {'g_num': 91006, 'gun_type': 'X'}}).get_json()['id']
+    g2 = client.post('/api/admin/table/gun', json={'values': {'g_num': 91007, 'gun_type': 'X'}}).get_json()['id']
+    doc = wb_doc(client, 'A01')
+    r = client.post(f'/api/admin/doc/{doc}/batch', json={'changes': [
+        {'op': 'insert', 'values': {'gun_mntc': 'G.91006', 'spot_number': '88005', 'model_code': 'A01'}}]})
+    assert r.get_json()['status'] == 'success'
+
+    db = _db(app)
+    spots = db.execute("""SELECT s.UniqueID FROM spot s JOIN model m ON s.model_id=m.UniqueID
+                          WHERE m.model_code='A01' AND s.spot_number=88005""").fetchall()
+    assert len(spots) == 2  # карточка в каждой модификации
+    for (sid,) in spots:
+        assert _active(db, sid, g1) == 1
+
+    wp_id = db.execute("SELECT id FROM weld_point WHERE spot_number='88005'").fetchone()[0]
+    client.post(f'/api/admin/doc/{doc}/batch', json={'changes': [
+        {'op': 'update', 'field': 'gun_mntc', 'value': 'G.91007', 'row_pks': {'weld_point': wp_id}}]})
+    db = _db(app)
+    for (sid,) in spots:
+        assert _active(db, sid, g1) == 0  # старые клещи закрыты в обеих модификациях
+        assert _active(db, sid, g2) == 1  # новые активны в обеих

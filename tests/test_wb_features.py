@@ -33,10 +33,10 @@ def test_wb_tab_validation(client):
 
 
 def test_weld_point_autolink(client, app):
-    # строка WB с «Клещи (G)»=G.1 и модель Tiggo2 (id=1) + № точки 17 → авто gun_id/spot_id
+    # строка WB с «Клещи (G)»=G.1 и кодом модели A13T (Tiggo2) + № точки 17 → авто gun_id/spot_id
     doc = wb_doc(client, 'A13T')
     res = client.post(f'/api/admin/doc/{doc}/batch', json={'changes': [
-        {'op': 'insert', 'values': {'gun_mntc': 'G.1', 'model_id': 1, 'spot_number': '17',
+        {'op': 'insert', 'values': {'gun_mntc': 'G.1', 'model_code': 'A13T', 'spot_number': '17',
                                     'zone': 'autolink', 'row_order': 1}}]}).get_json()
     assert res['status'] == 'success'
     db = sqlite3.connect(app.config['DB_PATH'])
@@ -51,7 +51,7 @@ def test_weld_point_creates_spot_card(client, app):
     и становится видимой для остальных вкладок (Обзор, поиск точек, дефекты)."""
     doc = wb_doc(client, 'A13T')
     res = client.post(f'/api/admin/doc/{doc}/batch', json={'changes': [
-        {'op': 'insert', 'values': {'gun_mntc': 'G.1', 'model_id': 1, 'spot_number': '99001',
+        {'op': 'insert', 'values': {'gun_mntc': 'G.1', 'model_code': 'A13T', 'spot_number': '99001',
                                     'welding_type': 'PSW', 'zone': 'newcard', 'row_order': 1}}]}).get_json()
     assert res['status'] == 'success'
 
