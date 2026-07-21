@@ -15,66 +15,120 @@
 """
 import re
 
-# ── общие колонки Weld Balance (показываем ВСЕ колонки Excel; ничего не теряем) ──
-# Реальные поля weld_point — редактируемые; «прочие» колонки Excel лежат в raw_extra (JSON) —
-# показываем их read-only через json_extract. Столбцы «Вариант 1-4» — символы-пометки из Excel
-# (какой Вариант = 2WD/4WD/ToD, в данных не подписано — по запросу переименуем).
+# ── колонки Weld Balance = ТОЧНОЕ зеркало листа «Welds» Excel (колонка-в-колонку,
+#    col0..col52), чтобы Ctrl+V из Excel вставлялся 1:1 без сдвига столбцов. Детали
+#    слоёв (Excel col11-25) пишутся в под-таблицу weld_point_part через setter
+#    'wb_part'; служебные колонки Excel (STUCK, метки «!», Laser, доп. проверки)
+#    хранятся в raw_extra (JSON) и редактируются через setter 'raw_extra'. Внутренние
+#    поля (Клещи id, Точка id, Модель-код, порядок) заблокированы и вынесены В КОНЕЦ,
+#    чтобы не занимать позиции вставки. Порядок первых 53 колонок менять нельзя —
+#    он привязан к структуре Excel (см. scripts/import_weld_balance.py::IDX).
+
+
+def _wp(label, field, **extra):
+    """Прямое поле weld_point (редактируемое)."""
+    return {'label': label, 'field': field, 'expr': f'wp.{field}', 'edit': True,
+            'table': 'weld_point', 'col': field, **extra}
+
+
+def _raw(label, field, key):
+    """Служебная колонка Excel — хранится в weld_point.raw_extra по ключу key."""
+    return {'label': label, 'field': field, 'edit': True, 'setter': 'raw_extra', 'raw_key': key,
+            'expr': f"json_extract(wp.raw_extra,'$.{key}')"}
+
+
+# Деталь слоя: пишется в weld_point_part (layer_no=слой). Материал — имя из wb_material.
+_PART_FIELDS = [('НАИМЕНОВАНИЕ', 'name', 'part_name'), ('НОМЕР ДЕТАЛИ', 'num', 'part_number'),
+                ('МАТЕРИАЛ', 'mat', 'material'), ('ПОКРЫТИЕ', 'coat', 'coating'),
+                ('Т-НА', 'thk', 'thickness')]
+
+
+def _part_cols(layer):
+    cols = []
+    for label, short, part_field in _PART_FIELDS:
+        expr = (f'm{layer}.name' if part_field == 'material' else f'p{layer}.{part_field}')
+        cols.append({'label': f'{label} {layer}', 'field': f'part{layer}_{short}', 'edit': True,
+                     'setter': 'wb_part', 'part_layer': layer, 'part_field': part_field, 'expr': expr})
+    return cols
+
+
 _WB_COLUMNS = [
-    {'label': 'Лист №', 'field': 'sh_num', 'expr': 'wp.sh_num', 'edit': True, 'table': 'weld_point', 'col': 'sh_num'},
-    {'label': 'Зона', 'field': 'zone', 'expr': 'wp.zone', 'edit': True, 'table': 'weld_point', 'col': 'zone'},
-    {'label': 'Станция', 'field': 'wb_station', 'expr': 'wp.wb_station', 'edit': True, 'table': 'weld_point', 'col': 'wb_station'},
-    {'label': '№ процесса', 'field': 'process_no', 'expr': 'wp.process_no', 'edit': True, 'table': 'weld_point', 'col': 'process_no'},
-    {'label': 'Операция', 'field': 'operation_name', 'expr': 'wp.operation_name', 'edit': True, 'table': 'weld_point', 'col': 'operation_name'},
-    {'label': 'Этап', 'field': 'stage_no', 'expr': 'wp.stage_no', 'edit': True, 'table': 'weld_point', 'col': 'stage_no'},
-    {'label': 'Тип сварки', 'field': 'welding_type', 'expr': 'wp.welding_type', 'edit': True, 'table': 'weld_point', 'col': 'welding_type'},
-    {'label': 'Тип клещей', 'field': 'gun_type', 'expr': 'wp.gun_type', 'edit': True, 'table': 'weld_point', 'col': 'gun_type'},
-    {'label': 'Клещи (G)', 'field': 'gun_mntc', 'expr': 'wp.gun_mntc', 'edit': True, 'table': 'weld_point', 'col': 'gun_mntc',
-     'hint': 'Формат G.043 — по номеру точка автоматически привяжется к клещам. СМЕНА номера = ПЕРЕНОС точки: старая связка закроется датой, создастся новая.'},
-    {'label': '№ точки', 'field': 'spot_number', 'expr': 'wp.spot_number', 'edit': True, 'table': 'weld_point', 'col': 'spot_number',
-     'hint': 'Номер уникален в пределах модели. Вместе с «Модель» создаёт/находит карточку точки для Обзора и Дефектов.'},
-    {'label': 'Сторона', 'field': 'side', 'expr': 'wp.side', 'edit': True, 'table': 'weld_point', 'col': 'side'},
-    {'label': 'Модель (код)', 'field': 'model_code', 'expr': 'wp.model_code', 'edit': True, 'table': 'weld_point', 'col': 'model_code',
+    _wp('Лист №', 'sh_num'),                    # Excel col0
+    _wp('Зона', 'zone'),                        # col1
+    _wp('Станция', 'wb_station'),               # col2
+    _wp('№ процесса', 'process_no'),            # col3
+    _wp('Операция', 'operation_name'),          # col4
+    _wp('Этап', 'stage_no'),                    # col5
+    _wp('Тип сварки', 'welding_type'),          # col6
+    _wp('Тип клещей', 'gun_type'),              # col7
+    _wp('Клещи (G)', 'gun_mntc',                # col8
+        hint='Формат G.043 — по номеру точка автоматически привяжется к клещам. '
+             'СМЕНА номера = ПЕРЕНОС точки: старая связка закроется датой, создастся новая.'),
+    _wp('№ точки', 'spot_number',               # col9
+        hint='Номер уникален в пределах модели. Вместе с «Модель (код)» создаёт/находит карточку точки.'),
+    _wp('Сторона', 'side'),                     # col10
+    *_part_cols(1),                             # col11-15  (деталь слоя 1)
+    *_part_cols(2),                             # col16-20  (деталь слоя 2)
+    *_part_cols(3),                             # col21-25  (деталь слоя 3)
+    _raw('STUCK', 'x_stuck', 'stuck'),          # col26
+    _wp('Ст. толщина', 'std_thickness'),        # col27
+    _wp('Покрытие', 'coating'),                 # col28
+    _wp('LME (hold)', 'lme_hold'),              # col29
+    _wp('Наггет', 'nugget'),                    # col30
+    _wp('Проверка', 'check_mark'),              # col31
+    _wp('Важность', 'important'),               # col32
+    _wp('Доступ зубила', 'chisel_access'),      # col33
+    _raw('Служебн. 1', 'x_m1', 'mark1'),        # col34
+    _raw('Служебн. 2', 'x_m2', 'mark2'),        # col35
+    _raw('Служебн. 3', 'x_m3', 'mark3'),        # col36
+    _raw('Coord Laser', 'x_laser', 'coord_laser'),  # col37
+    _wp('Change Index', 'change_index'),        # col38
+    _wp('SPEC', 'spec'),                        # col39
+    _raw('Проверка 2', 'x_check2', 'check2'),   # col40
+    _wp('WP stack info', 'wp_stack_info'),      # col41
+    _raw('All points', 'x_allpts', 'check_all_points'),   # col42
+    _raw('Work process', 'x_wproc', 'check_work_process'),  # col43
+    _raw('A-лист пересм.', 'x_alist', 'a_list_revised'),   # col44
+    _wp('Вариант 1', 'variant_1'),              # col45
+    _wp('Вариант 2', 'variant_2'),              # col46
+    _wp('Вариант 3', 'variant_3'),              # col47
+    _wp('Вариант 4', 'variant_4'),              # col48
+    _wp('X', 'coord_x'),                        # col49
+    _wp('Y', 'coord_y'),                        # col50
+    _wp('Z', 'coord_z'),                        # col51
+    _wp('Вариант (Models)', 'model_variant'),   # col52
+    # ── заблокированные/внутренние поля — В КОНЦЕ (не входят в вставку из Excel) ──
+    {'label': 'Модель (код)', 'field': 'model_code', 'expr': 'wp.model_code', 'edit': True,
+     'table': 'weld_point', 'col': 'model_code',
      'hint': 'Код модели: A13T, A01, P01G, CS55, CS65. Код + № точки → карточка точки (создаётся, если её нет). '
              'Коды с двумя модификациями (A01 — Jolion 2WD/4WD, P01G — Tank ToD/NOT ToD) привязывают точку к ОБЕИМ.'},
-    {'label': 'Вариант (Models)', 'field': 'model_variant', 'expr': 'wp.model_variant', 'edit': True, 'table': 'weld_point', 'col': 'model_variant'},
-    {'label': 'Ст. толщина', 'field': 'std_thickness', 'expr': 'wp.std_thickness', 'edit': True, 'table': 'weld_point', 'col': 'std_thickness'},
-    {'label': 'Покрытие', 'field': 'coating', 'expr': 'wp.coating', 'edit': True, 'table': 'weld_point', 'col': 'coating'},
-    {'label': 'Наггет', 'field': 'nugget', 'expr': 'wp.nugget', 'edit': True, 'table': 'weld_point', 'col': 'nugget'},
-    {'label': 'Проверка', 'field': 'check_mark', 'expr': 'wp.check_mark', 'edit': True, 'table': 'weld_point', 'col': 'check_mark'},
-    {'label': 'Важность', 'field': 'important', 'expr': 'wp.important', 'edit': True, 'table': 'weld_point', 'col': 'important'},
-    {'label': 'Доступ зубила', 'field': 'chisel_access', 'expr': 'wp.chisel_access', 'edit': True, 'table': 'weld_point', 'col': 'chisel_access'},
-    {'label': 'SPEC', 'field': 'spec', 'expr': 'wp.spec', 'edit': True, 'table': 'weld_point', 'col': 'spec'},
-    {'label': 'Change Index', 'field': 'change_index', 'expr': 'wp.change_index', 'edit': True, 'table': 'weld_point', 'col': 'change_index'},
-    {'label': 'WP stack info', 'field': 'wp_stack_info', 'expr': 'wp.wp_stack_info', 'edit': True, 'table': 'weld_point', 'col': 'wp_stack_info'},
-    {'label': 'Вариант 1', 'field': 'variant_1', 'expr': 'wp.variant_1', 'edit': True, 'table': 'weld_point', 'col': 'variant_1'},
-    {'label': 'Вариант 2', 'field': 'variant_2', 'expr': 'wp.variant_2', 'edit': True, 'table': 'weld_point', 'col': 'variant_2'},
-    {'label': 'Вариант 3', 'field': 'variant_3', 'expr': 'wp.variant_3', 'edit': True, 'table': 'weld_point', 'col': 'variant_3'},
-    {'label': 'Вариант 4', 'field': 'variant_4', 'expr': 'wp.variant_4', 'edit': True, 'table': 'weld_point', 'col': 'variant_4'},
-    {'label': 'X', 'field': 'coord_x', 'expr': 'wp.coord_x', 'edit': True, 'table': 'weld_point', 'col': 'coord_x'},
-    {'label': 'Y', 'field': 'coord_y', 'expr': 'wp.coord_y', 'edit': True, 'table': 'weld_point', 'col': 'coord_y'},
-    {'label': 'Z', 'field': 'coord_z', 'expr': 'wp.coord_z', 'edit': True, 'table': 'weld_point', 'col': 'coord_z'},
     {'label': 'Клещи id', 'field': 'gun_id', 'expr': 'wp.gun_id', 'edit': False},
     {'label': 'Точка id', 'field': 'spot_id', 'expr': 'wp.spot_id', 'edit': False},
     {'label': 'Файл-источник', 'field': 'source_file', 'expr': 'wp.source_file', 'edit': False},
-    {'label': 'STUCK', 'field': 'x_stuck', 'expr': "json_extract(wp.raw_extra,'$.stuck')", 'edit': False},
-    {'label': 'Проверка 2', 'field': 'x_check2', 'expr': "json_extract(wp.raw_extra,'$.check2')", 'edit': False},
-    {'label': 'All points', 'field': 'x_allpts', 'expr': "json_extract(wp.raw_extra,'$.check_all_points')", 'edit': False},
-    {'label': 'Work process', 'field': 'x_wproc', 'expr': "json_extract(wp.raw_extra,'$.check_work_process')", 'edit': False},
-    {'label': 'A-лист пересм.', 'field': 'x_alist', 'expr': "json_extract(wp.raw_extra,'$.a_list_revised')", 'edit': False},
-    {'label': 'Coord Laser', 'field': 'x_laser', 'expr': "json_extract(wp.raw_extra,'$.coord_laser')", 'edit': False},
-    {'label': 'Служебн. 1', 'field': 'x_m1', 'expr': "json_extract(wp.raw_extra,'$.mark1')", 'edit': False},
-    {'label': 'Служебн. 2', 'field': 'x_m2', 'expr': "json_extract(wp.raw_extra,'$.mark2')", 'edit': False},
-    {'label': 'Служебн. 3', 'field': 'x_m3', 'expr': "json_extract(wp.raw_extra,'$.mark3')", 'edit': False},
     # Порядок строки в документе (как в листе Excel). Скрыт в UI, но редактируем —
     # вставка/перемещение строк в гриде меняет его через обычный batch.
     {'label': '#', 'field': 'row_order', 'expr': 'wp.row_order', 'edit': True,
      'table': 'weld_point', 'col': 'row_order', 'hidden': True},
 ]
 
+# Кол-во колонок, соответствующих листу Excel (col0..col52) — на них рассчитана вставка.
+WB_EXCEL_COLUMN_COUNT = 53
+
+# JOIN'ы деталей слоёв 1-3 (по одной строке weld_point_part на слой — дублей нет)
+# и их материалов, чтобы плоские колонки деталей читались одним запросом.
+_WB_BASE = """FROM weld_point wp
+        LEFT JOIN weld_point_part p1 ON p1.weld_point_id=wp.id AND p1.layer_no=1
+        LEFT JOIN weld_point_part p2 ON p2.weld_point_id=wp.id AND p2.layer_no=2
+        LEFT JOIN weld_point_part p3 ON p3.weld_point_id=wp.id AND p3.layer_no=3
+        LEFT JOIN wb_material m1 ON p1.material_id=m1.id
+        LEFT JOIN wb_material m2 ON p2.material_id=m2.id
+        LEFT JOIN wb_material m3 ON p3.material_id=m3.id"""
+
+
 def _wb_doc(title, where, manual_src):
     return {
         'title': title,
-        'base': 'FROM weld_point wp',
+        'base': _WB_BASE,
         'where': where,
         'pks': {'weld_point': 'wp.id'},
         'primary': 'weld_point',

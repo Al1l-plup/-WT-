@@ -405,6 +405,65 @@ def sync_parameter_guns(db, parameter_id, value):
                    (today, parameter_id, gun_id))
 
 
+def set_raw_extra(db, wp_id, key, value):
+    """Записать служебную колонку Excel в weld_point.raw_extra (JSON). Пусто → удалить ключ."""
+    if value in (None, ''):
+        db.execute("UPDATE weld_point SET raw_extra=json_remove(COALESCE(raw_extra,'{}'), ?) WHERE id=?",
+                   (f'$.{key}', wp_id))
+    else:
+        db.execute("UPDATE weld_point SET raw_extra=json_set(COALESCE(raw_extra,'{}'), ?, ?) WHERE id=?",
+                   (f'$.{key}', str(value), wp_id))
+
+
+# Прямые (не material) поля детали, разрешённые к записи в weld_point_part.
+_WB_PART_DIRECT = {'part_name', 'part_number', 'coating', 'thickness'}
+
+
+def set_wb_part(db, wp_id, layer, field, value):
+    """Записать плоскую колонку детали слоя в weld_point_part (одна строка на слой).
+    Материал нормализуется через wb_material (upsert по имени)."""
+    row = db.execute('SELECT id FROM weld_point_part WHERE weld_point_id=? AND layer_no=? LIMIT 1',
+                     (wp_id, layer)).fetchone()
+    if field == 'material':
+        mat_id = None
+        name = str(value).strip() if value not in (None, '') else ''
+        if name:
+            m = db.execute('SELECT id FROM wb_material WHERE name=?', (name,)).fetchone()
+            mat_id = m[0] if m else db.execute('INSERT INTO wb_material (name) VALUES (?)', (name,)).lastrowid
+        if row:
+            db.execute('UPDATE weld_point_part SET material_id=? WHERE id=?', (mat_id, row[0]))
+        elif mat_id is not None:
+            db.execute('INSERT INTO weld_point_part (weld_point_id, layer_no, material_id) VALUES (?,?,?)',
+                       (wp_id, layer, mat_id))
+        return
+    if field not in _WB_PART_DIRECT:
+        raise ValueError(f'Недопустимое поле детали: {field}')
+    if row:
+        db.execute(f'UPDATE weld_point_part SET {_q(field)}=? WHERE id=?', (value, row[0]))
+    elif value not in (None, ''):
+        db.execute(f'INSERT INTO weld_point_part (weld_point_id, layer_no, {_q(field)}) VALUES (?,?,?)',
+                   (wp_id, layer, value))
+
+
+def _run_doc_setter(db, c, pks, value, wp_pk):
+    """Записать значение виртуальной (setter) колонки документа в её целевые таблицы."""
+    s = c['setter']
+    if s == 'parameter_guns':
+        pid = pks.get('parameters')
+        if pid not in (None, ''):
+            sync_parameter_guns(db, pid, value)
+    elif s == 'gun_transformer':
+        gid = pks.get('gun')
+        if gid not in (None, ''):
+            sync_gun_transformer(db, gid, value)
+    elif s == 'raw_extra':
+        if wp_pk not in (None, ''):
+            set_raw_extra(db, wp_pk, c['raw_key'], value)
+    elif s == 'wb_part':
+        if wp_pk not in (None, ''):
+            set_wb_part(db, wp_pk, c['part_layer'], c['part_field'], value)
+
+
 def _doc_read(db, cfg, args):
     cols = cfg['columns']
     pk_sel = [f'{expr} AS "__pk_{tbl}"' for tbl, expr in cfg['pks'].items()]
@@ -468,14 +527,8 @@ def batch_doc(doc_id):
                 if not c:
                     continue
                 if c.get('setter'):  # виртуальная колонка со спец-логикой записи
-                    if c['setter'] == 'parameter_guns':
-                        pid = (ch.get('row_pks') or {}).get('parameters')
-                        if pid not in (None, ''):
-                            sync_parameter_guns(db, pid, ch.get('value'))
-                    elif c['setter'] == 'gun_transformer':
-                        gid = (ch.get('row_pks') or {}).get('gun')
-                        if gid not in (None, ''):
-                            sync_gun_transformer(db, gid, ch.get('value'))
+                    pks = ch.get('row_pks') or {}
+                    _run_doc_setter(db, c, pks, ch.get('value'), pks.get('weld_point'))
                     continue
                 pkval = (ch.get('row_pks') or {}).get(c['table'])
                 if pkval in (None, ''):
@@ -484,8 +537,10 @@ def batch_doc(doc_id):
                 if c['table'] == 'weld_point':
                     wp_touched.append(pkval)
             elif op == 'insert':
-                vals = {editable[f]['col']: v for f, v in (ch.get('values') or {}).items()
-                        if f in editable and editable[f].get('table') == primary}
+                row_vals = ch.get('values') or {}
+                # прямые колонки первичной таблицы (setter-колонки пишутся отдельно ниже)
+                vals = {editable[f]['col']: v for f, v in row_vals.items()
+                        if f in editable and editable[f].get('table') == primary and not editable[f].get('setter')}
                 # обязательные значения по умолчанию (напр. source_file WB-документа)
                 for k, v in (cfg.get('insert_defaults') or {}).items():
                     vals.setdefault(k, v)
@@ -496,8 +551,15 @@ def batch_doc(doc_id):
                                      f'VALUES ({", ".join("?" * len(keys))})', [vals[k] for k in keys])
                 else:
                     cur = db.execute(f'INSERT INTO {_q(primary)} DEFAULT VALUES')
+                newpk = cur.lastrowid
                 if primary == 'weld_point':
-                    wp_touched.append(cur.lastrowid)
+                    wp_touched.append(newpk)
+                # setter-колонки новой строки (детали слоёв, raw_extra) — по свежему pk
+                wp_pk = newpk if primary == 'weld_point' else None
+                for f, v in row_vals.items():
+                    col = editable.get(f)
+                    if col and col.get('setter'):
+                        _run_doc_setter(db, col, {}, v, wp_pk)
             elif op == 'delete':
                 pkcol, _ = table_meta(db, primary)
                 if primary == 'weld_point':
