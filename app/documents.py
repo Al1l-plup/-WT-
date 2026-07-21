@@ -263,12 +263,58 @@ def _pair_backed_by_wb(db, spot_id, gun_id):
            LIMIT 1""", (spot_id, gun_id)).fetchone() is not None
 
 
+# Связки, которыми управляет WB-синхронизация (загрузки + авто-связки). Ручные
+# привязки (напр. обогащение дефектов) под это условие не подпадают и не трогаются.
+_WB_LINK_ORIGIN = ("(comments LIKE 'Первоначальная загрузка%' "
+                   "OR comments = 'создано из Weld Balance')")
+
+
+def _ensure_active_link(db, spot_id, gun_id, today) -> None:
+    """Гарантировать РОВНО одну активную связку (точка, клещи), сохранив программу сварки.
+
+    parameter_id наследуется от прежней связки той же пары (точка, клещи) — в т.ч. от
+    первоначальной загрузки, — чтобы Ток/Режим не терялись при переносе точки туда-обратно.
+    Прежняя авто-связка этой пары РЕАКТИВИРУЕТСЯ (а не плодится новая), чтобы история
+    связей не засорялась дубликатами."""
+    inh = db.execute("SELECT parameter_id FROM welding_setup WHERE spot_id=? AND gun_id=? "
+                     "AND parameter_id IS NOT NULL ORDER BY start_date DESC, UniqueID DESC LIMIT 1",
+                     (spot_id, gun_id)).fetchone()
+    param = inh[0] if inh else None
+    act = db.execute("SELECT UniqueID, parameter_id FROM welding_setup WHERE spot_id=? AND gun_id=? "
+                     "AND is_active=1 ORDER BY UniqueID DESC LIMIT 1", (spot_id, gun_id)).fetchone()
+    if act:
+        if act[1] is None and param is not None:  # активная есть, но программа утеряна — вернуть
+            db.execute('UPDATE welding_setup SET parameter_id=? WHERE UniqueID=?', (param, act[0]))
+        return
+    arch = db.execute("SELECT UniqueID FROM welding_setup WHERE spot_id=? AND gun_id=? AND is_active=0 "
+                      "AND comments='создано из Weld Balance' ORDER BY start_date DESC, UniqueID DESC LIMIT 1",
+                      (spot_id, gun_id)).fetchone()
+    if arch:
+        db.execute('UPDATE welding_setup SET is_active=1, end_date=NULL, start_date=?, '
+                   'parameter_id=COALESCE(parameter_id, ?) WHERE UniqueID=?', (today, param, arch[0]))
+    else:
+        db.execute("INSERT INTO welding_setup (comments, start_date, is_active, auto_created, "
+                   "spot_id, gun_id, parameter_id) VALUES ('создано из Weld Balance', ?, 1, 1, ?, ?, ?)",
+                   (today, spot_id, gun_id, param))
+
+
 def _close_if_unbacked(db, spot_id, gun_id, today):
-    """Закрыть активную связку датой, если Weld Balance её больше не подтверждает."""
+    """Закрыть активную WB-связку датой, если Weld Balance её больше не подтверждает."""
     if spot_id is None or gun_id is None or _pair_backed_by_wb(db, spot_id, gun_id):
         return
     db.execute('UPDATE welding_setup SET is_active=0, end_date=? '
-               'WHERE spot_id=? AND gun_id=? AND is_active=1', (today, spot_id, gun_id))
+               'WHERE spot_id=? AND gun_id=? AND is_active=1 AND ' + _WB_LINK_ORIGIN,
+               (today, spot_id, gun_id))
+
+
+def _close_unbacked_links(db, spot_ids, today):
+    """Закрыть ВСЕ активные WB-связки указанных карточек, не подтверждённые Weld Balance.
+    Так уходят «застрявшие» клещи (третий ган точки, которого нет ни в одной строке WB)."""
+    for sid in spot_ids:
+        for (gid,) in db.execute('SELECT DISTINCT gun_id FROM welding_setup '
+                                 'WHERE spot_id=? AND is_active=1 AND gun_id IS NOT NULL',
+                                 (sid,)).fetchall():
+            _close_if_unbacked(db, sid, gid, today)
 
 
 def close_removed_wb_rows(db, removed) -> None:
@@ -310,7 +356,7 @@ def resolve_weld_point_links(db, wp_ids) -> None:
         if not row:
             continue
         gun_mntc, code, spot_number, welding_type = row[0], row[1], row[2], row[3]
-        old_gun_id, old_spot_id = row[4], row[5]
+        old_spot_id = row[5]
         # 1) клещи
         gun_id = None
         m = re.search(r'G[.\s]*0*(\d+)', gun_mntc or '')
@@ -330,22 +376,15 @@ def resolve_weld_point_links(db, wp_ids) -> None:
                     cur = db.execute('INSERT INTO spot (spot_number, model_id, welding_type) VALUES (?,?,?)',
                                      (num, mid, welding_type))
                     new_spots.append(cur.lastrowid)
-        # 3) активные связки точка↔клещи (их видят Обзор/Дефекты)
+        # 3) активные связки точка↔клещи (их видят Обзор/Дефекты) с сохранением программы
         if gun_id is not None:
             for sid in new_spots:
-                has = db.execute('SELECT 1 FROM welding_setup WHERE spot_id=? AND gun_id=? AND is_active=1',
-                                 (sid, gun_id)).fetchone()
-                if not has:
-                    db.execute("INSERT INTO welding_setup (comments, start_date, is_active, auto_created, "
-                               "spot_id, gun_id, parameter_id) VALUES ('создано из Weld Balance', ?, 1, 1, ?, ?, NULL)",
-                               (today, sid, gun_id))
+                _ensure_active_link(db, sid, gun_id, today)
         db.execute('UPDATE weld_point SET gun_id=?, spot_id=? WHERE id=?',
                    (gun_id, new_spots[0] if new_spots else None, wp_id))
-        # 4) закрыть осиротевшие пары: старые/новые карточки × старые/новые клещи.
-        #    Проверка «подтверждена ли пара» идёт по УЖЕ обновлённой строке, поэтому
-        #    смена G, номера, модели или очистка G закрывают ровно то, что устарело.
-        candidates = set(_identity_spots(db, old_spot_id)) | set(new_spots)
-        for sid in candidates:
-            for g in {old_gun_id, gun_id}:
-                if g is not None:
-                    _close_if_unbacked(db, sid, g, today)
+        # 4) закрыть ВСЕ активные связки затронутых карточек, не подтверждённые WB
+        #    (старые/новые карточки + «застрявшие» третьи клещи). Проверка идёт по уже
+        #    обновлённой строке, поэтому смена G, номера, модели, очистка G и удаление
+        #    строки закрывают ровно то, что устарело.
+        affected = set(_identity_spots(db, old_spot_id)) | set(new_spots)
+        _close_unbacked_links(db, affected, today)

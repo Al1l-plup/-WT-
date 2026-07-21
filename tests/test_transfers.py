@@ -169,3 +169,61 @@ def test_multi_model_code_links_both_modifications(client, app):
     for (sid,) in spots:
         assert _active(db, sid, g1) == 0  # старые клещи закрыты в обеих модификациях
         assert _active(db, sid, g2) == 1  # новые активны в обеих
+
+
+def test_g_roundtrip_keeps_welding_program(client, app):
+    """Смена G туда-обратно НЕ теряет программу сварки (parameter_id наследуется)."""
+    g1 = client.post('/api/admin/table/gun', json={'values': {'g_num': 92001, 'gun_type': 'X'}}).get_json()['id']
+    client.post('/api/admin/table/gun', json={'values': {'g_num': 92002, 'gun_type': 'X'}})
+    doc = wb_doc(client, 'A13T')
+    client.post(f'/api/admin/doc/{doc}/batch', json={'changes': [
+        {'op': 'insert', 'values': {'gun_mntc': 'G.92001', 'spot_number': '89001', 'model_code': 'A13T'}}]})
+    db = _db(app)
+    wp_id, spot_id = db.execute("SELECT id, spot_id FROM weld_point WHERE spot_number='89001'").fetchone()
+    # назначить программу связке (точка, G.92001) — как первоначальная загрузка
+    param = db.execute('SELECT UniqueID FROM parameters LIMIT 1').fetchone()[0]
+    con = sqlite3.connect(app.config['DB_PATH'])
+    con.execute('UPDATE welding_setup SET parameter_id=? WHERE spot_id=? AND gun_id=? AND is_active=1',
+                (param, spot_id, g1))
+    con.commit(); con.close()
+
+    # перенос на G.92002, затем обратно на G.92001
+    client.post(f'/api/admin/doc/{doc}/batch', json={'changes': [
+        {'op': 'update', 'field': 'gun_mntc', 'value': 'G.92002', 'row_pks': {'weld_point': wp_id}}]})
+    client.post(f'/api/admin/doc/{doc}/batch', json={'changes': [
+        {'op': 'update', 'field': 'gun_mntc', 'value': 'G.92001', 'row_pks': {'weld_point': wp_id}}]})
+
+    db = _db(app)
+    # ровно одна активная связка точки, на G.92001, с восстановленной программой
+    act = db.execute('SELECT gun_id, parameter_id FROM welding_setup WHERE spot_id=? AND is_active=1',
+                     (spot_id,)).fetchall()
+    assert act == [(g1, param)]
+
+
+def test_stray_active_link_closed_on_edit(client, app):
+    """«Застрявшая» активная связка (третьи клещи, которых нет в WB) закрывается
+    при следующей синхронизации точки — в Обзоре остаётся один активный ган."""
+    g1 = client.post('/api/admin/table/gun', json={'values': {'g_num': 92003, 'gun_type': 'X'}}).get_json()['id']
+    stray = client.post('/api/admin/table/gun', json={'values': {'g_num': 92004, 'gun_type': 'X'}}).get_json()['id']
+    doc = wb_doc(client, 'A13T')
+    client.post(f'/api/admin/doc/{doc}/batch', json={'changes': [
+        {'op': 'insert', 'values': {'gun_mntc': 'G.92003', 'spot_number': '89002', 'model_code': 'A13T'}}]})
+    db = _db(app)
+    wp_id, spot_id = db.execute("SELECT id, spot_id FROM weld_point WHERE spot_number='89002'").fetchone()
+    # вручную «подвесить» вторую активную связку на клещи, которых нет в WB
+    con = sqlite3.connect(app.config['DB_PATH'])
+    con.execute("INSERT INTO welding_setup (comments, start_date, is_active, auto_created, spot_id, gun_id, parameter_id) "
+                "VALUES ('создано из Weld Balance', '2026-01-01', 1, 1, ?, ?, NULL)", (spot_id, stray))
+    con.commit(); con.close()
+    assert _active(_db(app), spot_id, stray) == 1  # две активные до правки
+
+    # любая правка строки WB запускает синхронизацию точки
+    client.post(f'/api/admin/doc/{doc}/batch', json={'changes': [
+        {'op': 'update', 'field': 'zone', 'value': 'touch', 'row_pks': {'weld_point': wp_id}}]})
+
+    db = _db(app)
+    assert _active(db, spot_id, stray) == 0   # застрявшая закрыта
+    assert _active(db, spot_id, g1) == 1      # подтверждённая WB осталась
+    active_guns = db.execute('SELECT gun_id FROM welding_setup WHERE spot_id=? AND is_active=1',
+                             (spot_id,)).fetchall()
+    assert active_guns == [(g1,)]             # ровно один активный ган

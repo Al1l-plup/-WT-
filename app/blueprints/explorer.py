@@ -246,6 +246,7 @@ def explorer_spot(spot_id):
         LEFT JOIN transformer_station_assignment tsa ON gta.transformer_id=tsa.transformer_id AND tsa.is_active=1
         LEFT JOIN station st ON tsa.station_id=st.UniqueID
         WHERE ws.spot_id=? AND ws.is_active=1
+        ORDER BY ws.start_date DESC, ws.UniqueID DESC
         LIMIT 1
     """, (spot_id,)).fetchone()
 
