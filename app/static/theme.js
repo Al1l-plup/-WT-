@@ -10,6 +10,12 @@ function initThemeToggle() {
     const dark = document.documentElement.getAttribute('data-theme') === 'dark';
     btn.textContent = dark ? '☀' : '🌙';
     btn.title = dark ? 'Светлая тема' : 'Тёмная тема';
+    // подпись для скринридера (кнопка — только иконка) и состояние переключателя
+    btn.setAttribute('aria-label', dark ? 'Включить светлую тему' : 'Включить тёмную тему');
+    btn.setAttribute('aria-pressed', String(!dark));
+    // цвет адресной строки браузера на телефоне — в тон текущей темы (цвет шапки)
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', dark ? '#161b22' : '#ffffff');
   };
   update();
   btn.addEventListener('click', () => {

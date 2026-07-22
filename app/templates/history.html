@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#161b22">
+  <meta name="description" content="WeldTeam MES — система управления точечной сваркой цеха BS">
   <title>Журнал версий · WeldTeam MES</title>
   <script src="/static/theme.js"></script>
   <link rel="stylesheet" href="/static/style.css">
@@ -27,6 +29,12 @@
     .new{color:#2e7d32;font-weight:600;margin-left:4px}
     .kv{opacity:.85}
     .revmark{opacity:.6;font-size:11px}
+
+    /* Мобильные: тач-цели ≥44px (Apple HIG / WCAG 2.5.5), поля 16px (анти-зум iOS) */
+    @media (max-width: 640px) {
+      .rowbtn, .primary { min-height: 44px; font-size: 14px; padding: 8px 14px; }
+      input, select { font-size: 16px; min-height: 44px; }
+    }
   </style>
 </head>
 <body>
@@ -41,7 +49,7 @@
     <a class="nav-link" href="/explorer">Обзор</a>
     <a class="nav-link" href="/admin">Редактор</a>
     <a class="nav-link active" href="/history">Журнал</a>
-    <button class="btn-theme" id="themeToggle">☀</button>
+    <button class="btn-theme" id="themeToggle" type="button" aria-label="Переключить тему">☀</button>
   </div>
 </nav>
 

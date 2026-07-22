@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#161b22">
+  <meta name="description" content="WeldTeam MES — система управления точечной сваркой цеха BS">
   <title>Вход · WeldTeam MES</title>
   <script src="/static/theme.js"></script>
   <link rel="stylesheet" href="/static/style.css">
@@ -17,6 +19,16 @@
     .err{background:color-mix(in srgb,#c0392b 15%,transparent);border:1px solid #c0392b;border-radius:8px;padding:8px 12px;font-size:13px;margin-bottom:12px}
     .alt{text-align:center;margin-top:14px;font-size:13px}
     .alt a{color:var(--accent)}
+
+    /* Мобильные: 16px — иначе iOS Safari зумит страницу при фокусе;
+       тач-цели ≥44px; отступы с учётом выреза/домашней полосы iPhone. */
+    @media (max-width: 640px) {
+      .authbox { margin: 4vh auto; padding: 20px 16px calc(20px + env(safe-area-inset-bottom));
+                 padding-left: max(16px, env(safe-area-inset-left));
+                 padding-right: max(16px, env(safe-area-inset-right)); border-radius: 12px; }
+      .fld input, .fld select { font-size: 16px; min-height: 44px; }
+      .btn { min-height: 44px; font-size: 16px; }
+    }
   </style>
 </head>
 <body>
