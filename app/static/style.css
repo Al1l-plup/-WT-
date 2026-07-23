@@ -63,6 +63,11 @@ a:active, button:active, .btn:active, .nav-link:active { opacity: .75; }
 .nav-link { padding: 5px 11px; border-radius: var(--r-sm); color: var(--muted); font-size: 13px; transition: all .12s; }
 .nav-link:hover { color: var(--text); background: var(--card2); }
 .nav-link.active { color: var(--text); background: var(--card2); }
+/* вкладка, недоступная отделу: видна, но заблокирована (замок ставит theme.js).
+   transition:none — состояние статичное, без анимации приглушения. */
+.nav-link.nav-locked { opacity: .4; cursor: not-allowed; pointer-events: none; transition: none; }
+.nav-link.nav-locked:hover { background: none; }
+.nav-link.nav-locked .lock { font-size: 10px; }
 
 /* PAGE */
 /* нижний отступ учитывает домашнюю полосу iPhone (safe-area-inset-bottom) */

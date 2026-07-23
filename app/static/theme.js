@@ -41,10 +41,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     const me = await r.json();
     const allowed = new Set(me.pages || []);
 
-    // 1) скрыть вкладки, недоступные отделу
+    // 1) недоступные отделу вкладки НЕ прячем (чтобы не «пропадали загадочно»),
+    //    а помечаем замком и делаем некликабельными — видно, что это ограничение прав.
+    //    Сервер всё равно закрывает доступ (before_request-щит).
     nav.querySelectorAll('a.nav-link[href]').forEach(a => {
       const href = a.getAttribute('href');
-      if (href && href.startsWith('/') && !allowed.has(href)) a.style.display = 'none';
+      if (href && href.startsWith('/') && !allowed.has(href)) {
+        a.classList.add('nav-locked');
+        a.setAttribute('aria-disabled', 'true');
+        a.title = 'Недоступно вашему отделу';
+        if (!a.querySelector('.lock')) {
+          const lk = document.createElement('span');
+          lk.className = 'lock'; lk.textContent = ' 🔒';
+          a.appendChild(lk);
+        }
+        a.addEventListener('click', e => { e.preventDefault(); }, true);
+      }
     });
 
     // 2) админу — вкладка «Пользователи»
