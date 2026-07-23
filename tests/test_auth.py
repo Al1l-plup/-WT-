@@ -27,7 +27,7 @@ def test_register_login_me(app):
     r = c.post('/register', data=TEST_USER)
     assert r.status_code == 302  # редирект на главную = вход выполнен
     me = c.get('/api/me').get_json()
-    assert me['auth'] and me['name'] == 'Тестов Т.' and me['dept'] == 'ИТО'
+    assert me['auth'] and me['name'] == 'Тестов Т.' and me['dept'] == 'WeldTeam'
     # выход и повторный вход по паролю
     c.get('/logout')
     assert c.get('/api/me').status_code == 401

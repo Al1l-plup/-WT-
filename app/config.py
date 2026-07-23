@@ -31,6 +31,10 @@ class Config:
     # Уровень логирования (DEBUG/INFO/WARNING/ERROR).
     LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
 
+    # Почта суперпользователя (админа). Аккаунт с этим логином автоматически
+    # получает роль admin при входе/регистрации и доступ к панели «Пользователи».
+    ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'al.galimov@astana-motors.kz').lower()
+
     # Запускать миграции БД при старте приложения.
     RUN_MIGRATIONS = True
 

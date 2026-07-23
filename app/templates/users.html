@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#161b22">
+  <meta name="description" content="WeldTeam MES — управление учётными записями">
+  <title>Пользователи · WeldTeam MES</title>
+  <script src="/static/theme.js"></script>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    .role-badge{font-size:11px;padding:1px 7px;border-radius:5px;border:1px solid var(--border)}
+    .role-admin{background:color-mix(in srgb,var(--accent) 22%,transparent);border-color:var(--accent)}
+    .u-inactive td{opacity:.5}
+    .rowbtn{cursor:pointer;padding:6px 11px;border:1px solid var(--border);border-radius:6px;background:var(--card);font-size:13px;color:inherit}
+    .rowbtn:hover{border-color:var(--accent)}
+    .u-dept{padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit;font-size:13px}
+    #tempDlg{border:1px solid var(--border);border-radius:12px;background:var(--card);color:inherit;max-width:440px;width:92%;padding:0}
+    #tempDlg::backdrop{background:rgba(0,0,0,.5)}
+    .tempbox{padding:22px}
+    .temppw{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:24px;font-weight:700;letter-spacing:1px;
+            background:var(--bg);border:1px dashed var(--accent);border-radius:8px;padding:12px;text-align:center;margin:12px 0;user-select:all}
+    @media (max-width:640px){ .rowbtn,.u-dept{min-height:44px} }
+  </style>
+</head>
+<body>
+<nav class="nav">
+  <a class="nav-brand" href="/">WeldTeam <span>/ цех BS</span></a>
+  <div class="nav-links">
+    <a class="nav-link" href="/">Главная</a>
+    <a class="nav-link" href="/explorer">Обзор</a>
+    <a class="nav-link" href="/admin">Редактор</a>
+    <a class="nav-link" href="/history">Журнал</a>
+    <button class="btn-theme" id="themeToggle" type="button" aria-label="Переключить тему">☀</button>
+  </div>
+</nav>
+
+<div class="page">
+  <div class="page-head">
+    <h1>Учётные записи</h1>
+    <p>Отдел определяет доступ к вкладкам. Пароли хранятся хешами и не показываются —
+       при необходимости используйте <b>«Сбросить пароль»</b> (система выдаст одноразовый временный).</p>
+  </div>
+
+  <div id="alert"></div>
+  <div class="card" style="overflow-x:auto">
+    <table class="tbl tbl-mobile" id="utbl">
+      <thead><tr>
+        <th>Сотрудник</th><th>Логин (почта)</th><th>Отдел</th><th>Роль</th>
+        <th>Статус</th><th style="text-align:right">Действия</th>
+      </tr></thead>
+      <tbody id="ubody"><tr><td colspan="6">Загрузка…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<dialog id="tempDlg">
+  <div class="tempbox">
+    <h3 style="margin:0 0 4px">Временный пароль создан</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0">Передайте его сотруднику <b id="tempLogin"></b>.
+       Пароль показывается <b>один раз</b> — при следующем входе сотрудник задаст свой.</p>
+    <div class="temppw" id="tempPw"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-ghost" id="tempCopy" type="button">Скопировать</button>
+      <button class="btn btn-primary" id="tempClose" type="button">Готово</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+const $ = s => document.querySelector(s);
+let DEPTS = [];
+
+function alertMsg(type, msg){
+  $('#alert').innerHTML = `<div class="alert alert-${type}" style="margin-bottom:12px">${msg}</div>`;
+  if (type === 'success') setTimeout(() => $('#alert').innerHTML = '', 4000);
+}
+
+async function load(){
+  const r = await fetch('/api/admin/users');
+  if (r.status === 403){ location.href = '/'; return; }
+  const d = await r.json();
+  DEPTS = d.departments;
+  $('#ubody').innerHTML = d.users.map(u => {
+    const fio = [u.surname, u.name, u.father_name].filter(Boolean).join(' ');
+    const opts = DEPTS.map(x => `<option value="${x}" ${x===u.department?'selected':''}>${x}</option>`).join('');
+    const role = u.role === 'admin'
+      ? '<span class="role-badge role-admin">админ</span>'
+      : '<span class="role-badge">пользователь</span>';
+    const status = u.is_active
+      ? (u.must_change_password ? '<span class="badge bw">ждёт смены пароля</span>' : '<span class="badge bs">активен</span>')
+      : '<span class="badge bm">отключён</span>';
+    return `<tr class="${u.is_active ? '' : 'u-inactive'}" data-id="${u.UniqueID}" data-admin="${u.role==='admin'?1:0}">
+      <td data-label="Сотрудник">${fio || '—'}${u.position ? '<br><span style="opacity:.6;font-size:12px">'+u.position+'</span>' : ''}</td>
+      <td data-label="Логин">${u.login || '—'}</td>
+      <td data-label="Отдел"><select class="u-dept" ${u.role==='admin'?'title="Админ определяется по почте"':''}>${opts}</select></td>
+      <td data-label="Роль">${role}</td>
+      <td data-label="Статус">${status}</td>
+      <td data-label="Действия" style="text-align:right;white-space:nowrap">
+        <button class="rowbtn act-reset">Сбросить пароль</button>
+        <button class="rowbtn act-toggle">${u.is_active ? 'Отключить' : 'Включить'}</button>
+      </td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="6">Нет учётных записей</td></tr>';
+
+  $('#ubody').querySelectorAll('tr[data-id]').forEach(tr => {
+    const id = tr.dataset.id;
+    tr.querySelector('.u-dept').onchange = e => saveDept(id, e.target.value);
+    tr.querySelector('.act-reset').onclick = () => resetPw(id);
+    tr.querySelector('.act-toggle').onclick = () => toggleActive(id, tr.querySelector('.act-toggle').textContent === 'Включить');
+  });
+}
+
+async function saveDept(id, dept){
+  const r = await fetch(`/api/admin/users/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({department: dept})});
+  const d = await r.json();
+  if (r.ok) alertMsg('success', 'Отдел обновлён'); else alertMsg('danger', d.message || 'Ошибка');
+}
+
+async function toggleActive(id, activate){
+  const r = await fetch(`/api/admin/users/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({is_active: activate})});
+  const d = await r.json();
+  if (r.ok){ alertMsg('success', activate ? 'Аккаунт включён' : 'Аккаунт отключён'); load(); }
+  else alertMsg('danger', d.message || 'Ошибка');
+}
+
+async function resetPw(id){
+  if (!confirm('Сбросить пароль? Текущий перестанет работать, будет выдан одноразовый временный.')) return;
+  const r = await fetch(`/api/admin/users/${id}/reset-password`, {method:'POST'});
+  const d = await r.json();
+  if (!r.ok){ alertMsg('danger', d.message || 'Ошибка'); return; }
+  $('#tempLogin').textContent = d.login;
+  $('#tempPw').textContent = d.temp_password;
+  $('#tempDlg').showModal();
+  load();
+}
+
+$('#tempClose').onclick = () => $('#tempDlg').close();
+$('#tempCopy').onclick = async () => {
+  try { await navigator.clipboard.writeText($('#tempPw').textContent); $('#tempCopy').textContent = 'Скопировано ✓'; }
+  catch { /* нет доступа к буферу — пароль виден, перепишут вручную */ }
+};
+
+load();
+</script>
+</body>
+</html>

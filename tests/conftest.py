@@ -39,7 +39,10 @@ def app(template_db, tmp_path):
     yield create_app(_Config)
 
 
-TEST_USER = {'surname': 'Тестов', 'name': 'Тест', 'department': 'ИТО',
+# По умолчанию тест-клиент — из отдела WeldTeam (полный доступ ко всем разделам),
+# чтобы тесты функций не упирались в ролевые ограничения. RBAC проверяется отдельно
+# (tests/test_permissions.py) через фабрику register_client с нужным отделом.
+TEST_USER = {'surname': 'Тестов', 'name': 'Тест', 'department': 'WeldTeam',
              'login': 'test@weldteam.kz', 'password': 'test1234', 'password2': 'test1234'}
 
 
@@ -55,3 +58,23 @@ def client(app):
     c = app.test_client()
     c.post('/register', data=TEST_USER)
     return c
+
+
+@pytest.fixture()
+def register_client(app):
+    """Фабрика: зарегистрировать и залогинить пользователя нужного отдела.
+
+    Использование: `c = register_client(department='ОТК')` → вошедший клиент ОТК.
+    Логин генерируется уникальным; для админа передайте его почту явным login.
+    """
+    counter = {'n': 0}
+
+    def _make(department='WeldTeam', login=None, surname='Роль', name='Тест'):
+        counter['n'] += 1
+        login = login or f'user{counter["n"]}@weldteam.kz'
+        c = app.test_client()
+        c.post('/register', data={'surname': surname, 'name': name, 'department': department,
+                                  'login': login, 'password': 'test1234', 'password2': 'test1234'})
+        return c
+
+    return _make
