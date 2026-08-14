@@ -35,3 +35,7 @@ Thumbs.db
 node_modules/
 dist/
 .claude/
+
+# Серверные артефакты развёртывания (создаются install.ps1 на сервере)
+deploy/nssm.exe
+logs/
