@@ -22,11 +22,13 @@
 
 1. Подключитесь к серверу по RDP (Win+R → `mstsc` → адрес, логин, пароль).
 2. Откройте **PowerShell от имени администратора** (правой кнопкой → «Запуск от имени администратора»).
-3. Выполните две строки:
+3. Выполните команду (это ОДНА строка — скопируйте целиком; две части разделены `;`):
    ```powershell
-   Set-ExecutionPolicy -Scope Process Bypass -Force
-   iwr -useb https://raw.githubusercontent.com/Al1l-plup/-WT-/DEV/deploy/install.ps1 | iex
+   Set-ExecutionPolicy -Scope Process Bypass -Force; iwr -useb https://raw.githubusercontent.com/Al1l-plup/-WT-/DEV/deploy/install.ps1 | iex
    ```
+   *(Если вводите вручную — сначала `Set-ExecutionPolicy -Scope Process Bypass -Force`,
+   Enter, затем `iwr -useb …/install.ps1 | iex`, Enter. На одной строке без `;` PowerShell
+   выдаст ошибку «Не удается найти позиционный параметр… iwr».)*
    Всё установится в `C:\WeldTeam`, служба запустится. В конце скрипт покажет адрес вида
    `http://192.168.X.X:5000` — по нему заходят из сети цеха.
 
