@@ -20,6 +20,14 @@ function Info($m){ Write-Host "[WeldTeam] $m" -ForegroundColor Cyan }
 function Warn($m){ Write-Host "[WeldTeam] $m" -ForegroundColor Yellow }
 function Die($m){ Write-Host "[WeldTeam] ERROR: $m" -ForegroundColor Red; exit 1 }
 function Have($c){ [bool](Get-Command $c -ErrorAction SilentlyContinue) }
+# git prints progress to stderr; under EAP=Stop that is wrongly treated as an
+# error and aborts the script. Run git with Continue and check the exit code.
+function Git-Do {
+  $eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+  try { & git @args 2>&1 | ForEach-Object { Write-Host "$_" } }
+  finally { $ErrorActionPreference = $eap }
+  if ($LASTEXITCODE -ne 0) { throw "git $($args -join ' ') failed (exit $LASTEXITCODE)" }
+}
 
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
           ).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
@@ -42,8 +50,17 @@ if (-not (Have 'git')) {
 if (-not (Have 'git')) { Die 'Git not on PATH yet. Open a NEW Administrator PowerShell and run this again.' }
 Info ('Git: ' + (git --version))
 
-# 2) already a git checkout?
-if (Test-Path "$Dir\.git") { Info 'Already a git checkout - nothing to convert. Use deploy\update.ps1.'; exit 0 }
+# 2) already a full git checkout (remote + branch)? then nothing to convert.
+if (Test-Path "$Dir\.git") {
+  Push-Location $Dir
+  $hasOrigin = ((& git remote 2>$null) -contains 'origin')
+  $onBranch  = (& git rev-parse --abbrev-ref HEAD 2>$null)
+  Pop-Location
+  if ($hasOrigin -and $onBranch -eq $Branch) {
+    Info "Already a git checkout of $Branch - nothing to do. Update with deploy\update.ps1."; exit 0
+  }
+  Info 'Found an incomplete git init - continuing the conversion.'
+}
 
 # 3) backup .env and DB (safety)
 $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -55,11 +72,11 @@ if (Test-Path $db) { Copy-Item $db "$db.bak_$stamp" -Force; Info "Backed up DB -
 Info "Converting $Dir into a git checkout of $Branch ..."
 Push-Location $Dir
 try {
-  git init | Out-Null
-  git remote remove origin 2>$null | Out-Null
-  git remote add origin $Repo
-  git fetch origin $Branch
-  git checkout -f -B $Branch "origin/$Branch"   # -f: repo files overwrite the ZIP copies; .env/data stay (gitignored)
+  Git-Do init
+  if ((& git remote 2>$null) -contains 'origin') { Git-Do remote set-url origin $Repo }
+  else { Git-Do remote add origin $Repo }
+  Git-Do fetch origin $Branch
+  Git-Do checkout -f -B $Branch "origin/$Branch"   # -f: repo files overwrite the ZIP copies; .env/data (gitignored) stay
 } finally { Pop-Location }
 
 Info '=================== DONE ==================='

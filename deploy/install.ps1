@@ -37,6 +37,13 @@ function RefreshPath(){
   $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' +
               [Environment]::GetEnvironmentVariable('Path','User')
 }
+# git prints progress to stderr; under EAP=Stop that is wrongly treated as an error.
+function Git-Do {
+  $eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+  try { & git @args 2>&1 | ForEach-Object { Write-Host "$_" } }
+  finally { $ErrorActionPreference = $eap }
+  if ($LASTEXITCODE -ne 0) { throw "git $($args -join ' ') failed (exit $LASTEXITCODE)" }
+}
 
 # --- 0) must be admin (service + firewall) ---
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
@@ -81,10 +88,12 @@ function Ensure-Git {
 function Get-Code {
   if (Test-Path "$Dir\.git") {
     Info "Updating existing checkout ($Branch) ..."
-    git -C $Dir fetch origin; git -C $Dir checkout $Branch; git -C $Dir pull origin $Branch
+    Git-Do -C $Dir fetch origin $Branch
+    Git-Do -C $Dir checkout -f $Branch
+    Git-Do -C $Dir reset --hard "origin/$Branch"
   } elseif (Have 'git') {
     Info "Cloning $Repo ($Branch) -> $Dir ..."
-    git clone -b $Branch $Repo $Dir
+    Git-Do clone -b $Branch $Repo $Dir
   } else {
     Info 'Git unavailable - downloading ZIP snapshot ...'
     $zip="$env:TEMP\wt.zip"
