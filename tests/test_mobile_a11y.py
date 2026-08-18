@@ -35,6 +35,23 @@ def test_icon_button_has_accessible_name(tpl):
     assert 'aria-label' in btn
 
 
+# Канонический набор вкладок общей шапки (порядок как в index.html).
+# «Пользователи» здесь нет: её добавляет theme.js только админу.
+CANONICAL_NAV = ('/', '/maintenance', '/defects', '/analytics',
+                 '/workers', '/explorer', '/admin', '/history')
+NAV_TEMPLATES = [t for t in TEMPLATES if 'class="nav-links"' in t.read_text(encoding='utf-8')]
+
+
+@pytest.mark.parametrize('tpl', NAV_TEMPLATES, ids=lambda p: p.name)
+def test_nav_is_consistent_across_pages(tpl):
+    """Шапка продублирована в каждом шаблоне (техдолг: нет base.html). Пока так —
+    каждая страница с навигацией обязана давать доступ ко ВСЕМ вкладкам, иначе с
+    одной страницы нельзя перейти на другую (реальный баг: users.html терял 4 вкладки)."""
+    html = tpl.read_text(encoding='utf-8')
+    missing = [h for h in CANONICAL_NAV if f'href="{h}"' not in html]
+    assert not missing, f'{tpl.name}: в шапке нет вкладок {missing}'
+
+
 def test_inputs_are_16px_on_mobile():
     """iOS Safari зумит страницу, если шрифт поля < 16px. Правило должно покрывать
     ВСЕ текстовые поля, включая date/email/password и <input> без type."""
