@@ -13,6 +13,10 @@ def get_db() -> sqlite3.Connection:
     if 'db' not in g:
         g.db = sqlite3.connect(current_app.config['DB_PATH'], check_same_thread=False)
         g.db.row_factory = sqlite3.Row
+        # Контроль ссылочной целостности: удаление записи, на которую ссылаются
+        # (напр. ган с уставками/дефектами), блокируется, а не оставляет «висячие»
+        # ссылки. Включается на каждое соединение (в SQLite по умолчанию выключено).
+        g.db.execute('PRAGMA foreign_keys = ON')
     return g.db
 
 

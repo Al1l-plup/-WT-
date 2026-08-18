@@ -7,11 +7,11 @@ import logging
 import sqlite3
 from datetime import timedelta
 
-from flask import Flask, jsonify, redirect, render_template, request, session
+from flask import Flask, g, jsonify, redirect, render_template, request, session
 
-from app.audit import ensure_audit_triggers
+from app.audit import ensure_audit_triggers, max_change_id, stamp_audit
 from app.config import Config, get_config
-from app.db import close_db
+from app.db import close_db, get_db
 from app.errors import register_error_handlers
 from app.migrations import run_migrations
 from app.permissions import can_access
@@ -20,6 +20,8 @@ from app.permissions import can_access
 _PUBLIC_ENDPOINTS = {'auth.login', 'auth.register', 'auth.logout', 'auth.departments', 'static'}
 # Доступны вошедшему всегда — даже при обязательной смене пароля (чтобы её и выполнить/выйти).
 _ALWAYS_ALLOWED = {'auth.change_password', 'auth.logout', 'auth.me', 'static'}
+# Методы, которые могут менять данные (для проставления автора в журнал).
+_WRITE_METHODS = {'POST', 'PUT', 'DELETE', 'PATCH'}
 
 
 def create_app(config: type[Config] | None = None) -> Flask:
@@ -71,6 +73,32 @@ def create_app(config: type[Config] | None = None) -> Flask:
                 return jsonify({'status': 'error', 'message': 'Недостаточно прав'}), 403
             return render_template('forbidden.html'), 403
         return None
+
+    # Автор правок в журнале — из сессии, для ЛЮБОЙ вкладки (ТО/Дефекты/Обзор/
+    # Сотрудники/Редактор), а не только редактора. Запоминаем «отметку» журнала до
+    # запроса на запись и после успешного ответа проставляем автора на новые записи,
+    # у которых он ещё не проставлен (редактор ставит автора+пакет сам — его строки
+    # уже не NULL и здесь не трогаются). Единая точка вместо правки каждого эндпоинта.
+    @app.before_request
+    def _audit_mark_author():
+        if request.method in _WRITE_METHODS and session.get('uid'):
+            try:
+                g._audit_since = max_change_id(get_db())
+            except Exception:  # noqa: BLE001 — аудит не должен ломать запрос
+                g._audit_since = None
+
+    @app.after_request
+    def _audit_stamp_author(response):
+        since = getattr(g, '_audit_since', None)
+        author = session.get('uname')
+        if since is not None and author and 200 <= response.status_code < 400:
+            try:
+                db = get_db()
+                stamp_audit(db, author, None, since)  # batch_id=NULL: одиночная правка вне редактора
+                db.commit()
+            except Exception:  # noqa: BLE001 — журнал не должен ломать ответ
+                app.logger.warning('Не удалось проставить автора в журнал', exc_info=True)
+        return response
 
     from app.blueprints import register_blueprints
     register_blueprints(app)
