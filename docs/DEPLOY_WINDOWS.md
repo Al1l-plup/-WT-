@@ -48,8 +48,16 @@
 
 **Обновление до новой версии** (после того как запушили правки в `DEV`):
 ```powershell
-C:\WeldTeam\deploy\update.ps1
+powershell -ExecutionPolicy Bypass -File C:\WeldTeam\deploy\update.ps1
 ```
+> `update.ps1` работает, только если проект скачан через Git. Если ставили и на сервере
+> НЕ было Git (код скачался ZIP-архивом), один раз выполните конвертацию в git-репозиторий
+> (ставит Git, бэкапит `.env` и базу, ничего не теряет):
+> ```powershell
+> Set-ExecutionPolicy -Scope Process Bypass -Force; iwr -useb https://raw.githubusercontent.com/Al1l-plup/-WT-/DEV/deploy/setup_git.ps1 | iex
+> ```
+> После этого обновления идут лёгкой командой `update.ps1` выше. Пока не сконвертировали —
+> обновляйтесь повторным запуском `install.ps1` (тоже сохраняет базу и `.env`).
 
 **Управление службой:**
 - Статус: `Get-Service WeldTeamMES` · Перезапуск: `Restart-Service WeldTeamMES`
