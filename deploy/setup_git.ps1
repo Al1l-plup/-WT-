@@ -50,17 +50,7 @@ if (-not (Have 'git')) {
 if (-not (Have 'git')) { Die 'Git not on PATH yet. Open a NEW Administrator PowerShell and run this again.' }
 Info ('Git: ' + (git --version))
 
-# 2) already a full git checkout (remote + branch)? then nothing to convert.
-if (Test-Path "$Dir\.git") {
-  Push-Location $Dir
-  $hasOrigin = ((& git remote 2>$null) -contains 'origin')
-  $onBranch  = (& git rev-parse --abbrev-ref HEAD 2>$null)
-  Pop-Location
-  if ($hasOrigin -and $onBranch -eq $Branch) {
-    Info "Already a git checkout of $Branch - nothing to do. Update with deploy\update.ps1."; exit 0
-  }
-  Info 'Found an incomplete git init - continuing the conversion.'
-}
+# (idempotent: safe to run even if a previous attempt left a partial .git)
 
 # 3) backup .env and DB (safety)
 $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -73,7 +63,10 @@ Info "Converting $Dir into a git checkout of $Branch ..."
 Push-Location $Dir
 try {
   Git-Do init
-  if ((& git remote 2>$null) -contains 'origin') { Git-Do remote set-url origin $Repo }
+  $eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+  $remotes = (& git remote)                        # quiet on a healthy repo; guarded anyway
+  $ErrorActionPreference = $eap
+  if ($remotes -contains 'origin') { Git-Do remote set-url origin $Repo }
   else { Git-Do remote add origin $Repo }
   Git-Do fetch origin $Branch
   Git-Do checkout -f -B $Branch "origin/$Branch"   # -f: repo files overwrite the ZIP copies; .env/data (gitignored) stay
