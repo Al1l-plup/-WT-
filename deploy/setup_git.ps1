@@ -49,6 +49,8 @@ if (-not (Have 'git')) {
 }
 if (-not (Have 'git')) { Die 'Git not on PATH yet. Open a NEW Administrator PowerShell and run this again.' }
 Info ('Git: ' + (git --version))
+# Use the Windows certificate store (works behind corporate SSL inspection, like PowerShell does).
+Git-Do config --global http.sslBackend schannel
 
 # (idempotent: safe to run even if a previous attempt left a partial .git)
 

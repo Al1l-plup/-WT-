@@ -86,6 +86,7 @@ function Ensure-Git {
 
 # --- 3) get the code ---
 function Get-Code {
+  if (Have 'git') { Git-Do config --global http.sslBackend schannel }  # Windows cert store (corp SSL inspection)
   if (Test-Path "$Dir\.git") {
     Info "Updating existing checkout ($Branch) ..."
     Git-Do -C $Dir fetch origin $Branch
