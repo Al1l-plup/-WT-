@@ -1,231 +1,194 @@
-# WeldTeam Database — Data Map
+# WeldTeam MES — карта данных (Data Map)
 
-## Database
-- **File:** `BD/WeldTeam_DataBase.db` (SQLite, ~15MB)
-- **Schema SQL:** `BD/create DB.sql`
-- **Seed data:** `BD/Insert Data.sql`, `BD/Insert Data Chery.sql`
-- **Diagram:** `BD/Database WT.drawio`
+Карта схемы БД: таблицы, ключевые колонки, связи и инварианты. Источник истины —
+`db/schema.sql` (человекочитаемая схема) и миграции Alembic (`migrations/versions/`).
+Объёмы и состояние данных — в [PROGRESS.md §3](PROGRESS.md); здесь — структура.
 
----
+## Где что лежит
 
-## Tables & Schema
+- **БД:** `data/welding_shop.db` (SQLite) — в git **не хранится**, собирается
+  `python scripts/init_db.py` из миграций + `db/seed.sql`.
+- **Схема (SQL):** `db/schema.sql` · **справочники:** `db/seed.sql`
+  (пересобрать из БД: `python scripts/dump_seed.py`).
+- **ERD:** `db/*.drawio`.
+- **Миграции схемы:** `migrations/versions/0001…0009` (см. [PROGRESS.md §4](PROGRESS.md)).
 
-### brand
-| Column | Type | Constraints |
-|--------|------|-------------|
-| UniqueID | INTEGER | PK AUTOINCREMENT |
-| brand | VARCHAR(10) | NOT NULL |
-
-**Data:** Chery, GWM, Changan
-
----
-
-### trans (Transformers)
-| Column | Type | Constraints |
-|--------|------|-------------|
-| UniqueID | INTEGER | PK AUTOINCREMENT |
-| transID | VARCHAR(20) | NOT NULL |
-| type | VARCHAR(2) | CHECK IN('AC','DC') NOT NULL |
+> Соглашение: у большинства таблиц PK — `UniqueID INTEGER` (историческое; у части
+> новых таблиц — `id`). «Мягкое» удаление/архив — через `is_active` + `start_date/end_date`,
+> строки не удаляются физически.
 
 ---
 
-### worker (Workers/Employees)
-| Column | Type | Constraints |
-|--------|------|-------------|
-| UniqueID | INTEGER | PK AUTOINCREMENT |
-| surname | VARCHAR(20) | NOT NULL |
-| name | VARCHAR(255) | NOT NULL |
-| father_name | VARCHAR(255) | - |
-| position | VARCHAR(30) | NOT NULL |
-| email | VARCHAR(50) | - |
-| password | VARCHAR(10) | NOT NULL |
-| start_date | DATE | NOT NULL |
-| end_date | DATE | - |
-| is_active | BOOL | - |
+## 1. Справочники оборудования и изделий
 
-**Positions:** начальник участка, старший техник-технолог, техник-технолог
+### brand — бренды
+`UniqueID` · `brand` — **Chery, GWM, Changan**.
 
----
+### model — модели (и модификации)
+`UniqueID` · `model_name` · `model_code` · `type` · `brand_id → brand`.
+Один `model_code` может охватывать несколько модификаций (`type`), точка привязана к коду.
 
-### parameters (Welding Parameters)
-| Column | Type | Constraints |
-|--------|------|-------------|
-| UniqueID | INTEGER | PK AUTOINCREMENT |
-| pressure | INTEGER | NOT NULL |
-| squeeze_time | INTEGER | NOT NULL |
-| up_slope_time | INTEGER | NOT NULL |
-| weld_1 | INTEGER | NOT NULL |
-| heat_1 | INTEGER | NOT NULL |
-| cool_1 | INTEGER | NOT NULL |
-| weld_2 | INTEGER | NOT NULL |
-| heat_2 | INTEGER | NOT NULL |
-| hold | INTEGER | NOT NULL |
-| turn_R | DECIMAL(3,1) | NOT NULL |
-| mode | VARCHAR | - (режим: A, B, ...) |
+| model_name | model_code | type |
+|-----------|-----------|------|
+| Tiggo2 | A13T | single |
+| Jolion | A01 | 2WD / 4WD |
+| Tank 300 | P01G | ToD / NOT ToD |
+| CS55 | CS55 | single |
+| CS65 | CS65 | single |
 
-**Data:** 547 записей
+### station — станции
+`UniqueID` · `station_name` · `brand_id → brand`.
 
----
+### trans — трансформаторы
+`UniqueID` · `transID` · `type` (`AC`/`DC`).
 
-### station (Welding Stations)
-| Column | Type | Constraints |
-|--------|------|-------------|
-| UniqueID | INTEGER | PK AUTOINCREMENT |
-| station_name | VARCHAR(20) | NOT NULL |
-| brand_id | INTEGER | FK → brand.UniqueID |
+### gun — сварочные клещи
+`UniqueID` · `g_num` (пользовательский номер, вид `G.001`) · **`gun_type`** (`AC` / `DC` /
+`Ручной ввод`). ⚠️ Именно `gun_type`, **не** `model` — не путать с таблицей `model`.
 
-**Data:** 47 Chery stations, 100+ GWM stations, 40+ Changan stations
+### spot — точки сварки
+`UniqueID` · `spot_number` · `model_id → model` · `welding_type`.
+Точки уникальны **в пределах модели** (не бренда).
+
+### parameters — программы (уставки) сварки
+`UniqueID` · `pressure` (в Ньютонах, в UI ÷10 → daN) · `squeeze_time` · `up_slope_time` ·
+`weld_1/heat_1/cool_1` · `weld_2/heat_2` · `hold` · `turn_R` · `mode` (режим A/B/…).
+
+### defect_code — справочник кодов дефектов
+`UniqueID` · код + расшифровка. 16 кодов (CR, SN, LP, BN, SW, P, MI, BT, IE, MS, ME, EMU, MN, NA, EO, BE).
 
 ---
 
-### model (Car Models)
-| Column | Type | Constraints |
-|--------|------|-------------|
-| UniqueID | INTEGER | PK AUTOINCREMENT |
-| model_name | VARCHAR(20) | NOT NULL |
-| model_code | VARCHAR(10) | NOT NULL |
-| type | VARCHAR(10) | NOT NULL |
-| brand_id | INTEGER | FK → brand.UniqueID |
+## 2. Связи оборудования (цепочка gun → станция)
 
-**Data:** Tiggo2 (Chery), Jolion 2WD/4WD (GWM), Tank 300 (GWM), CS55 (Changan)
+Клещи не привязаны к станции напрямую — связь идёт через трансформатор, с историей
+(`is_active`, `start_date`/`end_date`):
 
----
+```
+gun ──< gun_transformer_assignment >── trans ──< transformer_station_assignment >── station
+```
 
-### gun (Welding Guns)
-| Column | Type | Constraints |
-|--------|------|-------------|
-| UniqueID | INTEGER | PK AUTOINCREMENT |
-| g_num | INTEGER | NOT NULL |
-| model | VARCHAR(20) | NOT NULL |
-
----
-
-### spot (Welding Spots)
-| Column | Type | Constraints |
-|--------|------|-------------|
-| UniqueID | INTEGER | PK AUTOINCREMENT |
-| spot_number | INTEGER | NOT NULL |
-| model_id | INTEGER | FK → model.UniqueID |
-
----
-
-### maintenance (Gun Maintenance / ТО)
-| Column | Type | Constraints |
-|--------|------|-------------|
-| UniqueId | INTEGER | PK AUTOINCREMENT |
-| first_weld | INTEGER | NOT NULL |
-| second_weld | INTEGER | NOT NULL |
-| third_weld | INTEGER | NOT NULL |
-| first_pressure | INTEGER | NOT NULL |
-| second_pressure | INTEGER | NOT NULL |
-| third_pressure | INTEGER | NOT NULL |
-| to_date | DATE | NOT NULL |
-| worker_id | INTEGER | FK → worker.UniqueID |
-| gun_id | INTEGER | FK → gun.UniqueID |
-
----
-
-### defects (Defects / Дефекты)
-| Column | Type | Constraints |
-|--------|------|-------------|
-| UniqueID | INTEGER | PK AUTOINCREMENT |
-| problem_code | VARCHAR(3) | NOT NULL |
-| root_cause | TEXT | NOT NULL |
-| solution | TEXT | NOT NULL |
-| df_date | DATE | NOT NULL |
-| worker_name | INTEGER | FK → worker.UniqueID |
-| spot_id | INTEGER | FK → spot.UniqueID |
-| gun_id | INTEGER | FK → gun.UniqueID |
-
----
+### gun_transformer_assignment
+`UniqueID` · `gun_id → gun` · `transformer_id → trans` · `start_date` · `end_date` ·
+`is_active` · `comments`.
 
 ### transformer_station_assignment
-| Column | Type | Constraints |
-|--------|------|-------------|
-| UniqueID | INTEGER | PK AUTOINCREMENT |
-| start_date | DATE | NOT NULL |
-| end_date | DATE | - |
-| is_active | BOOL | NOT NULL |
-| comment | TEXT | - |
-| transformer_id | INTEGER | FK → trans.UniqueID |
-| station_id | INTEGER | FK → station.UniqueID |
+`UniqueID` · `transformer_id → trans` · `station_id → station` · `start_date` · `end_date` ·
+`is_active` · `comment`.
+
+### welding_setup — связка точка ↔ клещи ↔ программа
+`UniqueID` · `spot_id → spot` · `gun_id → gun` · `parameter_id → parameters` ·
+`is_active` · `start_date` · `end_date` · `comments` · `auto_created`.
+Активная связка — `is_active=1`. Перенос точки/смена программы = деактивировать старую
+строку (`is_active=0`, `end_date`) и создать новую — так копится аудит-trail.
 
 ---
 
-### gun_transformer_sssignment *(typo in original — 3 s's)*
-| Column | Type | Constraints |
-|--------|------|-------------|
-| UniqueID | INTEGER | PK AUTOINCREMENT |
-| start_date | DATE | NOT NULL |
-| end_date | DATE | - |
-| is_active | BOOL | NOT NULL |
-| comments | TEXT | NOT NULL |
-| gun_id | INTEGER | FK → gun.UniqueID |
-| transformer_id | INTEGER | FK → trans.UniqueID |
+## 3. Факты (ТО и дефекты) — с исторической заморозкой
+
+Факты **неизменяемы**: при записи контекст «замораживается» в `snap_*`-колонки, чтобы
+позднейшие правки справочников не «переписывали» прошлое (см. `app/snapshots.py`).
+
+### maintenance — записи ТО клеща
+Замеры: `first/second/third_weld` (ток) · `first/second/third_pressure` (Ньютоны) ·
+`to_date` · `worker_id → worker` · `gun_id → gun` · `parameter_id → parameters`.
+Заморозка: `snap_g_num`, `snap_gun_type`, `snap_station_id/name`, `snap_brand_id/brand`,
+`snap_worker_surname`, `snap_mode`, `snap_pressure`, `snap_heat_1/2`, `snap_turn_R`.
+
+### defects — дефекты
+`problem_code → defect_code` · `root_cause` · `solution` · `description` · `df_date` ·
+`status` (`registered` → `in_work` → `closed`).
+Люди: `worker_register_id`, `assigned_worker_id`, `worker_solve_id` (все → `worker`).
+Привязка: `spot_id → spot`, `gun_id → gun`; ручной ввод без точки в БД —
+`manual_spot_number`, `manual_model_id`, `manual_brand_id`; авто-созданная точка —
+`auto_created_spot_id`. Заморозка: `snap_spot_number`, `snap_model_id/name/type`,
+`snap_brand_id/brand`, `snap_station_id/name`, `snap_g_num`, `snap_gun_type`.
 
 ---
 
-### welding_setup
-| Column | Type | Constraints |
-|--------|------|-------------|
-| UniqueID | INTEGER | PK AUTOINCREMENT |
-| comments | TEXT | NOT NULL |
-| start_date | DATE | NOT NULL |
-| end_date | DATE | - |
-| is_active | BOOL | NOT NULL |
-| spot_id | INTEGER | FK → spot.UniqueID |
-| gun_id | INTEGER | FK → gun.UniqueID |
-| parameter_id | INTEGER | FK → parameters.UniqueID |
+## 4. Планирование ТО
+
+### maintenance_schedule — годовой план
+`id` · `gun_id → gun` · `brand_id → brand` · `month_number` (1–12) · `plan_type`.
+
+### maintenance_daily_task — ежедневные задачи
+`id` · `gun_id → gun` · `task_date` · `status` · `assigned_worker_id` ·
+`created_by_worker_id` · `completed_maintenance_id → maintenance` · `notes` · `created_at`.
 
 ---
 
-## Entity Relationships
+## 5. Weld Balance (инженерный слой, источник правды привязок)
+
+Импортируется из `.xlsm` (`scripts/import_weld_balance.py`), нормализован. Таблицы
+созданы миграцией `0003`; `model_code` вместо `model_id` — миграция `0007`.
+
+### weld_point — строки Weld Balance (зеркало листа «Welds»)
+`id` · `model_code` · `model_variant` · `source_file` · `sh_num` · `zone` · `wb_station` ·
+`process_no` · `operation_name` · `stage_no` · `welding_type` · `side` · `joint_type` ·
+`gun_type` · `gun_mntc` · `gun_id → gun` · `station_id → station` · `spot_number` ·
+`spot_id → spot` · `std_thickness` · `coating` · `nugget` · `variant_1…4` ·
+`coord_x/y/z` · `raw_extra` (служебные колонки листа) · `row_order` (порядок как в Excel).
+
+### weld_point_part — детали слоёв точки
+Нормализованные слои (`weld_point_id`, `layer_no`, материал/толщина). Индекс
+`(weld_point_id, layer_no)` — миграция `0008`.
+
+### wb_material — справочник материалов · ### wb_tab — вкладки WB
+`wb_tab`: `id` · `title` · `match_token` · `manual_src` · `position` (динамические вкладки
+по моделям: A01, P01, A13T, CS55).
+
+---
+
+## 6. Журнал версий и точки восстановления (аудит)
+
+Каждая правка в редакторе БД пишется триггерами SQLite (миграция `0004`; триггеры
+создаёт приложение из текущей схемы — `app/audit.py`).
+
+### change_log
+`id` · `ts` (datetime по умолчанию) · `table_name` · `row_pk` · `op` (INSERT/UPDATE/DELETE) ·
+`before_json` · `after_json` · `author` · `batch_id` (пакет правок) · `is_revert` · `note`.
+Автор проставляется из сессии для **всех** вкладок (глобальный хук в `app/__init__.py`).
+
+### restore_point
+`id` · `name` · `created_at` · `last_change_id` · `author` · `note` — именованный слепок
+момента, к которому можно откатить всю базу.
+
+---
+
+## 7. Пользователи и доступ
+
+### worker — сотрудники и учётные записи
+`UniqueID` · `surname` · `name` · `father_name` · `position` · `email` · `password`
+(хеш `werkzeug`, **не** открытый) · `start_date` · `end_date` · `is_active` ·
+`department` (WeldTeam / ИТО / ОТК / Производство — определяет права, см. `app/permissions.py`) ·
+`login` (рабочая почта, уникальна) · `role` (`user`/`admin`) · `must_change_password`
+(флаг обязательной смены после сброса).
+
+Роль `admin` поднимается автоматически при входе по `ADMIN_EMAIL`. Пароли не показываются:
+админ их **сбрасывает** — система выдаёт одноразовый временный (миграции `0006`, `0009`).
+
+---
+
+## Карта связей
 
 ```
-brand ──< station
+brand ──< station ──< transformer_station_assignment >── trans ──< gun_transformer_assignment >── gun
 brand ──< model ──< spot ──< welding_setup >── gun
-                              welding_setup >── parameters
-worker ──< maintenance >── gun
-worker ──< defects >── spot
-               defects >── gun
-trans ──< transformer_station_assignment >── station
-trans ──< gun_transformer_sssignment >── gun
+                                   │
+                                   └── welding_setup >── parameters
+worker ──< maintenance >── gun (>── parameters)
+worker ──< defects >── spot / gun            (manual_* — дефект без точки в БД)
+brand ──< maintenance_schedule >── gun
+gun   ──< maintenance_daily_task
+model_code ──< weld_point ──< weld_point_part        (gun_id/spot_id/station_id — best-effort связи)
+change_log / restore_point — аудит правок редактора (по всем таблицам)
 ```
 
----
+## Инварианты (кратко)
 
-## Business Scenarios (from scenario.docx)
-
-### Spot (Точка)
-- Create new spot on a gun
-- Transfer spot from one gun to another
-- Assign new parameter to spot (set is_active=false on old welding_setup row, create new)
-
-### Parameters (Параметры)
-- Create welding parameters
-
-### Defect (Дефект)
-- Create defect record
-- Delete defect record
-
-### Maintenance / ТО
-- Create gun maintenance record
-- Delete gun maintenance record
-
-### Transformer (Трансформатор)
-- Create transformer
-- Update: end_date, is_active, comment
-
-### Worker (Работник)
-- Create worker
-- Update: end_date
-
----
-
-## Key Notes
-- `is_active` pattern used for soft-deactivation across: worker, transformer_station_assignment, gun_transformer_assignment, welding_setup
-- Transferring a spot = deactivate old welding_setup + create new one with different gun_id
-- Database is SQLite (file-based, no server needed)
-- **welding_setup**: 13 796 записей — точная связь spot→gun→parameters заполнена (14.05.2026)
-- **parameters**: 547 записей с полем mode (A/B/...)
-- Таблица в БД: gun_transformer_assignment (2 буквы s, не 3)
+- **`gun.gun_type`, не `gun.model`** — тип клещей; `model` — отдельная таблица изделий.
+- Точка уникальна **в пределах модели** (`spot.model_id`), не бренда.
+- `parameters.pressure` — в **Ньютонах**; в daN конвертируется только в UI (÷10).
+- Связь `gun ↔ станция` — всегда через активные (`is_active=1`) назначения трансформатора.
+- Факты (ТО/дефекты) читаются из `snap_*` с `COALESCE`-fallback — история не «плывёт».
+- Перенос/смена связки — новая строка + деактивация старой, а не правка на месте.

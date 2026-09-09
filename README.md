@@ -52,7 +52,7 @@ app/                    # пакет приложения
 ├── blueprints/         # маршруты по разделам (pages, catalog, maintenance, …)
 ├── templates/          # Jinja2-шаблоны
 └── static/             # CSS/JS
-migrations/             # Alembic: env.py + versions/ (0001…0008, см. docs/PROGRESS.md §4)
+migrations/             # Alembic: env.py + versions/ (0001…0009, см. docs/PROGRESS.md §4)
 alembic.ini             # конфигурация Alembic
 db/                     # schema.sql, seed.sql (справочники), ERD (.drawio), SQL-скрипты
 data/welding_shop.db    # БД (SQLite) — НЕ в git, собирается scripts/init_db.py
@@ -136,13 +136,16 @@ pytest
 
 | Раздел | Метод | Путь |
 |--------|-------|------|
-| Страницы | GET | `/`, `/maintenance`, `/defects`, `/analytics`, `/workers`, `/explorer` |
+| Страницы | GET | `/`, `/maintenance`, `/defects`, `/analytics`, `/workers`, `/explorer`, `/admin`, `/history`, `/users` |
+| Аутентификация | GET/POST | `/login`, `/register`, `/logout`, `/change-password` |
 | Справочники | GET | `/api/brands`, `/api/stations`, `/api/guns/<station_id>`, `/api/parameters/<gun_id>`, `/api/models`, `/api/defect_codes` |
 | ТО | POST/GET | `/api/maintenance`, `/api/maintenance/schedule`, `/api/maintenance/daily`, `/api/maintenance/progress` |
 | Дефекты | POST/GET | `/api/defects/register`, `/api/defects/all`, `/api/defects/take`, `/api/defects/close`, `/api/defects/enrich` |
 | Аналитика | GET | `/api/analytics/defects`, `/api/stats` |
 | Сотрудники | GET/POST/PUT/DELETE | `/api/workers` |
 | Explorer | GET/PUT | `/api/explorer/gun/<id>`, `/api/explorer/station/<id>`, `/api/explorer/spot/<id>` |
+| Редактор/журнал | GET/POST/PUT/DELETE | `/api/admin/table/<name>`, `/api/admin/doc/<id>/batch`, `/api/admin/history`, `/api/admin/restore-points` |
+| Админ (только admin) | GET/POST/PUT | `/api/admin/users`, `/api/admin/users/<id>`, `/api/admin/users/<id>/reset-password` |
 
 ## База данных и миграции
 
