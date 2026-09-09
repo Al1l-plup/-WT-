@@ -8,6 +8,7 @@
   <title>ТО — WeldTeam MES</title>
   <script src="/static/theme.js"></script>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/sheet.css">
 </head>
 <body>
 
@@ -131,6 +132,16 @@
           <tbody id="recentMaintTable"><tr class="empty-row"><td colspan="6">Нет данных</td></tr></tbody>
         </table>
       </div>
+    </div>
+
+    <!-- Редактор записей ТО (тот же движок, что и «Редактор»: правка/копипаст/аудит) -->
+    <div class="card" style="margin-bottom:1rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;flex-wrap:wrap">
+        <div class="card-title" style="margin:0">Редактор записей ТО</div>
+        <button class="btn btn-ghost btn-sm" id="factEditToggle" aria-expanded="false">✎ Открыть редактор</button>
+      </div>
+      <p class="text-muted text-sm" style="margin:.4rem 0 0">Правьте записи ТО прямо в таблице, как в «Редакторе»: <b>Ctrl+C/V</b> — копирование (в т.ч. из Excel), правая кнопка — добавить/удалить строку. Каждая правка попадает в <a href="/history">Журнал</a> с автором и датой и откатывается.</p>
+      <div id="maintEditor" style="margin-top:.75rem" hidden></div>
     </div>
 
     <!-- Прогресс выполнения плана ТО -->
@@ -921,6 +932,21 @@ function renderProgress(data) {
   });
   div.innerHTML = html;
 }
+</script>
+<script src="/static/sheet.js?v=4"></script>
+<script src="/static/editor-embed.js"></script>
+<script>
+(function(){
+  const t = document.getElementById('factEditToggle'), host = document.getElementById('maintEditor');
+  let mounted = false;
+  t.addEventListener('click', async () => {
+    const show = host.hidden;
+    host.hidden = !show;
+    t.setAttribute('aria-expanded', show ? 'true' : 'false');
+    t.textContent = show ? '▲ Свернуть редактор' : '✎ Открыть редактор';
+    if (show && !mounted) { mounted = true; await window.mountFactEditor(host, 'maintenance'); }
+  });
+})();
 </script>
 </body>
 </html>

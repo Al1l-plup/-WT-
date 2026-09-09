@@ -11,7 +11,10 @@ def wb_doc(client, token_part):
 def test_docs_list(client):
     docs = client.get('/api/admin/docs').get_json()
     ids = [d['id'] for d in docs]
-    assert ids[0] == 'equipment' and ids[-1] == 'parameters'
+    assert ids[0] == 'equipment'
+    # equipment, WB-вкладки, parameters, затем документы фактов ТО/дефектов
+    for expected in ('parameters', 'maintenance', 'defects'):
+        assert expected in ids
     titles = ' '.join(d['title'] for d in docs)
     for t in ('A01', 'P01', 'A13T', 'CS55'):
         assert t in titles  # 4 вкладки WB из wb_tab

@@ -7,6 +7,7 @@
   <meta name="description" content="WeldTeam MES — система управления точечной сваркой цеха BS">
   <title>Дефекты — WeldTeam MES</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/sheet.css">
   <script src="/static/theme.js"></script>
 </head>
 <body>
@@ -166,6 +167,16 @@
         </tbody>
       </table>
     </div>
+  </div>
+
+  <!-- Редактор дефектов (тот же движок, что и «Редактор»: правка/копипаст/аудит) -->
+  <div class="card" style="margin-top:1rem">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;flex-wrap:wrap">
+      <div class="card-title" style="margin:0">Редактор дефектов</div>
+      <button class="btn btn-ghost btn-sm" id="factEditToggle" aria-expanded="false">✎ Открыть редактор</button>
+    </div>
+    <p class="text-muted text-sm" style="margin:.4rem 0 0">Правьте дефекты прямо в таблице, как в «Редакторе»: <b>Ctrl+C/V</b> — копирование (в т.ч. из Excel), правая кнопка — добавить/удалить строку. Каждая правка попадает в <a href="/history">Журнал</a> с автором и датой и откатывается. Привязку точки меняйте в «Редакторе»/Weld Balance.</p>
+    <div id="defectEditor" style="margin-top:.75rem" hidden></div>
   </div>
 
 </div>
@@ -419,6 +430,21 @@ function showAlert(el, type, msg) {
   el.className = `alert alert-${type}`;
   el.textContent = msg;
 }
+</script>
+<script src="/static/sheet.js?v=4"></script>
+<script src="/static/editor-embed.js"></script>
+<script>
+(function(){
+  const t = document.getElementById('factEditToggle'), host = document.getElementById('defectEditor');
+  let mounted = false;
+  t.addEventListener('click', async () => {
+    const show = host.hidden;
+    host.hidden = !show;
+    t.setAttribute('aria-expanded', show ? 'true' : 'false');
+    t.textContent = show ? '▲ Свернуть редактор' : '✎ Открыть редактор';
+    if (show && !mounted) { mounted = true; await window.mountFactEditor(host, 'defects'); }
+  });
+})();
 </script>
 </body>
 </html>

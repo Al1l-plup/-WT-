@@ -194,6 +194,69 @@ _PARAMETERS_DOC = {
     ],
 }
 
+# ── Записи ТО и Дефекты: тот же редактор во вкладках /maintenance и /defects.
+#    Факты правятся с полным аудитом (change_log) и откатом. snap_*-колонки (заморозка
+#    исторического контекста) в документ НЕ выводим — они остаются как «как было записано»
+#    и не меняются при правке ссылок. FK-выпадашки: клещи/сотрудник (мало строк). Точку у
+#    дефекта показываем только для чтения (spot — 17k строк, выпадашка непрактична; смену
+#    привязки делают в «Редакторе»/через Weld Balance).
+_MAINTENANCE_DOC = {
+    'title': 'Записи ТО',
+    'base': 'FROM maintenance m',
+    'pks': {'maintenance': 'm.UniqueId'},
+    'primary': 'maintenance',
+    'order': 'm.to_date DESC, m.UniqueId DESC',
+    'columns': [
+        {'label': 'Дата ТО', 'field': 'to_date', 'expr': 'm.to_date', 'edit': True,
+         'table': 'maintenance', 'col': 'to_date', 'hint': 'Формат ГГГГ-ММ-ДД'},
+        {'label': 'Клещи (G)', 'field': 'gun_id', 'expr': 'm.gun_id', 'edit': True,
+         'table': 'maintenance', 'col': 'gun_id', 'fk': 'gun'},
+        {'label': 'Сотрудник', 'field': 'worker_id', 'expr': 'm.worker_id', 'edit': True,
+         'table': 'maintenance', 'col': 'worker_id', 'fk': 'worker'},
+        {'label': 'Ток 1', 'field': 'first_weld', 'expr': 'm.first_weld', 'edit': True, 'table': 'maintenance', 'col': 'first_weld'},
+        {'label': 'Ток 2', 'field': 'second_weld', 'expr': 'm.second_weld', 'edit': True, 'table': 'maintenance', 'col': 'second_weld'},
+        {'label': 'Ток 3', 'field': 'third_weld', 'expr': 'm.third_weld', 'edit': True, 'table': 'maintenance', 'col': 'third_weld'},
+        {'label': 'Давление 1 (N)', 'field': 'first_pressure', 'expr': 'm.first_pressure', 'edit': True, 'table': 'maintenance', 'col': 'first_pressure'},
+        {'label': 'Давление 2 (N)', 'field': 'second_pressure', 'expr': 'm.second_pressure', 'edit': True, 'table': 'maintenance', 'col': 'second_pressure'},
+        {'label': 'Давление 3 (N)', 'field': 'third_pressure', 'expr': 'm.third_pressure', 'edit': True, 'table': 'maintenance', 'col': 'third_pressure'},
+    ],
+}
+
+_DEFECTS_DOC = {
+    'title': 'Дефекты',
+    'base': """FROM defects d
+        LEFT JOIN spot s ON d.spot_id=s.UniqueID
+        LEFT JOIN model mo ON s.model_id=mo.UniqueID""",
+    'pks': {'defects': 'd.UniqueID'},
+    'primary': 'defects',
+    'order': 'd.df_date DESC, d.UniqueID DESC',
+    'columns': [
+        {'label': 'Дата', 'field': 'df_date', 'expr': 'd.df_date', 'edit': True,
+         'table': 'defects', 'col': 'df_date', 'hint': 'Формат ГГГГ-ММ-ДД'},
+        {'label': 'Код дефекта', 'field': 'problem_code', 'expr': 'd.problem_code', 'edit': True,
+         'table': 'defects', 'col': 'problem_code', 'fk': 'defect_code'},
+        {'label': 'Статус', 'field': 'status', 'expr': 'd.status', 'edit': True,
+         'table': 'defects', 'col': 'status', 'hint': 'registered / in_work / closed'},
+        {'label': 'Точка', 'field': 'spot_disp', 'edit': False,
+         'expr': "CASE WHEN d.spot_id IS NOT NULL THEN s.spot_number || COALESCE(' · ' || mo.model_name,'') "
+                 "WHEN d.manual_spot_number IS NOT NULL THEN d.manual_spot_number || ' (ручной)' ELSE '—' END",
+         'hint': 'Только для чтения: смену привязки точки делайте в «Редакторе»/Weld Balance.'},
+        {'label': 'Клещи (G)', 'field': 'gun_id', 'expr': 'd.gun_id', 'edit': True,
+         'table': 'defects', 'col': 'gun_id', 'fk': 'gun'},
+        {'label': 'Ручной № точки', 'field': 'manual_spot_number', 'expr': 'd.manual_spot_number', 'edit': True,
+         'table': 'defects', 'col': 'manual_spot_number', 'hint': 'Для дефекта без карточки точки в БД.'},
+        {'label': 'Зарегистрировал', 'field': 'worker_register_id', 'expr': 'd.worker_register_id', 'edit': True,
+         'table': 'defects', 'col': 'worker_register_id', 'fk': 'worker'},
+        {'label': 'Назначен', 'field': 'assigned_worker_id', 'expr': 'd.assigned_worker_id', 'edit': True,
+         'table': 'defects', 'col': 'assigned_worker_id', 'fk': 'worker'},
+        {'label': 'Закрыл', 'field': 'worker_solve_id', 'expr': 'd.worker_solve_id', 'edit': True,
+         'table': 'defects', 'col': 'worker_solve_id', 'fk': 'worker'},
+        {'label': 'Причина', 'field': 'root_cause', 'expr': 'd.root_cause', 'edit': True, 'table': 'defects', 'col': 'root_cause'},
+        {'label': 'Решение', 'field': 'solution', 'expr': 'd.solution', 'edit': True, 'table': 'defects', 'col': 'solution'},
+        {'label': 'Описание', 'field': 'description', 'expr': 'd.description', 'edit': True, 'table': 'defects', 'col': 'description'},
+    ],
+}
+
 # Токен вкладки WB: только буквы/цифры/._- (защита от SQL-инъекции в LIKE-фильтре).
 TOKEN_RE = re.compile(r'^[A-Za-z0-9_.\-]+$')
 
@@ -208,6 +271,8 @@ def get_documents(db) -> dict:
         docs[f'weld_balance_{tab_id}'] = _wb_doc(
             title, f"wp.source_file LIKE '%{token}%'", manual) | {'wb_tab_id': tab_id}
     docs['parameters'] = _PARAMETERS_DOC
+    docs['maintenance'] = _MAINTENANCE_DOC
+    docs['defects'] = _DEFECTS_DOC
     return docs
 
 

@@ -52,6 +52,9 @@ def test_otk_read_only(register_client):
     assert c.post('/api/admin/table/gun', json={'values': {'g_num': 90103, 'gun_type': 'X'}}).status_code == 403
     assert c.post('/api/maintenance', json={}).status_code == 403
     assert c.put('/api/explorer/gun/1', json={'values': {'gun_type': 'x'}}).status_code == 403
+    # встроенный редактор фактов (ТО/дефекты): читать можно, писать — нет
+    assert c.get('/api/admin/doc/defects').status_code == 200
+    assert c.post('/api/admin/doc/defects/batch', json={'changes': []}).status_code == 403
 
 
 def test_proizvodstvo_read_only(register_client):
