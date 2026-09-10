@@ -22,11 +22,26 @@ def test_maintenance_doc_columns(client):
 
 def test_defects_doc_columns(client):
     d = client.get('/api/admin/doc/defects').get_json()
+    fields = {c['field'] for c in d['columns']}
     by = {c['field']: c for c in d['columns']}
     assert d['primary'] == 'defects'
     assert by['problem_code']['fk'] == 'defect_code'   # выпадашка кодов дефектов
     assert by['gun_id']['fk'] == 'gun'
     assert not by['spot_disp']['editable']             # точка — только чтение
+    assert 'worker_register_id' in fields              # регистратор остаётся (автозаполняется)
+    assert 'assigned_worker_id' not in fields          # «Назначен» убран из редактора
+    assert 'description' not in fields                 # «Описание» убрано из редактора
+
+
+def test_registrar_autofilled_on_register(client, app):
+    """«Зарегистрировал» проставляется автоматически = текущий вошедший пользователь."""
+    db = sqlite3.connect(app.config['DB_PATH'])
+    me_uid = db.execute("SELECT UniqueID FROM worker WHERE login='test@weldteam.kz'").fetchone()[0]
+    g_num = db.execute('SELECT g_num FROM gun LIMIT 1').fetchone()[0]
+    res = client.post('/api/defects/register_manual', json={'g_num': g_num, 'problem_code': 'CR'}).get_json()
+    assert res['status'] == 'success'
+    reg = db.execute('SELECT worker_register_id FROM defects ORDER BY UniqueID DESC LIMIT 1').fetchone()[0]
+    assert reg == me_uid
 
 
 def test_maintenance_insert_update_delete_audited(client, app):

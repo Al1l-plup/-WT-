@@ -1,11 +1,17 @@
 """Доска дефектов: регистрация, работа, закрытие."""
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, session
 
 from app.db import get_db
 from app.errors import api_error
 from app.snapshots import snapshot_defect
 
 bp = Blueprint('defects', __name__)
+
+
+def _current_worker_id():
+    """Кто регистрирует дефект — текущий вошедший пользователь (worker.UniqueID из сессии).
+    Доп. информации от пользователя не требуется, поэтому проставляем автоматически."""
+    return session.get('uid')
 
 
 @bp.route('/api/defects/register', methods=['POST'])
@@ -32,9 +38,9 @@ def register_defect():
             cur = db.cursor()
             cur.execute("""
                 INSERT INTO defects (problem_code, root_cause, solution, df_date,
-                                    spot_id, gun_id, status, manual_spot_number, manual_model_id)
-                VALUES (?, '', '', DATE('now'), NULL, NULL, 'registered', ?, ?)
-            """, (problem_code, spot_number, int(model_id)))
+                                    spot_id, gun_id, status, manual_spot_number, manual_model_id, worker_register_id)
+                VALUES (?, '', '', DATE('now'), NULL, NULL, 'registered', ?, ?, ?)
+            """, (problem_code, spot_number, int(model_id), _current_worker_id()))
             snapshot_defect(db, cur.lastrowid)
             db.commit()
             return jsonify({'status': 'success',
@@ -48,9 +54,9 @@ def register_defect():
         cur = db.cursor()
         cur.execute("""
             INSERT INTO defects
-                (problem_code, root_cause, solution, df_date, spot_id, gun_id, status)
-            VALUES (?, '', '', DATE('now'), ?, ?, 'registered')
-        """, (problem_code, row['spot_id'], row['gun_id']))
+                (problem_code, root_cause, solution, df_date, spot_id, gun_id, status, worker_register_id)
+            VALUES (?, '', '', DATE('now'), ?, ?, 'registered', ?)
+        """, (problem_code, row['spot_id'], row['gun_id'], _current_worker_id()))
         snapshot_defect(db, cur.lastrowid)
         db.commit()
         return jsonify({'status': 'success', 'message': f'Дефект {problem_code} на точке №{spot_number} зафиксирован'})
@@ -68,8 +74,8 @@ def add_defect():
         cur.execute("""
             INSERT INTO defects (problem_code, description, root_cause, solution, df_date,
                                  worker_register_id, worker_solve_id, spot_id, gun_id, status)
-            VALUES (?, '', '', 'В процессе устранения', DATE('now'), NULL, NULL, ?, ?, 'registered')
-        """, (data['problem_code'], int(data['spot_id']), int(data['gun_id'])))
+            VALUES (?, '', '', 'В процессе устранения', DATE('now'), ?, NULL, ?, ?, 'registered')
+        """, (data['problem_code'], _current_worker_id(), int(data['spot_id']), int(data['gun_id'])))
         snapshot_defect(db, cur.lastrowid)
         db.commit()
         return jsonify({'status': 'success', 'message': 'Карточка дефекта сохранена!'})
@@ -358,9 +364,9 @@ def register_defect_manual():
     try:
         cur = db.cursor()
         cur.execute("""
-            INSERT INTO defects (problem_code, root_cause, solution, df_date, spot_id, gun_id, status)
-            VALUES (?, '', '', DATE('now'), NULL, ?, 'registered')
-        """, (problem_code, gun_id))
+            INSERT INTO defects (problem_code, root_cause, solution, df_date, spot_id, gun_id, status, worker_register_id)
+            VALUES (?, '', '', DATE('now'), NULL, ?, 'registered', ?)
+        """, (problem_code, gun_id, _current_worker_id()))
         snapshot_defect(db, cur.lastrowid)
         db.commit()
         return jsonify({'status': 'success',

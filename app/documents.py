@@ -246,14 +246,14 @@ _DEFECTS_DOC = {
         {'label': 'Ручной № точки', 'field': 'manual_spot_number', 'expr': 'd.manual_spot_number', 'edit': True,
          'table': 'defects', 'col': 'manual_spot_number', 'hint': 'Для дефекта без карточки точки в БД.'},
         {'label': 'Зарегистрировал', 'field': 'worker_register_id', 'expr': 'd.worker_register_id', 'edit': True,
-         'table': 'defects', 'col': 'worker_register_id', 'fk': 'worker'},
-        {'label': 'Назначен', 'field': 'assigned_worker_id', 'expr': 'd.assigned_worker_id', 'edit': True,
-         'table': 'defects', 'col': 'assigned_worker_id', 'fk': 'worker'},
+         'table': 'defects', 'col': 'worker_register_id', 'fk': 'worker',
+         'hint': 'Проставляется автоматически — кто зафиксировал дефект (вошедший пользователь).'},
         {'label': 'Закрыл', 'field': 'worker_solve_id', 'expr': 'd.worker_solve_id', 'edit': True,
          'table': 'defects', 'col': 'worker_solve_id', 'fk': 'worker'},
         {'label': 'Причина', 'field': 'root_cause', 'expr': 'd.root_cause', 'edit': True, 'table': 'defects', 'col': 'root_cause'},
         {'label': 'Решение', 'field': 'solution', 'expr': 'd.solution', 'edit': True, 'table': 'defects', 'col': 'solution'},
-        {'label': 'Описание', 'field': 'description', 'expr': 'd.description', 'edit': True, 'table': 'defects', 'col': 'description'},
+        # «Назначен» (assigned_worker_id) и «Описание» (description) убраны из редактора:
+        # рабочий процесс их не собирает, доп. информации от пользователя не требуют.
     ],
 }
 
