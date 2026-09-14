@@ -18,6 +18,9 @@ class Sheet {
     this.storageKey = opts.storageKey || null;
     this.sortField = opts.sortField || '';
     this.sortDir = opts.sortDir || 'asc';
+    // Excel-подобные фильтр и сортировка — на клиенте (все строки уже загружены).
+    this.colFilters = {};   // {имя_колонки: Set(разрешённых отображаемых значений)}
+    this._sort = opts.sortField ? { col: opts.sortField, dir: opts.sortDir === 'desc' ? 'desc' : 'asc' } : null;
     this.rowH = 23;
     this._first = 0; this._last = 0;
     this.allCols = (opts.columns || []).map(c => ({
@@ -37,6 +40,7 @@ class Sheet {
     this.cutSet = null;
     this._editing = null;           // {vr, c, value} — открытый редактор ячейки
     this._widths = this._loadWidths();
+    Sheet._injectCSS();
     // один живой экземпляр на контейнер: прежний отписываем (иначе события двоятся)
     if (container.__sheet) container.__sheet.destroy();
     container.__sheet = this;
@@ -46,6 +50,7 @@ class Sheet {
 
   destroy() {
     this._closeMenu();
+    this._closeFilter();
     if (this._ac) this._ac.abort();  // снимает ВСЕ обработчики (el и document)
     if (this.el.__sheet === this) this.el.__sheet = null;
   }
@@ -73,7 +78,8 @@ class Sheet {
   _rowOpsBlockReason() {
     if (!this.orderField) return 'Доступно в документах Weld Balance (там есть порядок строк)';
     if (this._filtered()) return 'Снимите фильтр — позиция вставки при фильтре неоднозначна';
-    if (!this.naturalOrder) return 'Уберите сортировку (кликните по заголовку до сброса) — порядок вставки неоднозначен';
+    if (this._sort) return 'Уберите сортировку (клик по заголовку до сброса) — порядок вставки неоднозначен';
+    if (!this.naturalOrder) return 'Уберите сортировку — порядок вставки неоднозначен';
     return null;
   }
   _canEdit(c, vr) { const r = this.view[vr]; return c.editable && !(c.pk && this.state[r] !== 'new'); }
@@ -104,7 +110,7 @@ class Sheet {
   redo() { const c = this.redoStack.pop(); if (!c) return; c.redo(); this.undoStack.push(c); this._afterMutate(); }
   _afterMutate() {
     this.view = this.rows.map((_, i) => i);
-    this._applyFilter(true);
+    this._recompute(true);
     this._onChange();
     if (this.onUndoState) this.onUndoState(this.canUndo(), this.canRedo());
     this._emitActive();
@@ -349,18 +355,16 @@ class Sheet {
     let head = '<tr><th class="rownum"></th>';
     for (const c of this.cols) {
       const ci = this.cols.indexOf(c);
-      const mark = this.sortField === c.name ? (this.sortDir === 'desc' ? ' ↓' : ' ↑') : '';
+      const mark = this._sort && this._sort.col === c.name ? (this._sort.dir === 'desc' ? ' ↓' : ' ↑') : '';
       const hint = c.hint ? `<span class="colhint" data-hint="${this._esc(c.hint)}" title="${this._esc(c.hint)}">❓</span>` : '';
-      head += `<th data-c-name="${c.name}" title="клик — сортировка">${this._esc(c.label)}${c.fk ? ' 🔗' : ''}${c.pk ? ' 🔑' : ''}${!c.editable ? ' 🔒' : ''}${mark}${hint}<span class="colresize" data-rs="${ci}"></span></th>`;
+      head += `<th data-c-name="${c.name}" title="клик — сортировка (А→Я → Я→А → сброс)">${this._esc(c.label)}${c.fk ? ' 🔗' : ''}${c.pk ? ' 🔑' : ''}${!c.editable ? ' 🔒' : ''}${mark}${hint}<span class="colresize" data-rs="${ci}"></span></th>`;
     }
     head += '<th class="rownum"></th></tr>';
-    // фильтры
+    // строка фильтров: кнопка-воронка на колонку (открывает Excel-подобную форму)
     let filt = '<tr class="filter"><th></th>';
-    this.cols.forEach((c, ci) => {
-      const vals = [...new Set(this.rows.map(r => this._dispRaw(r, c)).filter(v => v !== ''))].sort().slice(0, 1000);
-      const dl = `dl_${ci}_${Math.random().toString(36).slice(2, 7)}`;
-      filt += `<th><input data-f="${c.name}" list="${dl}" placeholder="фильтр ▾">` +
-              `<datalist id="${dl}">${vals.map(v => `<option value="${this._esc(v)}"></option>`).join('')}</datalist></th>`;
+    this.cols.forEach((c) => {
+      const on = this.colFilters[c.name] ? ' on' : '';
+      filt += `<th class="fcell"><button class="filterbtn${on}" data-fcol="${this._esc(c.name)}" title="Фильтр и сортировка">▾</button></th>`;
     });
     filt += '<th></th></tr>';
     this.el.innerHTML = `<table class="sheet" style="width:${this._totalWidth()}px">${cg}<thead>${letters}${head}${filt}</thead><tbody></tbody></table>` +
@@ -701,9 +705,11 @@ class Sheet {
     }, sig);
     this.el.addEventListener('click', (e) => {
       if (e.target.closest('.colresize')) return;
+      const fb = e.target.closest('.filterbtn');
+      if (fb) { this._openFilter(fb.dataset.fcol, fb); return; }   // Excel-подобная форма фильтра
       const hintEl = e.target.closest('.colhint');
       if (hintEl) { alert(hintEl.dataset.hint); return; }   // подсказка колонки, не сортировка
-      const th = e.target.closest('th[data-c-name]'); if (th && this.onSort) this.onSort(th.dataset.cName);
+      const th = e.target.closest('th[data-c-name]'); if (th) this._cycleSort(th.dataset.cName);
     }, sig);
     this.el.addEventListener('contextmenu', (e) => {
       const td = e.target.closest('td[data-c], td.rownum[data-rn]');
@@ -717,9 +723,7 @@ class Sheet {
       }
       this._menu(e.clientX, e.clientY);
     }, sig);
-    this.el.addEventListener('input', (e) => { if (e.target.dataset && e.target.dataset.f !== undefined) this._applyFilter(); }, sig);
     this.el.addEventListener('keydown', (e) => {
-      if (e.target.tagName === 'INPUT' && e.target.dataset.f !== undefined) return;
       const k = e.key;
       if ((k === 'z' || k === 'Z' || k === 'я' || k === 'Я') && (e.ctrlKey || e.metaKey)) { e.preventDefault(); e.shiftKey ? this.redo() : this.undo(); }
       else if ((k === 'y' || k === 'Y' || k === 'н' || k === 'Н') && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this.redo(); }
@@ -746,18 +750,129 @@ class Sheet {
       e.preventDefault(); this._pasteTSV(e.clipboardData.getData('text/plain'));
     }, sig);
   }
-  _applyFilter(keepScroll) {
-    const filters = {};
-    this.el.querySelectorAll('input[data-f]').forEach(i => { if (i.value.trim()) filters[i.dataset.f] = i.value.trim().toLowerCase(); });
-    const cols = this.cols;
-    this.view = [];
+  // ── фильтр + сортировка (клиентские, Excel-подобные) ─────────────────────
+  // Натуральное сравнение: числа как числа (9 < 10), затем текст (рус. алфавит), пустые — в конце.
+  _cmp(a, b) {
+    if (a === b) return 0;
+    if (a === '') return 1;
+    if (b === '') return -1;
+    const na = Number(a), nb = Number(b);
+    const aN = a.trim() !== '' && !isNaN(na), bN = b.trim() !== '' && !isNaN(nb);
+    if (aN && bN) return na - nb;
+    if (aN) return -1;
+    if (bN) return 1;
+    return a.localeCompare(b, 'ru');
+  }
+  // Пересобрать this.view из строк: применить фильтры-множества, затем сортировку.
+  _recompute(keepScroll) {
+    const active = Object.keys(this.colFilters);
+    const idx = [];
     for (let r = 0; r < this.rows.length; r++) {
       let ok = true;
-      for (const col in filters) { const c = cols.find(x => x.name === col); if (!this._dispRaw(this.rows[r], c).toLowerCase().includes(filters[col])) { ok = false; break; } }
-      if (ok) this.view.push(r);
+      for (const name of active) {
+        const c = this.cols.find(x => x.name === name);
+        if (c && !this.colFilters[name].has(this._dispRaw(this.rows[r], c))) { ok = false; break; }
+      }
+      if (ok) idx.push(r);
     }
+    if (this._sort) {
+      const c = this.cols.find(x => x.name === this._sort.col);
+      if (c) { const d = this._sort.dir === 'desc' ? -1 : 1; idx.sort((x, y) => d * this._cmp(this._dispRaw(this.rows[x], c), this._dispRaw(this.rows[y], c))); }
+    }
+    this.view = idx;
     if (!keepScroll) { this._setSingleSel(0, this.active.c); this.el.scrollTop = 0; this._emitActive(); }
     this._renderBody();
+  }
+  _markFilterBtns() {
+    this.el.querySelectorAll('.filterbtn').forEach(b => b.classList.toggle('on', !!this.colFilters[b.dataset.fcol]));
+  }
+  _cycleSort(name) {           // клик по заголовку: А→Я → Я→А → сброс
+    if (!this._sort || this._sort.col !== name) this._sort = { col: name, dir: 'asc' };
+    else if (this._sort.dir === 'asc') this._sort = { col: name, dir: 'desc' };
+    else this._sort = null;
+    this.render(); this._recompute();
+  }
+  _setSort(name, dir) { this._sort = { col: name, dir }; this.render(); this._recompute(); }
+
+  _openFilter(name, btn) {
+    this._closeFilter(); this._closeMenu();
+    const col = this.cols.find(c => c.name === name);
+    if (!col) return;
+    const seen = new Set(), vals = [];
+    for (const row of this.rows) { const v = this._dispRaw(row, col); if (!seen.has(v)) { seen.add(v); vals.push(v); } }
+    vals.sort((a, b) => this._cmp(a, b));
+    const CAP = 3000, capped = vals.length > CAP, shown = vals.slice(0, CAP);
+    const cur = this.colFilters[name];                    // Set | undefined
+    const isOn = v => cur ? cur.has(v) : true;
+    const lbl = v => v === '' ? '(Пустые)' : v;
+    const p = document.createElement('div'); p.id = 'sheetfilter';
+    p.innerHTML =
+      '<div class="sf-sort"><button data-sort="asc">А → Я ↑</button><button data-sort="desc">Я → А ↓</button></div>' +
+      '<input class="sf-search" placeholder="Поиск значения…">' +
+      '<label class="sf-all"><input type="checkbox" class="sf-allbox"> (Выделить все)</label>' +
+      '<div class="sf-list">' +
+        shown.map(v => `<label class="sf-item"><input type="checkbox"${isOn(v) ? ' checked' : ''}> ${this._esc(lbl(v))}</label>`).join('') +
+      '</div>' +
+      (capped ? `<div class="sf-empty">Показаны первые ${CAP} значений — уточните поиском</div>` : '') +
+      '<div class="sf-actions"><button class="sf-ok">Применить</button><button class="sf-cancel">Отмена</button><button class="sf-clear">Сброс</button></div>';
+    document.body.appendChild(p);
+    const r = btn.getBoundingClientRect();
+    p.style.left = Math.min(r.left, window.innerWidth - 272) + 'px';
+    p.style.top = Math.min(r.bottom + 4, window.innerHeight - p.offsetHeight - 8) + 'px';
+
+    const listEl = p.querySelector('.sf-list'), search = p.querySelector('.sf-search'), allbox = p.querySelector('.sf-allbox');
+    const items = () => [...listEl.querySelectorAll('.sf-item')];
+    const visible = () => items().filter(it => it.style.display !== 'none');
+    const syncAll = () => { const v = visible(), on = v.filter(it => it.firstChild.checked).length; allbox.checked = on > 0 && on === v.length; allbox.indeterminate = on > 0 && on < v.length; };
+    syncAll(); search.focus();
+    search.oninput = () => { const q = search.value.trim().toLowerCase(); items().forEach((it, i) => { it.style.display = lbl(shown[i]).toLowerCase().includes(q) ? '' : 'none'; }); syncAll(); };
+    allbox.onchange = () => { visible().forEach(it => it.firstChild.checked = allbox.checked); };
+    listEl.onchange = syncAll;
+    p.querySelector('.sf-ok').onclick = () => {
+      const picked = new Set();
+      items().forEach((it, i) => { if (it.firstChild.checked) picked.add(shown[i]); });
+      if (!capped && picked.size === shown.length) delete this.colFilters[name];   // всё выбрано → фильтра нет
+      else this.colFilters[name] = picked;
+      this._closeFilter(); this._markFilterBtns(); this._recompute();
+    };
+    p.querySelector('.sf-cancel').onclick = () => this._closeFilter();
+    p.querySelector('.sf-clear').onclick = () => { delete this.colFilters[name]; this._closeFilter(); this._markFilterBtns(); this._recompute(); };
+    p.querySelectorAll('.sf-sort button').forEach(b => b.onclick = () => { this._closeFilter(); this._setSort(name, b.dataset.sort); });
+
+    this._filterEsc = (e) => { if (e.key === 'Escape') this._closeFilter(); };
+    this._filterDown = (e) => { if (!p.contains(e.target) && !e.target.closest('.filterbtn')) this._closeFilter(); };
+    document.addEventListener('keydown', this._filterEsc);
+    document.addEventListener('mousedown', this._filterDown);
+    this._filterEl = p;
+  }
+  _closeFilter() {
+    if (this._filterEl) { this._filterEl.remove(); this._filterEl = null; }
+    if (this._filterEsc) { document.removeEventListener('keydown', this._filterEsc); this._filterEsc = null; }
+    if (this._filterDown) { document.removeEventListener('mousedown', this._filterDown); this._filterDown = null; }
+  }
+
+  static _injectCSS() {
+    if (document.getElementById('sheet-x-css')) return;
+    const s = document.createElement('style'); s.id = 'sheet-x-css';
+    s.textContent =
+      '.filterbtn{border:1px solid var(--border);background:var(--bg);color:var(--muted,#888);border-radius:4px;font-size:11px;line-height:1;padding:2px 6px;cursor:pointer;width:100%}' +
+      '.filterbtn:hover{border-color:var(--accent);color:var(--accent)}' +
+      '.filterbtn.on{background:var(--accent);color:#fff;border-color:var(--accent)}' +
+      '#sheetfilter{position:fixed;z-index:100;width:262px;background:var(--card);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,.28);padding:8px;font-size:13px;color:inherit;display:flex;flex-direction:column;gap:7px}' +
+      '#sheetfilter .sf-sort{display:flex;gap:6px}' +
+      '#sheetfilter .sf-sort button{flex:1;padding:6px;border:1px solid var(--border);background:var(--bg);color:inherit;border-radius:6px;cursor:pointer;font-size:12px}' +
+      '#sheetfilter .sf-sort button:hover{border-color:var(--accent);color:var(--accent)}' +
+      '#sheetfilter .sf-search{padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit;font-size:13px;width:100%;box-sizing:border-box}' +
+      '#sheetfilter .sf-all{display:flex;align-items:center;gap:7px;padding:2px;font-weight:600;border-bottom:1px solid var(--border);padding-bottom:6px;cursor:pointer}' +
+      '#sheetfilter .sf-list{max-height:210px;overflow:auto;display:flex;flex-direction:column}' +
+      '#sheetfilter .sf-item{display:flex;align-items:center;gap:7px;padding:3px 2px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      '#sheetfilter .sf-item:hover{background:color-mix(in srgb,var(--accent) 12%,transparent)}' +
+      '#sheetfilter .sf-actions{display:flex;gap:6px;border-top:1px solid var(--border);padding-top:7px}' +
+      '#sheetfilter .sf-actions button{padding:6px 10px;border:1px solid var(--border);background:var(--bg);color:inherit;border-radius:6px;cursor:pointer;font-size:12px}' +
+      '#sheetfilter .sf-ok{background:var(--accent);color:#fff;border-color:var(--accent)}' +
+      '#sheetfilter .sf-clear{margin-left:auto}' +
+      '#sheetfilter .sf-empty{color:var(--muted,#888);font-size:11.5px;padding:2px}';
+    document.head.appendChild(s);
   }
 }
 window.Sheet = Sheet;
