@@ -1,8 +1,8 @@
 """Ролевой доступ по отделам (RBAC) и админ-панель.
 
-Матрица: WeldTeam — всё; ИТО — Редактор+Обзор (запись), остальные вкладки в UI
-заблокированы (видны, но не открыть); ОТК/Производство — всё только для чтения;
-админ (по почте) — всё + Пользователи. /api/me.pages — список доступных страниц.
+Матрица: WeldTeam — всё; ИТО — видит все вкладки, правит Редактор+Обзор; ОТК —
+видит всё, фиксирует дефекты; Производство/ОТО — только просмотр; админ (по почте)
+— всё + Пользователи. /api/me.pages — список доступных страниц.
 """
 ADMIN_EMAIL = 'al.galimov@astana-motors.kz'
 
@@ -11,7 +11,7 @@ ADMIN_EMAIL = 'al.galimov@astana-motors.kz'
 def test_weldteam_full_access(register_client):
     c = register_client(department='WeldTeam')
     me = c.get('/api/me').get_json()
-    assert me['readonly'] is False and me['is_admin'] is False
+    assert me['readonly'] is False and me['is_admin'] is False and me['can_edit_docs'] is True
     assert set(me['pages']) >= {'/', '/maintenance', '/defects', '/analytics',
                                 '/workers', '/explorer', '/admin', '/history'}
     assert '/users' not in me['pages']            # не админ — панели пользователей нет
@@ -20,39 +20,40 @@ def test_weldteam_full_access(register_client):
     assert c.post('/api/admin/table/gun', json={'values': {'g_num': 90101, 'gun_type': 'X'}}).status_code == 200
 
 
-# ── ИТО: только Редактор + Обзор, но с записью ───────────────────────────────
-def test_ito_editor_and_explorer_only(register_client):
+# ── ИТО: видит все вкладки, правит Редактор + Обзор ──────────────────────────
+def test_ito_views_all_edits_editor(register_client):
     c = register_client(department='ИТО')
     me = c.get('/api/me').get_json()
-    assert me['readonly'] is False
-    assert set(me['pages']) == {'/', '/explorer', '/admin', '/history'}
-    # страницы вне доступа → 403
-    assert c.get('/maintenance').status_code == 403
-    assert c.get('/defects').status_code == 403
-    assert c.get('/analytics').status_code == 403
-    # свои страницы открываются
-    assert c.get('/admin').status_code == 200
-    assert c.get('/explorer').status_code == 200
+    assert me['readonly'] is False and me['can_edit_docs'] is True
+    # видит все основные вкладки (не только Редактор/Обзор)
+    assert set(me['pages']) >= {'/', '/maintenance', '/defects', '/analytics',
+                                '/workers', '/explorer', '/admin', '/history'}
+    assert '/users' not in me['pages']
+    # ранее закрытые вкладки теперь открываются в режиме просмотра
+    assert c.get('/maintenance').status_code == 200
+    assert c.get('/defects').status_code == 200
+    assert c.get('/analytics').status_code == 200
     # запись в Редакторе и Обзоре разрешена
     assert c.post('/api/admin/table/gun', json={'values': {'g_num': 90102, 'gun_type': 'X'}}).status_code == 200
     assert c.put('/api/explorer/gun/1', json={'values': {'gun_type': 'ITO'}}).status_code == 200
-    # запись в чужой области (Дефекты) запрещена
+    # запись в чужой области (Дефекты) запрещена — только просмотр
     assert c.post('/api/defects/register', json={'model_id': 1, 'spot_number': 1, 'problem_code': 'CR'}).status_code == 403
 
 
-# ── ОТК / Производство: видят всё, менять нельзя ─────────────────────────────
-def test_otk_read_only(register_client):
+# ── ОТК: видит всё, фиксирует дефекты, остальное — просмотр ──────────────────
+def test_otk_defects_only(register_client):
     c = register_client(department='ОТК')
     me = c.get('/api/me').get_json()
-    assert me['readonly'] is True
-    assert '/maintenance' in me['pages'] and '/admin' in me['pages']   # видит всё
-    assert c.get('/maintenance').status_code == 200                    # просмотр открыт
-    assert c.get('/admin').status_code == 200
-    # любая запись запрещена (400≠; именно 403 от щита прав)
+    assert me['readonly'] is False and me['can_edit_docs'] is False   # запись только в Дефекты
+    assert '/maintenance' in me['pages'] and '/admin' in me['pages']
+    assert c.get('/maintenance').status_code == 200 and c.get('/admin').status_code == 200
+    # фиксация дефекта разрешена (не 403 от щита; создаётся запись)
+    assert c.post('/api/defects/register_manual', json={'g_num': 90777, 'problem_code': 'CR'}).status_code == 200
+    # остальные области — только чтение (403 от щита прав)
     assert c.post('/api/admin/table/gun', json={'values': {'g_num': 90103, 'gun_type': 'X'}}).status_code == 403
     assert c.post('/api/maintenance', json={}).status_code == 403
     assert c.put('/api/explorer/gun/1', json={'values': {'gun_type': 'x'}}).status_code == 403
-    # встроенный редактор фактов (ТО/дефекты): читать можно, писать — нет
+    # встроенный редактор фактов — только чтение (раздел «Редактор» = r)
     assert c.get('/api/admin/doc/defects').status_code == 200
     assert c.post('/api/admin/doc/defects/batch', json={'changes': []}).status_code == 403
 
@@ -60,8 +61,20 @@ def test_otk_read_only(register_client):
 def test_proizvodstvo_read_only(register_client):
     c = register_client(department='Производство')
     me = c.get('/api/me').get_json()
-    assert me['readonly'] is True
+    assert me['readonly'] is True and me['can_edit_docs'] is False
     assert c.post('/api/admin/table/gun', json={'values': {'g_num': 90104, 'gun_type': 'X'}}).status_code == 403
+    assert c.post('/api/defects/register_manual', json={'g_num': 90105, 'problem_code': 'CR'}).status_code == 403
+
+
+def test_oto_read_only(register_client):
+    """Новый отдел ОТО — доступен при регистрации, только просмотр."""
+    c = register_client(department='ОТО')
+    me = c.get('/api/me').get_json()
+    assert me['readonly'] is True and me['can_edit_docs'] is False
+    assert set(me['pages']) >= {'/', '/maintenance', '/defects', '/analytics', '/explorer', '/admin', '/history'}
+    assert c.get('/defects').status_code == 200                       # просмотр открыт
+    assert c.post('/api/defects/register_manual', json={'g_num': 90106, 'problem_code': 'CR'}).status_code == 403
+    assert c.post('/api/admin/table/gun', json={'values': {'g_num': 90107, 'gun_type': 'X'}}).status_code == 403
 
 
 # ── Панель пользователей — только админ ──────────────────────────────────────

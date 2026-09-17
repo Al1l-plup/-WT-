@@ -23,7 +23,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from app.constants import DEPARTMENTS
 from app.db import get_db
 from app.errors import api_error
-from app.permissions import is_readonly, visible_pages
+from app.permissions import can_edit_docs, is_readonly, visible_pages
 
 # Логин — рабочая почта (планируется рассылка уведомлений об изменениях).
 EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]{2,}$')
@@ -72,6 +72,7 @@ def me():
         'role': session.get('role', 'user'),
         'is_admin': is_admin,
         'readonly': is_readonly(dept, is_admin),
+        'can_edit_docs': can_edit_docs(dept, is_admin),
         'pages': visible_pages(dept, is_admin),
         'must_change': bool(session.get('must_change')),
     })

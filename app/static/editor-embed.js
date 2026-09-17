@@ -34,7 +34,9 @@
     if (!host || typeof Sheet === 'undefined') return null;
 
     const me = await getMe();
-    const readonly = !!me.readonly;
+    // право правки встроенного редактора = право записи в раздел «Редактор» (can_edit_docs);
+    // общий readonly-флаг тут не подходит: у ОТК есть запись в Дефекты, но не в Редактор
+    const readonly = !(me.can_edit_docs !== undefined ? me.can_edit_docs : !me.readonly);
     host.classList.add('fed');
     host.innerHTML =
       `<div class="fed-bar">
