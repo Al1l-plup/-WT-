@@ -864,8 +864,9 @@ class Sheet {
       '#sheetfilter .sf-sort button:hover{border-color:var(--accent);color:var(--accent)}' +
       '#sheetfilter .sf-search{padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit;font-size:13px;width:100%;box-sizing:border-box}' +
       '#sheetfilter .sf-all{display:flex;align-items:center;gap:7px;padding:2px;font-weight:600;border-bottom:1px solid var(--border);padding-bottom:6px;cursor:pointer}' +
-      '#sheetfilter .sf-list{max-height:210px;overflow:auto;display:flex;flex-direction:column}' +
-      '#sheetfilter .sf-item{display:flex;align-items:center;gap:7px;padding:3px 2px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      '#sheetfilter .sf-list{max-height:210px;overflow-y:auto;overflow-x:hidden}' +
+      '#sheetfilter .sf-item{display:flex;align-items:center;gap:7px;min-height:24px;padding:2px 4px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3}' +
+      '#sheetfilter .sf-item input,#sheetfilter .sf-all input{flex:0 0 auto;width:15px;height:15px;margin:0}' +
       '#sheetfilter .sf-item:hover{background:color-mix(in srgb,var(--accent) 12%,transparent)}' +
       '#sheetfilter .sf-actions{display:flex;gap:6px;border-top:1px solid var(--border);padding-top:7px}' +
       '#sheetfilter .sf-actions button{padding:6px 10px;border:1px solid var(--border);background:var(--bg);color:inherit;border-radius:6px;cursor:pointer;font-size:12px}' +
