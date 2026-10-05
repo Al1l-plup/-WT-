@@ -465,9 +465,9 @@ class Sheet {
     if (!col || !this._canEdit(col, vr)) return;
     const r = this.view[vr];
     this._editing = { vr, c, value: initial != null ? String(initial) : String(this.rows[r][col.name] ?? ''), fresh: initial != null };
-    await this._mountEditor(true);
+    await this._mountEditor();
   }
-  async _mountEditor(selectAll) {
+  async _mountEditor() {
     const ed = this._editing; if (!ed) return;
     const col = this.cols[ed.c], r = this.view[ed.vr];
     const td = this._td(ed.vr, ed.c); if (!td) return;
@@ -485,8 +485,9 @@ class Sheet {
     }
     input.className = 'celledit';
     td.textContent = ''; td.appendChild(input); input.focus();
-    if (selectAll && input.select && !ed.fresh) input.select();
-    if (ed.fresh && input.setSelectionRange) input.setSelectionRange(input.value.length, input.value.length);
+    // курсор в конец текста (для дозаписи), без выделения всего содержимого —
+    // двойной клик / F2 открывают ячейку с готовой к правке строкой, как в Excel
+    if (input.setSelectionRange) input.setSelectionRange(input.value.length, input.value.length);
     input.oninput = () => { if (this._editing) this._editing.value = input.value; };
     const commit = (move, fillAll) => {
       input.onblur = null; input.remove();
