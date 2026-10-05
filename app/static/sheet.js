@@ -534,13 +534,43 @@ class Sheet {
   }
   _pasteTSV(text) {
     const grid = text.replace(/\r/g, '').replace(/\n$/, '').split('\n').map(l => l.split('\t'));
-    const vr0 = this.active.r, c0 = this.active.c, list = [];
+    if (!grid.length) return;
+    const vr0 = this.active.r, c0 = this.active.c, self = this, of = this.orderField;
+    // Как в Excel: если данных больше, чем строк — дотянуть недостающие строки в хвост.
+    // Автодобавление только когда вставка расширяет конец (без фильтра и сортировки —
+    // иначе позиция неоднозначна и сохраняем прежнее поведение «по существующим»).
+    let need = vr0 + grid.length - this.view.length;
+    if (need < 0 || this._filtered() || this._sort || !this.naturalOrder) need = 0;
+    const startIdx = this.rows.length, newRows = [];
+    if (need > 0) {
+      let base = this.rows.length;                 // порядок новых строк — за максимумом существующих
+      if (of) { const mx = Math.max(0, ...this.rows.map(r => Number(r[of])).filter(v => !isNaN(v))); base = mx; }
+      for (let i = 0; i < need; i++) {
+        const row = {}; this.allCols.forEach(c => { row[c.name] = ''; });
+        if (of) row[of] = base + 1 + i;              // порядок строк (Weld Balance)
+        newRows.push(row);
+        this.rows.push(row); this.orig.push({}); this.state.push('new');
+      }
+      this.view = this.rows.map((_, i) => i);
+    }
+    // записать значения (в существующие и новые строки), собрать undo
+    const cells = [];
     grid.forEach((line, dr) => line.forEach((val, dc) => {
       const vr = vr0 + dr, c = c0 + dc;
-      if (vr < this.view.length && c < this.cols.length && this._canEdit(this.cols[c], vr))
-        list.push({ r: this.view[vr], name: this.cols[c].name, val });
+      if (vr >= self.view.length || c >= self.cols.length) return;
+      const col = self.cols[c];
+      if (!self._canEdit(col, vr)) return;
+      const ridx = self.view[vr], old = self.rows[ridx][col.name];
+      if (String(old ?? '') !== String(val ?? '')) { cells.push({ ridx, name: col.name, old, val }); self.rows[ridx][col.name] = val; }
     }));
-    if (this._setCells(list)) this._afterMutate();
+    if (!need && !cells.length) return;
+    this._push({
+      undo() { for (const ch of cells) self.rows[ch.ridx][ch.name] = ch.old; if (need) { self.rows.splice(startIdx, need); self.orig.splice(startIdx, need); self.state.splice(startIdx, need); } self.view = self.rows.map((_, i) => i); },
+      redo() { for (let i = 0; i < need; i++) { self.rows.push(newRows[i]); self.orig.push({}); self.state.push('new'); } for (const ch of cells) self.rows[ch.ridx][ch.name] = ch.val; self.view = self.rows.map((_, i) => i); },
+    });
+    this._afterMutate();
+    const r2 = Math.min(vr0 + grid.length - 1, this.view.length - 1), c2 = Math.min(c0 + grid[0].length - 1, this.cols.length - 1);
+    this.sels = [{ r1: vr0, c1: c0, r2, c2 }]; this.active = { r: vr0, c: c0 }; this._paint();
   }
   _clearSel() {
     const list = [];

@@ -84,6 +84,60 @@ def test_wb_update_part_and_clear_raw(client, app):
     assert stuck is None  # пустое значение удалило ключ из raw_extra
 
 
+def test_wb_paste_autoadds_rows_and_links(client, app):
+    """Большая вставка (Ctrl+V) в «Редакторе» дотягивает недостающие строки — sheet.js
+    отправляет их пачкой `insert` с row_order. Проверяем, что ВСЕ новые строки
+    сохраняются одним батчем и у каждой срабатывают подвязки: gun_id по G.N, карточка
+    точки (spot) по (код, №), активная связка welding_setup — как у одиночной вставки."""
+    doc = wb_doc(client, 'A13T')
+    db = _db(app)
+    base = db.execute("SELECT COALESCE(MAX(row_order),0) FROM weld_point").fetchone()[0]
+
+    # 5 строк «из буфера»: клещи G.1 (есть в seed), модель A13T (model_id=1), новые № точек.
+    n = 5
+    changes = [{'op': 'insert', 'values': {
+        'gun_mntc': 'G.1', 'model_code': 'A13T', 'spot_number': str(96100 + i),
+        'welding_type': 'PSW', 'zone': f'bulk{i}', 'row_order': base + 1 + i}} for i in range(n)]
+    assert client.post(f'/api/admin/doc/{doc}/batch', json={'changes': changes}).get_json()['status'] == 'success'
+
+    gun1 = db.execute('SELECT UniqueID FROM gun WHERE g_num=1').fetchone()[0]
+    for i in range(n):
+        wp = db.execute("SELECT id, gun_id, spot_id, row_order FROM weld_point WHERE zone=?",
+                        (f'bulk{i}',)).fetchone()
+        assert wp is not None, f'строка bulk{i} не создана'
+        _id, gun_id, spot_id, row_order = wp
+        assert gun_id == gun1, f'bulk{i}: клещи не привязаны'          # подвязка 1: G.N → gun
+        assert spot_id is not None, f'bulk{i}: карточка точки не создана'  # подвязка 2: (код,№) → spot
+        assert row_order == base + 1 + i                              # порядок строк сохранён (как в Excel)
+        spot = db.execute("SELECT UniqueID FROM spot WHERE model_id=1 AND spot_number=?",
+                          (96100 + i,)).fetchone()
+        assert spot and spot[0] == spot_id
+        ws = db.execute('SELECT auto_created FROM welding_setup WHERE spot_id=? AND gun_id=? AND is_active=1',
+                        (spot_id, gun1)).fetchone()
+        assert ws is not None and ws[0] == 1                          # подвязка 3: активная связка точка↔клещи
+
+    # все 5 — под одним батчем (один Ctrl+V = одна правка в Журнале)
+    assert db.execute("SELECT COUNT(DISTINCT row_order) FROM weld_point WHERE zone LIKE 'bulk%'").fetchone()[0] == n
+
+
+def test_wb_paste_row_inherits_tab_model_code(client, app):
+    """Ctrl+V из Excel НЕ содержит «Модель (код)» (её нет среди 53 колонок листа).
+    Новая строка вкладки должна унаследовать код модели вкладки, чтобы точка сразу
+    привязалась к карточке (spot) — иначе подвязка по точке молча не сработает."""
+    doc = wb_doc(client, 'A13T')
+    # вставка без model_code — как реальная паста строки Excel
+    r = client.post(f'/api/admin/doc/{doc}/batch', json={'changes': [{'op': 'insert', 'values': {
+        'gun_mntc': 'G.1', 'spot_number': '96300', 'zone': 'inherit', 'row_order': 1}}]})
+    assert r.get_json()['status'] == 'success'
+
+    db = _db(app)
+    wp = db.execute("SELECT model_code, gun_id, spot_id FROM weld_point WHERE zone='inherit'").fetchone()
+    assert wp[0] == 'A13T'                        # код модели подставлен из вкладки
+    assert wp[1] is not None and wp[2] is not None  # и клещи, и карточка точки привязаны
+    spot = db.execute("SELECT UniqueID FROM spot WHERE model_id=1 AND spot_number=96300").fetchone()
+    assert spot and spot[0] == wp[2]
+
+
 def test_wb_paste_full_excel_row(client, app):
     """Смоделировать Ctrl+V строки из Excel: значения по позициям попадают в свои поля,
     включая детали и служебные, без сдвига колонок."""

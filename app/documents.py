@@ -125,7 +125,29 @@ _WB_BASE = """FROM weld_point wp
         LEFT JOIN wb_material m3 ON p3.material_id=m3.id"""
 
 
-def _wb_doc(title, where, manual_src):
+def _wb_tab_model_code(db, token):
+    """Код модели вкладки WB для авто-подстановки в новые строки (Ctrl+V из Excel не
+    содержит 'Модель (код)' — её нет среди 53 колонок листа). Берём преобладающий код
+    уже загруженных строк вкладки (каждая вкладка = одна модель); пустая вкладка —
+    точное совпадение токена с карточкой модели; иначе None (пользователь впишет сам)."""
+    try:
+        row = db.execute(
+            "SELECT model_code FROM weld_point WHERE source_file LIKE '%'||?||'%' AND model_code IS NOT NULL "
+            "GROUP BY model_code ORDER BY COUNT(*) DESC LIMIT 1", (token,)).fetchone()
+        if row and row[0]:
+            return row[0]
+        m = db.execute('SELECT model_code FROM model WHERE UPPER(model_code)=UPPER(?) LIMIT 1', (token,)).fetchone()
+        return m[0] if m else None
+    except Exception:
+        return None
+
+
+def _wb_doc(title, where, manual_src, model_code=None):
+    # авто-подстановки для строк, создаваемых в редакторе: source_file (NOT NULL + фильтр
+    # документа) и model_code вкладки — чтобы точка пасты сразу привязалась к карточке
+    defaults = {'source_file': manual_src}
+    if model_code:
+        defaults['model_code'] = model_code
     return {
         'title': title,
         'base': _WB_BASE,
@@ -134,8 +156,7 @@ def _wb_doc(title, where, manual_src):
         'primary': 'weld_point',
         'order': 'wp.row_order, wp.id',
         'child': {'table': 'weld_point_part', 'fk_col': 'weld_point_id', 'title': 'Детали точки'},
-        # значения по умолчанию для строк, создаваемых через редактор (NOT NULL + фильтр документа)
-        'insert_defaults': {'source_file': manual_src},
+        'insert_defaults': defaults,
         'columns': _WB_COLUMNS,
     }
 
@@ -269,7 +290,8 @@ def get_documents(db) -> dict:
         if not TOKEN_RE.match(token or ''):
             continue  # некорректный токен не должен попадать в SQL
         docs[f'weld_balance_{tab_id}'] = _wb_doc(
-            title, f"wp.source_file LIKE '%{token}%'", manual) | {'wb_tab_id': tab_id}
+            title, f"wp.source_file LIKE '%{token}%'", manual,
+            _wb_tab_model_code(db, token)) | {'wb_tab_id': tab_id}
     docs['parameters'] = _PARAMETERS_DOC
     docs['maintenance'] = _MAINTENANCE_DOC
     docs['defects'] = _DEFECTS_DOC
