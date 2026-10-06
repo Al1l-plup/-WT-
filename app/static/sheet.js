@@ -495,7 +495,11 @@ class Sheet {
       this._editing = null;
       if (fillAll) this.fillSelection(val);
       else { this._setCells([{ r, name: col.name, val }]); this._renderCell(ed.vr, ed.c); }
-      if (move) this._move(move.dr, move.dc); else this._paint();
+      // Enter в последней строке — дотянуть новую строку и перейти в неё (как в Excel:
+      // лист растёт по мере ввода, а не по отдельной кнопке).
+      if (move && move.dr > 0 && ed.vr >= this.view.length - 1 && this._rowOpsAllowed()) {
+        this.addRow(); this._focus(this.view.length - 1, ed.c);
+      } else if (move) this._move(move.dr, move.dc); else this._paint();
       this._onChange(); this._emitActive();
     };
     this._commitEdit = commit;
@@ -521,6 +525,50 @@ class Sheet {
     const s = this._activeSel();
     if (extend) { s.r2 = vr; s.c2 = c; } else this.sels = [{ r1: vr, c1: c, r2: vr, c2: c }];
     this._ensureVisible(vr); this._paint(); this._emitActive();
+  }
+  _isBlank(vr, c) {
+    const row = this.rows[this.view[vr]];
+    if (!row) return true;
+    const v = row[this.cols[c].name];
+    return v === '' || v === null || v === undefined;
+  }
+  // Край блока данных в направлении (dr,dc) — как Ctrl+стрелка в Excel:
+  // по заполненным ячейкам до последней перед пустой; по пустым — до первой заполненной;
+  // если дальше ничего нет — до края таблицы.
+  _jumpEdge(vr, c, dr, dc) {
+    const maxR = this.view.length - 1, maxC = this.cols.length - 1;
+    const inb = (r, cc) => r >= 0 && r <= maxR && cc >= 0 && cc <= maxC;
+    let r = vr, cc = c;
+    if (!inb(r + dr, cc + dc)) return { r, c: cc };            // уже у края
+    if (this._isBlank(r, cc)) {                                // старт на пустой → до первой заполненной
+      while (inb(r + dr, cc + dc)) { r += dr; cc += dc; if (!this._isBlank(r, cc)) return { r, c: cc }; }
+      return { r, c: cc };
+    }
+    if (this._isBlank(r + dr, cc + dc)) {                      // за заполненной идёт пусто → через пропуск к следующей заполненной
+      r += dr; cc += dc;
+      while (inb(r + dr, cc + dc) && this._isBlank(r, cc)) { r += dr; cc += dc; }
+      return { r, c: cc };
+    }
+    while (inb(r + dr, cc + dc) && !this._isBlank(r + dr, cc + dc)) { r += dr; cc += dc; }  // сплошной блок → до последней заполненной
+    return { r, c: cc };
+  }
+  _moveEdge(dr, dc, extend) {
+    const t = this._jumpEdge(this.active.r, this.active.c, dr, dc);
+    this.active = { r: t.r, c: t.c };
+    const s = this._activeSel();
+    if (extend) { s.r2 = t.r; s.c2 = t.c; } else this.sels = [{ r1: t.r, c1: t.c, r2: t.r, c2: t.c }];
+    this._ensureVisible(t.r); this._paint(); this._emitActive();
+  }
+  // Вставка из буфера по правой кнопке/меню: читаем clipboard и гоним через общий разбор.
+  // В небезопасном контексте (http без localhost) браузер запрещает чтение буфера — подсказываем Ctrl+V.
+  async _pasteFromClipboard() {
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.readText) throw new Error('no clipboard api');
+      const text = await navigator.clipboard.readText();
+      if (text) this._pasteTSV(text);
+    } catch (e) {
+      alert('Браузер не разрешает чтение буфера обмена здесь. Нажмите Ctrl+V для вставки.');
+    }
   }
 
   // ── копипаст ─────────────────────────────────────────────────────────────
@@ -617,6 +665,9 @@ class Sheet {
     const items = [
       { t: `Вставить строку выше (${n})`, f: () => this.insertRows(s.r1, n), dis: rowReason },
       { t: `Вставить строку ниже (${n})`, f: () => this.insertRows(s.r2 + 1, n), dis: rowReason },
+      { t: 'Вставить число строк…', f: () => { const v = prompt('Сколько строк вставить ниже выделения?', String(n)); const cnt = parseInt(v, 10); if (cnt > 0) this.insertRows(s.r2 + 1, cnt); }, dis: rowReason },
+      { t: '—' },
+      { t: 'Вставить из буфера (Ctrl+V)', f: () => this._pasteFromClipboard() },
       { t: '—' },
       { t: `Вырезать строки (${n})`, f: () => this.cutRows(s.r1, s.r2), dis: rowReason },
       this.cutSet ? { t: 'Вставить вырезанные выше текущей', f: () => this.pasteCutBefore(this.active.r) } : null,
@@ -787,10 +838,10 @@ class Sheet {
       else if ((k === 'd' || k === 'D' || k === 'в' || k === 'В') && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this.fillDown(); }
       else if (k === 'ArrowUp' && e.altKey) { e.preventDefault(); const s = this._normSel(); this.moveRows(s.r1, s.r2, -1); }
       else if (k === 'ArrowDown' && e.altKey) { e.preventDefault(); const s = this._normSel(); this.moveRows(s.r1, s.r2, 1); }
-      else if (k === 'ArrowUp') { e.preventDefault(); this._move(-1, 0, e.shiftKey); }
-      else if (k === 'ArrowDown') { e.preventDefault(); this._move(1, 0, e.shiftKey); }
-      else if (k === 'ArrowLeft') { e.preventDefault(); this._move(0, -1, e.shiftKey); }
-      else if (k === 'ArrowRight') { e.preventDefault(); this._move(0, 1, e.shiftKey); }
+      else if (k === 'ArrowUp') { e.preventDefault(); (e.ctrlKey || e.metaKey) ? this._moveEdge(-1, 0, e.shiftKey) : this._move(-1, 0, e.shiftKey); }
+      else if (k === 'ArrowDown') { e.preventDefault(); (e.ctrlKey || e.metaKey) ? this._moveEdge(1, 0, e.shiftKey) : this._move(1, 0, e.shiftKey); }
+      else if (k === 'ArrowLeft') { e.preventDefault(); (e.ctrlKey || e.metaKey) ? this._moveEdge(0, -1, e.shiftKey) : this._move(0, -1, e.shiftKey); }
+      else if (k === 'ArrowRight') { e.preventDefault(); (e.ctrlKey || e.metaKey) ? this._moveEdge(0, 1, e.shiftKey) : this._move(0, 1, e.shiftKey); }
       else if (k === 'PageDown') { e.preventDefault(); this._move(Math.round(this.el.clientHeight / this.rowH) - 2, 0, e.shiftKey); }
       else if (k === 'PageUp') { e.preventDefault(); this._move(-(Math.round(this.el.clientHeight / this.rowH) - 2), 0, e.shiftKey); }
       else if (k === 'Tab') { e.preventDefault(); this._move(0, e.shiftKey ? -1 : 1); }
