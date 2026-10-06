@@ -253,7 +253,7 @@
   </ul>
 </dialog>
 
-<script src="/static/sheet.js?v=10"></script>
+<script src="/static/sheet.js?v=11"></script>
 <script>
 const $ = s => document.querySelector(s);
 // автор правок определяется на сервере по сессии входа
@@ -412,7 +412,7 @@ async function saveRaw(){
 // ── общее ────────────────────────────────────────────────────────────────────
 function pageBar(d){ const from=d.total?page*pageSize+1:0, to=Math.min((page+1)*pageSize,d.total); $('#pageInfo').textContent=`${from}–${to} из ${d.total}`; $('#cnt').textContent=''; }
 const reload = ()=> mode==='doc'?loadDoc():loadRaw();
-$('#addBtn').onclick=()=>sheet&&sheet.addRow();
+$('#addBtn').onclick=()=>{ if(!sheet) return; const v=prompt('Сколько строк добавить?','1'); if(v===null) return; const n=parseInt(v,10); if(n>0) sheet.addRows(n); };
 $('#undoBtn').onclick=()=>sheet&&sheet.undo();
 $('#redoBtn').onclick=()=>sheet&&sheet.redo();
 $('#mergeChk').onchange=e=>{ sheet&&sheet.setMergeView(e.target.checked); childSheet&&childSheet.setMergeView(e.target.checked); };

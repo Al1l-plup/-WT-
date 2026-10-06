@@ -113,7 +113,7 @@
     host.addEventListener('click', e => {
       const a = e.target.closest('[data-a]'); if (!a) return;
       const act = a.dataset.a;
-      if (act === 'add') sheet && sheet.addRow();
+      if (act === 'add') { if (sheet) { const v = prompt('Сколько строк добавить?', '1'); if (v !== null) { const n = parseInt(v, 10); if (n > 0) sheet.addRows(n); } } }
       else if (act === 'undo') sheet && sheet.undo();
       else if (act === 'redo') sheet && sheet.redo();
       else if (act === 'save') save();

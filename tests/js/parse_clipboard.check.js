@@ -62,5 +62,26 @@ eq('edge right: блок до пустой', gh._jumpEdge(0, 0, 0, 1), { r: 0, c
 eq('edge right: через пропуск', gh._jumpEdge(0, 1, 0, 1), { r: 0, c: 3 });
 eq('edge right: у края', gh._jumpEdge(0, 3, 0, 1), { r: 0, c: 3 });
 
+// ── _afterMutate: пересборка view (фильтр/сортировка) только при смене числа строк ──
+function afterMutateProbe() {
+  let recomputed = 0, rendered = 0;
+  const self = {
+    rows: [{}, {}, {}], view: [0, 1, 2], _viewRowCount: 3,
+    _recompute() { recomputed++; }, _renderBody() { rendered++; },
+    _onChange() {}, _emitActive() {}, onUndoState: null,
+    canUndo() { return false; }, canRedo() { return false; },
+  };
+  self._afterMutate = Sheet.prototype._afterMutate.bind(self);
+  self._afterMutate();                      // правка значений: число строк не изменилось
+  const afterEdit = { recomputed, rendered };
+  self.rows.push({});                       // добавили строку: число строк выросло
+  self._afterMutate();
+  const afterAdd = { recomputed, rendered };
+  return { afterEdit, afterAdd };
+}
+const am = afterMutateProbe();
+eq('afterMutate: правка — без пересборки view', am.afterEdit, { recomputed: 0, rendered: 1 });
+eq('afterMutate: смена числа строк — пересборка', am.afterAdd, { recomputed: 1, rendered: 1 });
+
 if (fail) { console.error(`\n${fail} FAILED`); process.exit(1); }
-console.log('\nparser + edge-jump OK');
+console.log('\nparser + edge-jump + afterMutate OK');

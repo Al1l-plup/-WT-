@@ -60,6 +60,7 @@ class Sheet {
     this.orig = this.rows.map(r => Object.assign({}, r));
     this.state = this.rows.map(() => 'clean');
     this.view = this.rows.map((_, i) => i);
+    this._viewRowCount = this.rows.length;    // для _afterMutate: пересобирать view только при смене числа строк
     this.active = { r: 0, c: 0 };
     this.sels = [{ r1: 0, c1: 0, r2: 0, c2: 0 }];
     this.undoStack = []; this.redoStack = []; this.cutSet = null; this._editing = null;
@@ -109,8 +110,17 @@ class Sheet {
   undo() { const c = this.undoStack.pop(); if (!c) return; c.undo(); this.redoStack.push(c); this._afterMutate(); }
   redo() { const c = this.redoStack.pop(); if (!c) return; c.redo(); this.undoStack.push(c); this._afterMutate(); }
   _afterMutate() {
-    this.view = this.rows.map((_, i) => i);
-    this._recompute(true);
+    // Состав строк изменился (вставка/удаление/пачка/undo) — пересобрать view с учётом
+    // фильтра и сортировки. Обычная правка значений (в т.ч. протяжка/заливка) состав view
+    // НЕ меняет: иначе отфильтрованные строки исчезали бы прямо во время правки. В Excel
+    // фильтр — стабильный вид, он переприменяется только вручную (повторным фильтром).
+    if (this.rows.length !== this._viewRowCount) {
+      this.view = this.rows.map((_, i) => i);
+      this._recompute(true);
+    } else {
+      this._renderBody();
+    }
+    this._viewRowCount = this.rows.length;
     this._onChange();
     if (this.onUndoState) this.onUndoState(this.canUndo(), this.canRedo());
     this._emitActive();
@@ -190,17 +200,25 @@ class Sheet {
     this._afterMutate();
     this._focus(atVr, this.cols.findIndex(c => c.editable && !c.pk));
   }
-  addRow(preset) {
-    if (this.orderField && !preset?.[this.orderField]) {
-      preset = Object.assign({}, preset);
+  addRow(preset) { this.addRows(1, preset); }
+  // Добавить N строк в конец одним действием (одна отмена). Работает и без orderField
+  // (напр. детали точки); для WB порядок строк продолжается за максимумом.
+  addRows(n, preset) {
+    n = Math.max(1, n | 0);
+    const self = this, rowsData = [];
+    let base = null;
+    if (this.orderField) {
       const last = this.rows.length ? Number(this.rows[this.rows.length - 1][this.orderField]) : 0;
-      preset[this.orderField] = (isNaN(last) ? this.rows.length : last) + 1;
+      base = isNaN(last) ? this.rows.length : last;
     }
-    const row = Object.assign({}, preset || {});
-    this.allCols.forEach(c => { if (!(c.name in row)) row[c.name] = ''; });
-    const self = this;
-    const doIns = () => { self.rows.push(row); self.orig.push({}); self.state.push('new'); };
-    const doDel = () => { self.rows.pop(); self.orig.pop(); self.state.pop(); };
+    for (let i = 0; i < n; i++) {
+      const row = Object.assign({}, preset || {});
+      this.allCols.forEach(c => { if (!(c.name in row)) row[c.name] = ''; });
+      if (this.orderField && !(preset && preset[this.orderField])) row[this.orderField] = base + 1 + i;
+      rowsData.push(row);
+    }
+    const doIns = () => { for (const r of rowsData) { self.rows.push(r); self.orig.push({}); self.state.push('new'); } };
+    const doDel = () => { for (let i = 0; i < n; i++) { self.rows.pop(); self.orig.pop(); self.state.pop(); } };
     doIns();
     this._push({ undo: doDel, redo: doIns });
     this._afterMutate();
