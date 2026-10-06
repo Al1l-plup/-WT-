@@ -96,12 +96,14 @@ _WB_COLUMNS = [
     _wp('X', 'coord_x'),                        # col49
     _wp('Y', 'coord_y'),                        # col50
     _wp('Z', 'coord_z'),                        # col51
-    _wp('Вариант (Models)', 'model_variant'),   # col52
+    _wp('Вариант (Models)', 'model_variant',    # col52 (BA) — МОДЕЛЬ строки, источник привязки
+        hint='Модель строки (столбец Models/BA листа). По ней определяется код модели и привязка '
+             'точки. Пусто → берётся модель вкладки. P01 автоматически = P01G.'),
     # ── заблокированные/внутренние поля — В КОНЦЕ (не входят в вставку из Excel) ──
     {'label': 'Модель (код)', 'field': 'model_code', 'expr': 'wp.model_code', 'edit': True,
      'table': 'weld_point', 'col': 'model_code',
-     'hint': 'Код модели: A13T, A01, P01G, CS55, CS65. Код + № точки → карточка точки (создаётся, если её нет). '
-             'Коды с двумя модификациями (A01 — Jolion 2WD/4WD, P01G — Tank ToD/NOT ToD) привязывают точку к ОБЕИМ.'},
+     'hint': 'Код модели для связей (A13T, A01, P01G, CS55, CS65). Заполняется автоматически из '
+             '«Вариант (Models)» (BA); обычно править вручную не нужно. Код + № точки → карточка точки.'},
     {'label': 'Клещи id', 'field': 'gun_id', 'expr': 'wp.gun_id', 'edit': False},
     {'label': 'Точка id', 'field': 'spot_id', 'expr': 'wp.spot_id', 'edit': False},
     {'label': 'Файл-источник', 'field': 'source_file', 'expr': 'wp.source_file', 'edit': False},

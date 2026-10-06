@@ -332,8 +332,33 @@ def delete_wb_tab(tab_id):
         return api_error(e)
 
 
-def _validate_business(db, table, values, exclude_pk=None):
-    """Доменная валидация перед записью. Ошибка → ValueError (уйдёт клиенту как 400)."""
+def _known_model_codes(db):
+    return [r[0] for r in db.execute('SELECT DISTINCT model_code FROM model')]
+
+
+def _canonical_model_code(db, raw):
+    """Код модели из значения колонки BA («Models»/model_variant): точное совпадение с
+    карточкой модели, иначе единственное совпадение по префиксу (P01 → P01G); иначе —
+    значение как есть (напр. A04: такого кода нет, подвязка не создастся, строка отметится)."""
+    v = str(raw or '').strip()
+    if not v:
+        return ''
+    codes = _known_model_codes(db)
+    for c in codes:
+        if c.upper() == v.upper():
+            return c
+    pref = [c for c in codes if c.upper().startswith(v.upper())]
+    return pref[0] if len(pref) == 1 else v
+
+
+def _is_known_model(db, code):
+    return code in (None, '') or str(code).upper() in {c.upper() for c in _known_model_codes(db)}
+
+
+def _validate_business(db, table, values, exclude_pk=None, allow_unknown_model=False):
+    """Доменная валидация перед записью. Ошибка → ValueError (уйдёт клиенту как 400).
+    allow_unknown_model=True (модель пришла из BA «Models» при вставке/пасте) — неизвестный
+    код НЕ блокирует пакет (строка сохранится без подвязки и будет отмечена в ответе)."""
     if table == 'gun' and 'g_num' in values and values['g_num'] not in (None, ''):
         try:
             gnum = int(values['g_num'])
@@ -362,8 +387,8 @@ def _validate_business(db, table, values, exclude_pk=None):
                 p.append(exclude_pk)
             if db.execute(q, p).fetchone():
                 raise ValueError(f'Точка №{spot_number} уже есть в этой модели — номер уникален в пределах модели')
-    if table == 'weld_point' and values.get('model_code') not in (None, ''):
-        codes = [r[0] for r in db.execute('SELECT DISTINCT model_code FROM model')]
+    if table == 'weld_point' and values.get('model_code') not in (None, '') and not allow_unknown_model:
+        codes = _known_model_codes(db)
         if str(values['model_code']).upper() not in {c.upper() for c in codes}:
             raise ValueError(f'Неизвестный код модели «{values["model_code"]}». Допустимые: {", ".join(sorted(codes))}')
 
@@ -520,6 +545,7 @@ def batch_doc(doc_id):
         updates = {}      # (table, pk_value) -> {col: value}
         wp_touched = []   # затронутые weld_point.id — для авто-привязки gun_id/spot_id
         wp_removed = []   # (model_code, spot_number, gun_id) удалённых строк WB
+        warnings = []     # строки с нераспознанной моделью из BA (напр. A04) — сохранены без подвязки
         for ch in changes:
             op = ch.get('op')
             if op == 'update':
@@ -541,10 +567,18 @@ def batch_doc(doc_id):
                 # прямые колонки первичной таблицы (setter-колонки пишутся отдельно ниже)
                 vals = {editable[f]['col']: v for f, v in row_vals.items()
                         if f in editable and editable[f].get('table') == primary and not editable[f].get('setter')}
-                # обязательные значения по умолчанию (напр. source_file WB-документа)
+                # Модель строки WB берём из BA («Models»/model_variant): нормализуем к коду
+                # (P01→P01G) и кладём в model_code. Пустая BA → код вкладки (insert_defaults).
+                from_ba = primary == 'weld_point' and vals.get('model_variant') not in (None, '')
+                if from_ba:
+                    vals['model_code'] = _canonical_model_code(db, vals['model_variant'])
+                # обязательные значения по умолчанию (напр. source_file WB-документа, код вкладки)
                 for k, v in (cfg.get('insert_defaults') or {}).items():
                     vals.setdefault(k, v)
-                _validate_business(db, primary, vals)
+                _validate_business(db, primary, vals, allow_unknown_model=from_ba)
+                if from_ba and not _is_known_model(db, vals.get('model_code')):
+                    warnings.append(f"Модель «{vals['model_variant']}» не распознана "
+                                    f"(№ точки {row_vals.get('spot_number', '?')}) — строка сохранена без привязки точки")
                 keys = list(vals)
                 if keys:
                     cur = db.execute(f'INSERT INTO {_q(primary)} ({", ".join(_q(k) for k in keys)}) '
@@ -569,7 +603,13 @@ def batch_doc(doc_id):
                         wp_removed.append(tuple(r))
                 db.execute(f'DELETE FROM {_q(primary)} WHERE {_q(pkcol)}=?', (ch.get('pk'),))
         for (tbl, pkval), colvals in updates.items():
-            _validate_business(db, tbl, colvals, exclude_pk=pkval)
+            # правка BA («Models») тянет за собой код модели (BB) — источник модели = BA
+            from_ba = tbl == 'weld_point' and 'model_variant' in colvals
+            if from_ba:
+                colvals['model_code'] = _canonical_model_code(db, colvals['model_variant'])
+                if not _is_known_model(db, colvals['model_code']):
+                    warnings.append(f"Модель «{colvals['model_variant']}» не распознана — точка не привязана")
+            _validate_business(db, tbl, colvals, exclude_pk=pkval, allow_unknown_model=from_ba)
             pkcol, _ = table_meta(db, tbl)
             sets = ', '.join(f'{_q(k)}=?' for k in colvals)
             db.execute(f'UPDATE {_q(tbl)} SET {sets} WHERE {_q(pkcol)}=?', list(colvals.values()) + [pkval])
@@ -580,7 +620,12 @@ def batch_doc(doc_id):
             close_removed_wb_rows(db, wp_removed)
         stamp_audit(db, _author(), batch, since)
         db.commit()
-        return jsonify({'status': 'success', 'batch_id': batch, 'rows_updated': len(updates)})
+        resp = {'status': 'success', 'batch_id': batch, 'rows_updated': len(updates)}
+        if warnings:
+            # не больше 10 строк в подсказке, остальное свёрнём счётчиком
+            resp['warnings'] = warnings[:10]
+            resp['warnings_total'] = len(warnings)
+        return jsonify(resp)
     except ValueError as e:
         db.rollback()
         return jsonify({'status': 'error', 'message': str(e)}), 400

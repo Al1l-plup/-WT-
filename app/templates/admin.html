@@ -355,7 +355,12 @@ async function saveDoc(){
   }
   if(!changes.length){ alert('Нет изменений'); return; }
   const res = await (await fetch(`/api/admin/doc/${cur}/batch`,{method:'POST',headers:hdr(),body:JSON.stringify({changes})})).json();
-  if(res.status==='success'){ fkCache={}; loadDoc(); } else alert(res.message||'Ошибка');
+  if(res.status==='success'){ fkCache={}; showWarnings(res); loadDoc(); } else alert(res.message||'Ошибка');
+}
+function showWarnings(res){
+  if(!res.warnings||!res.warnings.length) return;
+  const more = res.warnings_total>res.warnings.length ? `\n…и ещё ${res.warnings_total-res.warnings.length}` : '';
+  alert('Сохранено, но есть замечания по модели:\n• '+res.warnings.join('\n• ')+more);
 }
 
 // ── под-таблица деталей (weld_point_part) ────────────────────────────────────

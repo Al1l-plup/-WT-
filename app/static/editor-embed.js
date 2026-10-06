@@ -105,8 +105,14 @@
       if (!changes.length) { msg('Нет изменений'); return; }
       try {
         const res = await (await fetch(`/api/admin/doc/${docId}/batch`, { method: 'POST', headers: hdr(), body: JSON.stringify({ changes }) })).json();
-        if (res.status === 'success') { for (const k in fkCache) delete fkCache[k]; msg('Сохранено', 'ok'); load(); }
-        else msg(res.message || 'Ошибка сохранения', 'err');
+        if (res.status === 'success') {
+          for (const k in fkCache) delete fkCache[k];
+          if (res.warnings && res.warnings.length) {
+            const more = res.warnings_total > res.warnings.length ? ` …и ещё ${res.warnings_total - res.warnings.length}` : '';
+            msg('Сохранено. Замечания: ' + res.warnings.join('; ') + more, 'err');
+          } else msg('Сохранено', 'ok');
+          load();
+        } else msg(res.message || 'Ошибка сохранения', 'err');
       } catch (e) { msg('Ошибка: ' + e.message, 'err'); }
     }
 

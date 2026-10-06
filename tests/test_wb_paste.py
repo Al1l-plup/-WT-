@@ -138,6 +138,43 @@ def test_wb_paste_row_inherits_tab_model_code(client, app):
     assert spot and spot[0] == wp[2]
 
 
+def test_wb_model_taken_from_ba_column(client, app):
+    """Модель берётся из BA («Вариант (Models)»/model_variant), а не из BB: значение BA
+    нормализуется в код (P01 → P01G) и кладётся в model_code — по нему идут подвязки."""
+    doc = wb_doc(client, 'A13T')
+    r = client.post(f'/api/admin/doc/{doc}/batch', json={'changes': [{'op': 'insert', 'values': {
+        'gun_mntc': 'G.1', 'spot_number': '96500', 'model_variant': 'P01', 'zone': 'ba_p01', 'row_order': 1}}]})
+    assert r.get_json()['status'] == 'success'
+    db = _db(app)
+    wp = db.execute("SELECT model_variant, model_code, spot_id FROM weld_point WHERE zone='ba_p01'").fetchone()
+    assert wp[0] == 'P01'                          # BA сохранена как есть
+    assert wp[1] == 'P01G'                         # код модели выведен из BA (P01 → P01G)
+    assert wp[2] is not None                       # карточка точки создана/привязана
+
+
+def test_wb_model_ba_unknown_saved_and_flagged(client, app):
+    """BA с нераспознанной моделью (напр. A04 — такого кода нет) НЕ блокирует пакет:
+    строка сохраняется (без привязки точки), а в ответе — предупреждение."""
+    doc = wb_doc(client, 'A13T')
+    r = client.post(f'/api/admin/doc/{doc}/batch', json={'changes': [{'op': 'insert', 'values': {
+        'gun_mntc': 'G.1', 'spot_number': '96501', 'model_variant': 'A04', 'zone': 'ba_a04', 'row_order': 2}}]}).get_json()
+    assert r['status'] == 'success'
+    assert r.get('warnings') and any('A04' in w for w in r['warnings'])   # строка отмечена
+    db = _db(app)
+    wp = db.execute("SELECT model_code, spot_id FROM weld_point WHERE zone='ba_a04'").fetchone()
+    assert wp[0] == 'A04'                           # сохранено как есть
+    assert wp[1] is None                            # подвязки точки нет (нет такой модели)
+
+
+def test_wb_direct_unknown_model_code_still_rejected(client):
+    """Прямой ввод неизвестного model_code (без BA) по-прежнему отвергается — ручной
+    ввод остаётся строгим (это не массовая паста из BA)."""
+    doc = wb_doc(client, 'A13T')
+    r = client.post(f'/api/admin/doc/{doc}/batch', json={'changes': [{'op': 'insert', 'values': {
+        'spot_number': '96502', 'model_code': 'ZZZ', 'zone': 'direct_bad', 'row_order': 3}}]})
+    assert r.status_code == 400 and 'Неизвестный код модели' in r.get_json()['message']
+
+
 def test_wb_paste_full_excel_row(client, app):
     """Смоделировать Ctrl+V строки из Excel: значения по позициям попадают в свои поля,
     включая детали и служебные, без сдвига колонок."""
