@@ -526,16 +526,42 @@ class Sheet {
   // ── копипаст ─────────────────────────────────────────────────────────────
   _copyTSV() {
     const s = this._normSel(); const out = [];
+    // ячейку с табом/переводом строки/кавычкой заключаем в "..." (кавычки удваиваем) —
+    // чтобы вставка обратно (в Excel или сюда) не разъехалась по колонкам/строкам
+    const q = v => { v = String(v ?? ''); return /[\t\n\r"]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
     for (let vr = s.r1; vr <= s.r2; vr++) {
       const r = this.view[vr], line = [];
-      for (let c = s.c1; c <= s.c2; c++) line.push(this.rows[r][this.cols[c].name] ?? '');
+      for (let c = s.c1; c <= s.c2; c++) line.push(q(this.rows[r][this.cols[c].name]));
       out.push(line.join('\t'));
     }
-    return out.join('\n');
+    return out.join('\r\n');
+  }
+  // Разбор буфера обмена Excel/TSV с учётом кавычек: ячейка с табом/переводом строки/
+  // кавычкой заключена в "...", внутренняя кавычка удвоена (""). Такой разбор НЕ рвёт
+  // многострочные ячейки (длинные описания) на несколько строк и не сдвигает колонки.
+  static _parseClipboard(text) {
+    const rows = []; let row = [], field = '', inQ = false, atStart = true;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === '\r') continue;                                              // CRLF→LF везде (в т.ч. внутри кавычек)
+      if (inQ) {
+        if (ch === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inQ = false; }
+        else field += ch;
+        continue;
+      }
+      if (ch === '"' && atStart) { inQ = true; atStart = false; continue; }   // кавычка только в начале ячейки
+      if (ch === '\t') { row.push(field); field = ''; atStart = true; continue; }
+      if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; atStart = true; continue; }
+      field += ch; atStart = false;
+    }
+    row.push(field); rows.push(row);
+    // убрать единственную пустую хвостовую строку (Excel добавляет перевод строки в конце)
+    if (rows.length && rows[rows.length - 1].length === 1 && rows[rows.length - 1][0] === '') rows.pop();
+    return rows;
   }
   _pasteTSV(text) {
-    const grid = text.replace(/\r/g, '').replace(/\n$/, '').split('\n').map(l => l.split('\t'));
-    if (!grid.length) return;
+    const grid = Sheet._parseClipboard(text);
+    if (!grid.length || (grid.length === 1 && grid[0].length === 1 && grid[0][0] === '')) return;
     const vr0 = this.active.r, c0 = this.active.c, self = this, of = this.orderField;
     // Как в Excel: если данных больше, чем строк — дотянуть недостающие строки в хвост.
     // Автодобавление только когда вставка расширяет конец (без фильтра и сортировки —
