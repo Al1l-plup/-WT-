@@ -61,7 +61,13 @@ def analytics_defects():
 @bp.route('/api/stats')
 def get_stats():
     db = get_db()
-    maint  = db.execute('SELECT COUNT(*) FROM maintenance').fetchone()[0]
-    open_d = db.execute("SELECT COUNT(*) FROM defects WHERE COALESCE(status,'registered') IN ('registered','in_work')").fetchone()[0]
-    total  = db.execute('SELECT COUNT(*) FROM defects').fetchone()[0]
-    return jsonify({'maintenance_records': maint, 'defects_open': open_d, 'defects_total': total})
+    def one(q): return db.execute(q).fetchone()[0]
+    maint  = one('SELECT COUNT(*) FROM maintenance')
+    open_d = one("SELECT COUNT(*) FROM defects WHERE COALESCE(status,'registered') IN ('registered','in_work')")
+    total  = one('SELECT COUNT(*) FROM defects')
+    # «масштаб» системы для плиток Главной
+    points = one('SELECT COUNT(*) FROM weld_point')
+    guns   = one('SELECT COUNT(*) FROM gun')
+    models = one('SELECT COUNT(DISTINCT model_code) FROM model')
+    return jsonify({'maintenance_records': maint, 'defects_open': open_d, 'defects_total': total,
+                    'weld_points': points, 'guns': guns, 'models': models})

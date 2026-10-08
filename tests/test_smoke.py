@@ -21,7 +21,8 @@ def test_brands_list(client):
 def test_stats_shape(client):
     r = client.get('/api/stats')
     assert r.status_code == 200
-    assert {'maintenance_records', 'defects_open', 'defects_total'} <= r.get_json().keys()
+    assert {'maintenance_records', 'defects_open', 'defects_total',
+            'weld_points', 'guns', 'models'} <= r.get_json().keys()
 
 
 def test_defects_all_shape(client):

@@ -4,10 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#161b22">
-  <meta name="description" content="WeldTeam MES — система управления точечной сваркой цеха BS">
-  <title>WeldTeam MES</title>
+  <meta name="description" content="WeldTeam MES — единая система техпроцесса, обслуживания и дефектов точечной сварки кузовного цеха BS">
+  <title>WeldTeam MES — система цеха сварки</title>
   <script src="/static/theme.js"></script>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v=2">
 </head>
 <body>
 
@@ -26,39 +26,150 @@
   </div>
 </nav>
 
-<div class="page">
-  <div class="page-head">
-    <h1>Система управления сваркой</h1>
-    <p>Цех BS · Chery · GWM · Changan</p>
+<main class="home">
+
+  <!-- ─── HERO ─────────────────────────────────────────── -->
+  <section class="hero">
+    <div class="hero-text">
+      <span class="hero-eyebrow">Цех BS · Body Shop · MES</span>
+      <h1 class="hero-title">Вся сварка кузовного цеха&nbsp;— в одном месте</h1>
+      <p class="hero-sub">
+        Техпроцесс, обслуживание и дефекты точечной сварки: точки, клещи и станции
+        связаны между собой, данные живые и доступны с телефона — вместо десятка
+        Excel-файлов в разных папках.
+      </p>
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="/explorer">Открыть обзор</a>
+        <a class="btn btn-ghost" href="/admin">Редактор данных</a>
+      </div>
+      <div class="hero-brands">
+        <span>Chery</span><span>GWM</span><span>Changan</span>
+      </div>
+    </div>
+
+    <!-- схема сути системы: точка ↔ клещи ↔ станция -->
+    <svg class="hero-graph" viewBox="0 0 320 210" role="img"
+         aria-label="Связка: точка сварки — клещи — станция">
+      <defs>
+        <marker id="hg-dot" markerWidth="6" markerHeight="6" refX="3" refY="3">
+          <circle cx="3" cy="3" r="2.4" fill="var(--accent)"/>
+        </marker>
+      </defs>
+      <g class="hg-link">
+        <line x1="74" y1="56" x2="166" y2="112"/>
+        <line x1="166" y1="112" x2="256" y2="60"/>
+        <line x1="166" y1="112" x2="166" y2="176"/>
+      </g>
+      <g class="hg-node">
+        <circle cx="74"  cy="56"  r="26"/><text x="74"  y="60">точка</text>
+      </g>
+      <g class="hg-node accent">
+        <circle cx="166" cy="112" r="30"/><text x="166" y="116">клещи</text>
+      </g>
+      <g class="hg-node">
+        <circle cx="256" cy="60"  r="26"/><text x="256" y="64">станция</text>
+      </g>
+      <g class="hg-node sm">
+        <circle cx="166" cy="176" r="22"/><text x="166" y="180">уставки</text>
+      </g>
+    </svg>
+  </section>
+
+  <!-- ─── ЖИВЫЕ ЦИФРЫ ──────────────────────────────────── -->
+  <section class="home-stats" aria-label="Текущие показатели">
+    <div class="home-stat"><div class="hs-val accent" id="s-points">—</div><div class="hs-lbl">Точек сварки</div></div>
+    <div class="home-stat"><div class="hs-val" id="s-guns">—</div><div class="hs-lbl">Клещей</div></div>
+    <div class="home-stat"><div class="hs-val" id="s-maint">—</div><div class="hs-lbl">Записей ТО</div></div>
+    <div class="home-stat"><div class="hs-val danger" id="s-open">—</div><div class="hs-lbl">Открытых дефектов</div></div>
+  </section>
+
+  <!-- ─── РАЗДЕЛЫ / ЧТО УМЕЕТ ──────────────────────────── -->
+  <h2 class="home-h2">Разделы системы</h2>
+  <div class="sec-grid" id="secGrid">
+    <a class="sec-card" href="/explorer" data-page="/explorer">
+      <span class="sec-ico">🔎</span>
+      <span class="sec-title">Обзор</span>
+      <span class="sec-desc">Карточки точек, клещей и станций: что к чему привязано, активные связки и история.</span>
+      <span class="sec-arr">→</span>
+    </a>
+    <a class="sec-card" href="/admin" data-page="/admin">
+      <span class="sec-ico">📋</span>
+      <span class="sec-title">Редактор · Weld Balance</span>
+      <span class="sec-desc">Таблица точек как в Excel: слои, параметры, вставка из листа. Точка↔клещи↔станция связываются сами.</span>
+      <span class="sec-arr">→</span>
+    </a>
+    <a class="sec-card" href="/maintenance" data-page="/maintenance">
+      <span class="sec-ico">🔧</span>
+      <span class="sec-title">Обслуживание · ТО</span>
+      <span class="sec-desc">Замеры тока и усилия, сверка с уставками техпроцесса, история обслуживания клещей.</span>
+      <span class="sec-arr">→</span>
+    </a>
+    <a class="sec-card" href="/defects" data-page="/defects">
+      <span class="sec-ico">⚠️</span>
+      <span class="sec-title">Дефекты</span>
+      <span class="sec-desc">Регистрация от ОТК, разбор причин и контрмер, корректировка уставок, статусный процесс.</span>
+      <span class="sec-arr">→</span>
+    </a>
+    <a class="sec-card" href="/analytics" data-page="/analytics">
+      <span class="sec-ico">📈</span>
+      <span class="sec-title">Аналитика</span>
+      <span class="sec-desc">Дефекты за период в разрезе моделей и типов, динамика по месяцам.</span>
+      <span class="sec-arr">→</span>
+    </a>
+    <a class="sec-card" href="/workers" data-page="/workers">
+      <span class="sec-ico">👥</span>
+      <span class="sec-title">Сотрудники</span>
+      <span class="sec-desc">Операторы и ответственные по участкам, доступы по отделам.</span>
+      <span class="sec-arr">→</span>
+    </a>
+    <a class="sec-card" href="/history" data-page="/history">
+      <span class="sec-ico">🧾</span>
+      <span class="sec-title">Журнал</span>
+      <span class="sec-desc">Полный аудит правок: кто, что и когда менял, с возможностью отката.</span>
+      <span class="sec-arr">→</span>
+    </a>
   </div>
 
-  <div class="modules">
-    <a href="/maintenance" class="module-card">
-      <div class="module-icon">🔧</div>
-      <div class="module-title">Техническое обслуживание</div>
-      <div class="module-desc">Замеры тока и давления, просмотр и обновление уставок техпроцесса, история клещей</div>
-      <div class="module-arr">→</div>
-    </a>
-    <a href="/defects" class="module-card">
-      <div class="module-icon">📊</div>
-      <div class="module-title">Журнал дефектов</div>
-      <div class="module-desc">Аналитика за месяц, регистрация тикетов ОТК, закрытие дефектов, корректировка уставок</div>
-      <div class="module-arr">→</div>
-    </a>
-  </div>
+  <!-- ─── ПОД ЧТО ЗАТОЧЕНА ─────────────────────────────── -->
+  <section class="home-note">
+    <strong>Под что заточена.</strong> Кузовной цех точечной сварки (Chery · GWM · Changan).
+    Единый источник данных для WeldTeam, ИТО, ОТК, Производства и ОТО — вместо разрозненных
+    Excel; открывается с ноутбука и с телефона, каждая правка фиксируется в журнале.
+  </section>
 
-  <div class="stats-bar mt-3">
-    <div class="stat"><div class="stat-val accent" id="s-maint">—</div><div class="stat-lbl">Записей ТО</div></div>
-    <div class="stat"><div class="stat-val danger" id="s-open">—</div><div class="stat-lbl">Открытых дефектов</div></div>
-    <div class="stat"><div class="stat-val" id="s-total">—</div><div class="stat-lbl">Всего дефектов</div></div>
-  </div>
-</div>
+</main>
 
 <script>
+// Живые цифры
 fetch('/api/stats').then(r => r.json()).then(d => {
-  document.getElementById('s-maint').textContent = d.maintenance_records;
-  document.getElementById('s-open').textContent  = d.defects_open;
-  document.getElementById('s-total').textContent = d.defects_total;
+  const fmt = n => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace('.0', '') + 'k' : String(n));
+  const put = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  put('s-points', fmt(d.weld_points)); put('s-guns', fmt(d.guns));
+  put('s-maint', fmt(d.maintenance_records)); put('s-open', d.defects_open);
+}).catch(() => {});
+
+// Карточки разделов по правам: недоступные отделу — помечаем замком (как в навигации),
+// админу добавляем «Пользователи». Доступ всё равно решает сервер.
+fetch('/api/me').then(r => r.ok ? r.json() : null).then(me => {
+  if (!me) return;
+  const allowed = new Set(me.pages || []);
+  document.querySelectorAll('.sec-card[data-page]').forEach(c => {
+    if (!allowed.has(c.getAttribute('data-page'))) {
+      c.classList.add('sec-locked');
+      c.setAttribute('aria-disabled', 'true');
+      c.title = 'Недоступно вашему отделу';
+      c.addEventListener('click', e => e.preventDefault(), true);
+    }
+  });
+  if (me.is_admin) {
+    const grid = document.getElementById('secGrid');
+    const a = document.createElement('a');
+    a.className = 'sec-card'; a.href = '/users';
+    a.innerHTML = '<span class="sec-ico">🔐</span><span class="sec-title">Пользователи</span>' +
+      '<span class="sec-desc">Учётные записи и отделы, сброс паролей, активация доступа.</span>' +
+      '<span class="sec-arr">→</span>';
+    grid.appendChild(a);
+  }
 }).catch(() => {});
 </script>
 </body>
