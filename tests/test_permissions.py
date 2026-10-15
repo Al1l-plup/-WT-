@@ -129,6 +129,35 @@ def test_non_admin_cannot_reset(register_client):
     assert weld.post('/api/admin/users/1/reset-password').status_code == 403
 
 
+# ── Передача админских прав ──────────────────────────────────────────────────
+def test_admin_grant_and_revoke_admin(register_client):
+    admin = register_client(department='WeldTeam', login=ADMIN_EMAIL)
+    register_client(department='Производство', login='worker1@weldteam.kz')
+    uid = next(u['UniqueID'] for u in admin.get('/api/admin/users').get_json()['users']
+               if u['login'] == 'worker1@weldteam.kz')
+    # выдать админские права
+    assert admin.put(f'/api/admin/users/{uid}', json={'role': 'admin'}).status_code == 200
+    assert next(u['role'] for u in admin.get('/api/admin/users').get_json()['users']
+                if u['UniqueID'] == uid) == 'admin'
+    # снять
+    assert admin.put(f'/api/admin/users/{uid}', json={'role': 'user'}).status_code == 200
+    assert next(u['role'] for u in admin.get('/api/admin/users').get_json()['users']
+                if u['UniqueID'] == uid) == 'user'
+
+
+def test_root_admin_role_locked(register_client):
+    admin = register_client(department='WeldTeam', login=ADMIN_EMAIL)
+    root = next(u for u in admin.get('/api/admin/users').get_json()['users'] if u['login'] == ADMIN_EMAIL)
+    assert root['is_root'] is True
+    r = admin.put(f"/api/admin/users/{root['UniqueID']}", json={'role': 'user'})
+    assert r.status_code == 400 and 'корнев' in r.get_json()['message'].lower()
+
+
+def test_non_admin_cannot_change_role(register_client):
+    weld = register_client(department='WeldTeam')          # WeldTeam ≠ админ (не ADMIN_EMAIL)
+    assert weld.put('/api/admin/users/1', json={'role': 'admin'}).status_code == 403
+
+
 def test_admin_cannot_be_deactivated(register_client):
     admin = register_client(department='WeldTeam', login=ADMIN_EMAIL)
     uid = next(u['UniqueID'] for u in admin.get('/api/admin/users').get_json()['users']

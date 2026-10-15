@@ -44,7 +44,14 @@ def list_users():
         WHERE login IS NOT NULL AND login <> ''
         ORDER BY is_active DESC, department, surname
     """).fetchall()
-    return jsonify({'departments': DEPARTMENTS, 'users': [dict(r) for r in rows]})
+    admin_email = _admin_email()
+    users = []
+    for r in rows:
+        d = dict(r)
+        # корневой админ (по почте) всегда админ — его роль менять/снимать нельзя
+        d['is_root'] = (d.get('login') or '').lower() == admin_email
+        users.append(d)
+    return jsonify({'departments': DEPARTMENTS, 'users': users})
 
 
 def _get_user(db, uid):
@@ -73,17 +80,19 @@ def reset_password(uid):
 
 @bp.route('/api/admin/users/<int:uid>', methods=['PUT'])
 def update_user(uid):
-    """Сменить отдел / активность аккаунта. Роль admin управляется по ADMIN_EMAIL, не здесь."""
+    """Сменить отдел / активность / роль аккаунта (доступ раздаёт отдел; роль admin —
+    передача админских прав другому пользователю). Корневой админ (по ADMIN_EMAIL)
+    всегда остаётся админом — его роль здесь менять нельзя."""
     db = get_db()
     u = _get_user(db, uid)
     if not u:
         return jsonify({'status': 'error', 'message': 'Пользователь не найден'}), 404
     data = request.get_json(silent=True) or {}
-    is_self_admin = (u['login'] or '').lower() == _admin_email()
+    is_root = (u['login'] or '').lower() == _admin_email()
 
     if 'is_active' in data:
         active = 1 if data['is_active'] else 0
-        if not active and is_self_admin:
+        if not active and is_root:
             return jsonify({'status': 'error', 'message': 'Нельзя деактивировать админский аккаунт'}), 400
         db.execute('UPDATE worker SET is_active=? WHERE UniqueID=?', (active, uid))
 
@@ -92,6 +101,14 @@ def update_user(uid):
         if dept not in DEPARTMENTS:
             return jsonify({'status': 'error', 'message': 'Неизвестный отдел'}), 400
         db.execute('UPDATE worker SET department=? WHERE UniqueID=?', (dept, uid))
+
+    if 'role' in data:
+        role = data['role']
+        if role not in ('admin', 'user'):
+            return jsonify({'status': 'error', 'message': 'Роль: admin или user'}), 400
+        if is_root:
+            return jsonify({'status': 'error', 'message': 'Роль корневого админа (по почте) менять нельзя'}), 400
+        db.execute('UPDATE worker SET role=? WHERE UniqueID=?', (role, uid))
 
     try:
         db.commit()

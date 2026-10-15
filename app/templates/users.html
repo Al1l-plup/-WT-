@@ -42,8 +42,10 @@
 <div class="page">
   <div class="page-head">
     <h1>Учётные записи</h1>
-    <p>Отдел определяет доступ к вкладкам. Пароли хранятся хешами и не показываются —
-       при необходимости используйте <b>«Сбросить пароль»</b> (система выдаст одноразовый временный).</p>
+    <p>Доступ раздаётся <b>отделом</b> (меняйте отдел — меняется набор прав). Админские права
+       можно <b>передать</b> другому (кнопка «Сделать админом»); корневой админ по почте — всегда.
+       Пароли хранятся хешами и не показываются — при необходимости <b>«Сбросить пароль»</b>
+       (система выдаст одноразовый временный).</p>
   </div>
 
   <div id="alert"></div>
@@ -88,9 +90,13 @@ async function load(){
   $('#ubody').innerHTML = d.users.map(u => {
     const fio = [u.surname, u.name, u.father_name].filter(Boolean).join(' ');
     const opts = DEPTS.map(x => `<option value="${x}" ${x===u.department?'selected':''}>${x}</option>`).join('');
-    const role = u.role === 'admin'
-      ? '<span class="role-badge role-admin">админ</span>'
-      : '<span class="role-badge">пользователь</span>';
+    const role = u.is_root
+      ? '<span class="role-badge role-admin" title="Админ по почте — всегда">админ · по почте</span>'
+      : (u.role === 'admin'
+          ? '<span class="role-badge role-admin">админ</span>'
+          : '<span class="role-badge">пользователь</span>');
+    const roleBtn = u.is_root ? ''
+      : `<button class="rowbtn act-role">${u.role === 'admin' ? '↓ Снять админа' : '↑ Сделать админом'}</button>`;
     const status = u.is_active
       ? (u.must_change_password ? '<span class="badge bw">ждёт смены пароля</span>' : '<span class="badge bs">активен</span>')
       : '<span class="badge bm">отключён</span>';
@@ -101,6 +107,7 @@ async function load(){
       <td data-label="Роль">${role}</td>
       <td data-label="Статус">${status}</td>
       <td data-label="Действия" style="text-align:right;white-space:nowrap">
+        ${roleBtn}
         <button class="rowbtn act-reset">Сбросить пароль</button>
         <button class="rowbtn act-toggle">${u.is_active ? 'Отключить' : 'Включить'}</button>
       </td>
@@ -112,7 +119,19 @@ async function load(){
     tr.querySelector('.u-dept').onchange = e => saveDept(id, e.target.value);
     tr.querySelector('.act-reset').onclick = () => resetPw(id);
     tr.querySelector('.act-toggle').onclick = () => toggleActive(id, tr.querySelector('.act-toggle').textContent === 'Включить');
+    const roleEl = tr.querySelector('.act-role');
+    if (roleEl) roleEl.onclick = () => saveRole(id, tr.dataset.admin === '1' ? 'user' : 'admin');
   });
+}
+
+async function saveRole(id, role){
+  const verb = role === 'admin' ? 'выдать админские права' : 'снять админские права';
+  if (!confirm(`Точно ${verb}? Изменение вступит в силу при следующем входе пользователя.`)) return;
+  const r = await fetch(`/api/admin/users/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({role})});
+  const d = await r.json();
+  if (r.ok){ alertMsg('success', role === 'admin' ? 'Выданы админские права' : 'Админские права сняты'); load(); }
+  else alertMsg('danger', d.message || 'Ошибка');
 }
 
 async function saveDept(id, dept){
