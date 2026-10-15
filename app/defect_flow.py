@@ -214,6 +214,19 @@ def register_occurrence(conn, *, problem_code, spot_id=None, gun_id=None, regist
     return {'defect_id': did, 'serial': False, 'stage': stage}
 
 
+def reopen(conn, defect_id, actor_id=None):
+    """Переоткрыть закрытый дефект (аварийный клапан WeldTeam) — вернуть отделу, что
+    закрывал (для ОТО-кейса — отделу, передававшему в ОТО)."""
+    row = conn.execute('SELECT closed_by_dept, delegated_from_dept, problem_code FROM defects WHERE UniqueID=?',
+                        (defect_id,)).fetchone()
+    chain = route_for(conn, row[2])
+    back = row[0] or row[1] or (chain[0] if chain else None)
+    conn.execute("UPDATE defects SET status='in_review', current_stage_dept=?, stage_entered_at=? WHERE UniqueID=?",
+                 (back, _now(), defect_id))
+    _open_stage(conn, defect_id, back, actor_id)
+    return back
+
+
 # ── права на действие (владение этапом) ──────────────────────────────────────
 def can_act_stage(current_stage_dept, dept, is_admin=False):
     """Действовать на этапе может отдел текущего этапа; админ (WeldTeam) — аварийный клапан."""

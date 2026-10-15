@@ -1,21 +1,46 @@
-"""Доска дефектов: регистрация, работа, закрытие."""
-from flask import Blueprint, jsonify, request, session
+"""Доска дефектов: регистрация, цепочка согласования 4M (этапы/ОТО/серийность), фото."""
+import os
+import uuid
 
+from flask import Blueprint, current_app, jsonify, request, send_file, session
+
+from app import defect_flow as df
 from app.db import get_db
 from app.errors import api_error
 from app.snapshots import snapshot_defect
 
 bp = Blueprint('defects', __name__)
 
+_IMG_EXT = {'.jpg', '.jpeg', '.png', '.webp', '.gif'}
+
 
 def _current_worker_id():
-    """Кто регистрирует дефект — текущий вошедший пользователь (worker.UniqueID из сессии).
-    Доп. информации от пользователя не требуется, поэтому проставляем автоматически."""
+    """Кто регистрирует дефект — текущий вошедший пользователь (worker.UniqueID из сессии)."""
     return session.get('uid')
+
+
+def _ctx():
+    """(uid, dept, is_admin, privileged). privileged = админ или WeldTeam (аварийный клапан)."""
+    dept = session.get('dept')
+    is_admin = bool(session.get('is_admin'))
+    return session.get('uid'), dept, is_admin, (is_admin or dept == 'WeldTeam')
+
+
+def _denied():
+    return jsonify({'status': 'error', 'message': 'Нет прав: дефект сейчас не на вашем этапе'}), 403
+
+
+def _photo_dir():
+    d = os.path.join(os.path.dirname(current_app.config['DB_PATH']), 'uploads', 'defects')
+    os.makedirs(d, exist_ok=True)
+    return d
 
 
 @bp.route('/api/defects/register', methods=['POST'])
 def register_defect():
+    uid, dept, _is_admin, priv = _ctx()
+    if not (dept == 'ОТК' or priv):
+        return jsonify({'status': 'error', 'message': 'Регистрировать дефекты может ОТК'}), 403
     data = request.json or {}
     model_id     = data.get('model_id', '')
     spot_number  = str(data.get('spot_number', '')).strip()
@@ -26,40 +51,29 @@ def register_defect():
 
     db = get_db()
     row = db.execute("""
-        SELECT s.UniqueID as spot_id, ws.gun_id, s.spot_number
+        SELECT s.UniqueID as spot_id, ws.gun_id
         FROM spot s
         JOIN welding_setup ws ON s.UniqueID = ws.spot_id AND ws.is_active = 1
         WHERE s.spot_number=? AND s.model_id=?
         LIMIT 1
     """, (spot_number, int(model_id))).fetchone()
-
-    if not row:
-        try:
-            cur = db.cursor()
-            cur.execute("""
-                INSERT INTO defects (problem_code, root_cause, solution, df_date,
-                                    spot_id, gun_id, status, manual_spot_number, manual_model_id, worker_register_id)
-                VALUES (?, '', '', DATE('now'), NULL, NULL, 'registered', ?, ?, ?)
-            """, (problem_code, spot_number, int(model_id), _current_worker_id()))
-            snapshot_defect(db, cur.lastrowid)
-            db.commit()
-            return jsonify({'status': 'success',
-                            'message': f'Дефект {problem_code} зарегистрирован. ⚠ Точка №{spot_number} не найдена в БД — уточните данные при взятии в работу.',
-                            'found_in_db': False})
-        except Exception as e:
-            db.rollback()
-            return api_error(e)
-
     try:
-        cur = db.cursor()
-        cur.execute("""
-            INSERT INTO defects
-                (problem_code, root_cause, solution, df_date, spot_id, gun_id, status, worker_register_id)
-            VALUES (?, '', '', DATE('now'), ?, ?, 'registered', ?)
-        """, (problem_code, row['spot_id'], row['gun_id'], _current_worker_id()))
-        snapshot_defect(db, cur.lastrowid)
+        if row:
+            res = df.register_occurrence(db, problem_code=problem_code, spot_id=row['spot_id'],
+                                         gun_id=row['gun_id'], registered_by=uid)
+            msg = f'Дефект {problem_code} на точке №{spot_number} зафиксирован → отдел «{res["stage"]}»'
+        else:
+            res = df.register_occurrence(db, problem_code=problem_code, registered_by=uid,
+                                         manual_spot_number=spot_number, manual_model_id=int(model_id))
+            msg = (f'Дефект {problem_code} зарегистрирован → отдел «{res["stage"]}». '
+                   f'⚠ Точка №{spot_number} не найдена в БД — уточните при рассмотрении.')
+        if res['serial']:
+            msg = (f'⚠ ПОВТОР (серийный)! Дефект {problem_code} на точке №{spot_number} '
+                   f'вернулся отделу «{res["stage"]}» на перерассмотрение.')
+        snapshot_defect(db, res['defect_id'])
         db.commit()
-        return jsonify({'status': 'success', 'message': f'Дефект {problem_code} на точке №{spot_number} зафиксирован'})
+        return jsonify({'status': 'success', 'message': msg, 'serial': res['serial'],
+                        'stage': res['stage'], 'defect_id': res['defect_id'], 'found_in_db': bool(row)})
     except Exception as e:
         db.rollback()
         return api_error(e)
@@ -104,7 +118,13 @@ def defects_all():
                d.manual_spot_number,
                d.manual_model_id,
                COALESCE(enrich_m.model_name, '')           as manual_model_name,
-               CASE WHEN d.spot_id IS NULL AND d.manual_spot_number IS NOT NULL THEN 1 ELSE 0 END as needs_enrichment
+               CASE WHEN d.spot_id IS NULL AND d.manual_spot_number IS NOT NULL THEN 1 ELSE 0 END as needs_enrichment,
+               d.current_stage_dept,
+               d.delegated_from_dept,
+               COALESCE(d.is_serial,0)                     as is_serial,
+               COALESCE(d.return_count,0)                  as return_count,
+               CASE WHEN EXISTS(SELECT 1 FROM weld_point wp WHERE wp.spot_id=d.spot_id AND wp.important='B')
+                    THEN 1 ELSE 0 END                      as is_b_point
         FROM defects d
         LEFT JOIN spot   s       ON d.spot_id             = s.UniqueID
         LEFT JOIN model  m       ON s.model_id             = m.UniqueID
@@ -118,18 +138,32 @@ def defects_all():
         LEFT JOIN worker w_asgn  ON d.assigned_worker_id  = w_asgn.UniqueID
         LEFT JOIN worker w_solv  ON d.worker_solve_id     = w_solv.UniqueID
     """
+    # Приоритет списка: 1) точки B → 2) серийные → 3) остальные.
+    priority = """ORDER BY CASE WHEN is_b_point THEN 0 WHEN is_serial THEN 1 ELSE 2 END,
+                           d.df_date DESC, d.UniqueID DESC"""
     open_rows = db.execute(base + """
-        WHERE COALESCE(d.status,'registered') IN ('registered','in_work')
-        ORDER BY CASE COALESCE(d.status,'registered') WHEN 'registered' THEN 0 ELSE 1 END,
-                 d.df_date DESC, d.UniqueID DESC
-    """).fetchall()
+        WHERE COALESCE(d.status,'registered') IN ('registered','in_work','in_review','at_oto')
+    """ + priority).fetchall()
+    unresolved_rows = db.execute(base + """
+        WHERE COALESCE(d.status,'') = 'unresolved'
+    """ + priority).fetchall()
     closed_rows = db.execute(base + """
         WHERE COALESCE(d.status,'registered') = 'closed'
         ORDER BY d.df_date DESC, d.UniqueID DESC LIMIT 50
     """).fetchall()
     workers = db.execute('SELECT UniqueID, surname, name FROM worker WHERE is_active=1').fetchall()
-    return jsonify({'open': [dict(r) for r in open_rows],
-                    'closed': [dict(r) for r in closed_rows],
+    mydept = session.get('dept')
+
+    def row(r):
+        d = dict(r)
+        d['mine'] = bool(d.get('current_stage_dept') and d['current_stage_dept'] == mydept)
+        return d
+
+    return jsonify({'open': [row(r) for r in open_rows],
+                    'unresolved': [row(r) for r in unresolved_rows],
+                    'closed': [row(r) for r in closed_rows],
+                    'my_dept': mydept,
+                    'privileged': bool(session.get('is_admin') or mydept == 'WeldTeam'),
                     'workers': [dict(w) for w in workers]})
 
 
@@ -343,34 +377,173 @@ def enrich_defect():
 
 @bp.route('/api/defects/register_manual', methods=['POST'])
 def register_defect_manual():
+    uid, dept, _is_admin, priv = _ctx()
+    if not (dept == 'ОТК' or priv):
+        return jsonify({'status': 'error', 'message': 'Регистрировать дефекты может ОТК'}), 403
     data         = request.json or {}
     g_num        = data.get('g_num')
     problem_code = str(data.get('problem_code', '')).strip().upper()
     if not g_num or not problem_code:
         return jsonify({'status': 'error', 'message': 'Укажите номер пистолета и код дефекта'}), 400
     db  = get_db()
-    gun = db.execute('SELECT UniqueID FROM gun WHERE g_num=?', (int(g_num),)).fetchone()
-    if not gun:
-        try:
-            cur = db.cursor()
-            cur.execute("INSERT INTO gun (g_num, gun_type) VALUES (?, 'Ручной ввод')", (int(g_num),))
-            gun_id = cur.lastrowid
-            db.commit()
-        except Exception as e:
-            db.rollback()
-            return api_error(e)
-    else:
-        gun_id = gun['UniqueID']
     try:
-        cur = db.cursor()
-        cur.execute("""
-            INSERT INTO defects (problem_code, root_cause, solution, df_date, spot_id, gun_id, status, worker_register_id)
-            VALUES (?, '', '', DATE('now'), NULL, ?, 'registered', ?)
-        """, (problem_code, gun_id, _current_worker_id()))
-        snapshot_defect(db, cur.lastrowid)
+        gun = db.execute('SELECT UniqueID FROM gun WHERE g_num=?', (int(g_num),)).fetchone()
+        if gun:
+            gun_id = gun['UniqueID']
+        else:
+            gun_id = db.execute("INSERT INTO gun (g_num, gun_type) VALUES (?, 'Ручной ввод')",
+                                (int(g_num),)).lastrowid
+        res = df.register_occurrence(db, problem_code=problem_code, gun_id=gun_id, registered_by=uid)
+        snapshot_defect(db, res['defect_id'])
         db.commit()
-        return jsonify({'status': 'success',
-                        'message': f'Дефект {problem_code} на пистолете №{g_num} зафиксирован'})
+        return jsonify({'status': 'success', 'stage': res['stage'], 'serial': res['serial'], 'defect_id': res['defect_id'],
+                        'message': f'Дефект {problem_code} на пистолете №{g_num} зафиксирован → отдел «{res["stage"]}»'})
     except Exception as e:
         db.rollback()
         return api_error(e)
+
+
+# ── Цепочка согласования: действия на этапе ──────────────────────────────────
+@bp.route('/api/defects/<int:defect_id>/act', methods=['POST'])
+def defect_act(defect_id):
+    """Единая точка действий: close | pass | bounce | delegate_oto | oto | reopen.
+    Право действия проверяется по текущему этапу (владение) + WeldTeam=аварийный клапан."""
+    uid, dept, _is_admin, priv = _ctx()
+    data = request.json or {}
+    action = (data.get('action') or '').strip()
+    db = get_db()
+    d = db.execute('SELECT status, current_stage_dept FROM defects WHERE UniqueID=?', (defect_id,)).fetchone()
+    if not d:
+        return jsonify({'status': 'error', 'message': 'Дефект не найден'}), 404
+    status, cur_dept = d['status'], d['current_stage_dept']
+    acting = cur_dept or dept
+    try:
+        if action == 'close':
+            if not df.can_act_stage(cur_dept, dept, priv):
+                return _denied()
+            cm = (data.get('countermeasure') or '').strip()
+            if not cm:
+                return jsonify({'status': 'error', 'message': 'Укажите контрмеру'}), 400
+            df.act_close(db, defect_id, acting, uid, (data.get('cause') or '').strip(), cm)
+            msg = 'Дефект закрыт'
+        elif action == 'pass':
+            if not df.can_act_stage(cur_dept, dept, priv):
+                return _denied()
+            nxt = df.act_pass(db, defect_id, uid, (data.get('note') or '').strip() or None)
+            msg = (f'Передано отделу «{nxt}»' if nxt
+                   else 'Причина не выявлена — дефект в списке «не выявленные» (на недельный разбор)')
+        elif action == 'bounce':
+            if not df.can_act_stage(cur_dept, dept, priv):
+                return _denied()
+            to = (data.get('to_dept') or '').strip()
+            if not to:
+                return jsonify({'status': 'error', 'message': 'Выберите отдел для возврата'}), 400
+            df.act_bounce(db, defect_id, uid, to, (data.get('reason') or '').strip())
+            msg = f'Возвращено отделу «{to}» на доработку'
+        elif action == 'delegate_oto':
+            if not df.can_act_stage(cur_dept, dept, priv):
+                return _denied()
+            df.act_delegate_oto(db, defect_id, acting, uid, (data.get('reason') or '').strip())
+            msg = 'Заявка передана в ОТО (оборудование)'
+        elif action == 'oto':
+            if not (status == 'at_oto' and (dept == df.OTO or priv)):
+                return _denied()
+            cm = (data.get('countermeasure') or '').strip()
+            if not cm:
+                return jsonify({'status': 'error', 'message': 'Укажите контрмеру ОТО'}), 400
+            back = df.act_oto_countermeasure(db, defect_id, uid, cm)
+            msg = f'Контрмера ОТО принята — возврат отделу «{back}»'
+        elif action == 'reopen':
+            if not priv:
+                return jsonify({'status': 'error', 'message': 'Переоткрывать дефекты может только WeldTeam'}), 403
+            if status != 'closed':
+                return jsonify({'status': 'error', 'message': 'Переоткрыть можно только закрытый дефект'}), 400
+            back = df.reopen(db, defect_id, uid)
+            msg = f'Дефект переоткрыт → отдел «{back}»'
+        else:
+            return jsonify({'status': 'error', 'message': 'Неизвестное действие'}), 400
+        snapshot_defect(db, defect_id)
+        db.commit()
+        return jsonify({'status': 'success', 'message': msg})
+    except Exception as e:
+        db.rollback()
+        return api_error(e)
+
+
+@bp.route('/api/defects/<int:defect_id>')
+def defect_detail(defect_id):
+    """Карточка дефекта: сам дефект + история этапов + появления + фото."""
+    db = get_db()
+    d = db.execute("""
+        SELECT d.UniqueID, d.df_date, d.problem_code, COALESCE(d.status,'registered') as status,
+               d.current_stage_dept, d.delegated_from_dept, d.closed_by_dept,
+               COALESCE(d.is_serial,0) as is_serial, COALESCE(d.return_count,0) as return_count,
+               COALESCE(d.root_cause,'') as root_cause, COALESCE(d.solution,'') as solution,
+               COALESCE(d.snap_spot_number, s.spot_number, d.manual_spot_number, '—') as spot_number,
+               COALESCE(d.snap_model_name, m.model_name, '—') as model_name,
+               COALESCE(d.snap_g_num, g.g_num, 0) as g_num,
+               CASE WHEN EXISTS(SELECT 1 FROM weld_point wp WHERE wp.spot_id=d.spot_id AND wp.important='B')
+                    THEN 1 ELSE 0 END as is_b_point
+        FROM defects d
+        LEFT JOIN spot s ON d.spot_id=s.UniqueID
+        LEFT JOIN model m ON s.model_id=m.UniqueID
+        LEFT JOIN gun g ON d.gun_id=g.UniqueID
+        WHERE d.UniqueID=?""", (defect_id,)).fetchone()
+    if not d:
+        return jsonify({'status': 'error', 'message': 'Дефект не найден'}), 404
+    stages = db.execute("""
+        SELECT st.dept, st.entered_at, st.left_at, st.outcome, COALESCE(st.cause,'') as cause,
+               COALESCE(st.countermeasure,'') as countermeasure, COALESCE(st.note,'') as note,
+               COALESCE(w.surname,'') as actor
+        FROM defect_stage st LEFT JOIN worker w ON st.actor_id=w.UniqueID
+        WHERE st.defect_id=? ORDER BY st.UniqueID""", (defect_id,)).fetchall()
+    occ = db.execute('SELECT occ_date FROM defect_occurrence WHERE defect_id=? ORDER BY UniqueID',
+                     (defect_id,)).fetchall()
+    photos = db.execute('SELECT UniqueID, stage_dept, ts FROM defect_photo WHERE defect_id=? ORDER BY UniqueID',
+                        (defect_id,)).fetchall()
+    return jsonify({'status': 'success', 'defect': dict(d),
+                    'stages': [dict(r) for r in stages],
+                    'occurrences': [r['occ_date'] for r in occ],
+                    'photos': [dict(p) for p in photos],
+                    'my_dept': session.get('dept'),
+                    'privileged': bool(session.get('is_admin') or session.get('dept') == 'WeldTeam')})
+
+
+@bp.route('/api/defects/<int:defect_id>/photo', methods=['POST'])
+def defect_photo_upload(defect_id):
+    """Фото дефекта: любой на своём этапе (+ ОТК/WeldTeam). Изображения, хранятся в data/uploads/defects."""
+    uid, dept, _is_admin, priv = _ctx()
+    db = get_db()
+    d = db.execute('SELECT current_stage_dept FROM defects WHERE UniqueID=?', (defect_id,)).fetchone()
+    if not d:
+        return jsonify({'status': 'error', 'message': 'Дефект не найден'}), 404
+    if not (priv or dept == 'ОТК' or dept == d['current_stage_dept']):
+        return _denied()
+    f = request.files.get('photo')
+    if not f or not f.filename:
+        return jsonify({'status': 'error', 'message': 'Файл не передан'}), 400
+    ext = os.path.splitext(f.filename)[1].lower()
+    if ext not in _IMG_EXT:
+        return jsonify({'status': 'error', 'message': 'Только изображения (jpg/png/webp/gif)'}), 400
+    try:
+        fname = f'{defect_id}_{uuid.uuid4().hex}{ext}'
+        f.save(os.path.join(_photo_dir(), fname))
+        db.execute('INSERT INTO defect_photo (defect_id, path, uploaded_by, stage_dept, ts) VALUES (?,?,?,?,?)',
+                   (defect_id, fname, uid, dept, df._now()))
+        db.commit()
+        return jsonify({'status': 'success', 'message': 'Фото добавлено'})
+    except Exception as e:
+        db.rollback()
+        return api_error(e)
+
+
+@bp.route('/api/defects/photo/<int:photo_id>')
+def defect_photo_get(photo_id):
+    db = get_db()
+    p = db.execute('SELECT path FROM defect_photo WHERE UniqueID=?', (photo_id,)).fetchone()
+    if not p:
+        return jsonify({'status': 'error', 'message': 'Фото не найдено'}), 404
+    path = os.path.join(_photo_dir(), os.path.basename(p['path']))
+    if not os.path.exists(path):
+        return jsonify({'status': 'error', 'message': 'Файл отсутствует'}), 404
+    return send_file(path)

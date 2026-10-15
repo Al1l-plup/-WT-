@@ -58,19 +58,22 @@ def test_otk_defects_only(register_client):
     assert c.post('/api/admin/doc/defects/batch', json={'changes': []}).status_code == 403
 
 
-def test_proizvodstvo_read_only(register_client):
+def test_proizvodstvo_defects_chain_only(register_client):
+    """Производство участвует в цепочке дефектов (запись в Дефекты есть), но НЕ регистрирует
+    (это ОТК) и не правит другие разделы."""
     c = register_client(department='Производство')
     me = c.get('/api/me').get_json()
-    assert me['readonly'] is True and me['can_edit_docs'] is False
+    assert me['readonly'] is False and me['can_edit_docs'] is False        # есть запись в Дефекты
     assert c.post('/api/admin/table/gun', json={'values': {'g_num': 90104, 'gun_type': 'X'}}).status_code == 403
+    # регистрировать дефекты может только ОТК
     assert c.post('/api/defects/register_manual', json={'g_num': 90105, 'problem_code': 'CR'}).status_code == 403
 
 
-def test_oto_read_only(register_client):
-    """Новый отдел ОТО — доступен при регистрации, только просмотр."""
+def test_oto_defects_chain_only(register_client):
+    """ОТО — исполнитель по оборудованию: запись в Дефекты есть, регистрация/прочее — нет."""
     c = register_client(department='ОТО')
     me = c.get('/api/me').get_json()
-    assert me['readonly'] is True and me['can_edit_docs'] is False
+    assert me['readonly'] is False and me['can_edit_docs'] is False
     assert set(me['pages']) >= {'/', '/maintenance', '/defects', '/analytics', '/explorer', '/admin', '/history'}
     assert c.get('/defects').status_code == 200                       # просмотр открыт
     assert c.post('/api/defects/register_manual', json={'g_num': 90106, 'problem_code': 'CR'}).status_code == 403
