@@ -126,7 +126,8 @@ def defects_all():
                COALESCE(d.is_serial,0)                     as is_serial,
                COALESCE(d.return_count,0)                  as return_count,
                CASE WHEN EXISTS(SELECT 1 FROM weld_point wp WHERE wp.spot_id=d.spot_id AND wp.important='B')
-                    THEN 1 ELSE 0 END                      as is_b_point
+                    THEN 1 ELSE 0 END                      as is_b_point,
+               (SELECT COUNT(*) FROM defect_photo dp WHERE dp.defect_id=d.UniqueID) as photo_count
         FROM defects d
         LEFT JOIN spot   s       ON d.spot_id             = s.UniqueID
         LEFT JOIN model  m       ON s.model_id             = m.UniqueID

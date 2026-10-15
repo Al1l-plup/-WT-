@@ -90,6 +90,10 @@
         <button class="btn btn-danger btn-full" id="regBtn">Зафиксировать</button>
       </div>
     </div>
+    <div style="margin-top:.5rem;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
+      <label class="btn btn-ghost btn-sm">📷 Прикрепить фото<input type="file" id="regPhoto" accept="image/*" multiple hidden></label>
+      <span class="text-sm text-muted" id="regPhotoName">фото из WhatsApp — сожмётся и прикрепится к дефекту</span>
+    </div>
     <div id="regAlert" class="hidden mt-alert"></div>
     <div style="margin-top:.5rem;text-align:right">
       <button class="btn btn-ghost btn-sm" id="toggleManualBtn" style="font-size:11px">Точка не найдена в БД? Ввести вручную →</button>
@@ -112,6 +116,10 @@
         <div style="display:flex;align-items:flex-end">
           <button class="btn btn-danger btn-full" id="manRegBtn">Зафиксировать</button>
         </div>
+      </div>
+      <div style="margin-top:.5rem">
+        <label class="btn btn-ghost btn-sm">📷 Прикрепить фото<input type="file" id="manPhoto" accept="image/*" multiple hidden></label>
+        <span class="text-sm text-muted" id="manPhotoName" style="margin-left:.5rem"></span>
       </div>
       <div id="manRegAlert" class="hidden mt-alert"></div>
     </div>
@@ -156,6 +164,33 @@ const STAGE_LABEL = {closed:'закрыл', passed:'передал дальше'
 
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); }
 function showAlert(el, type, msg){ el.className = `alert alert-${type}`; el.textContent = msg; }
+
+// Сжатие фото на КЛИЕНТЕ (canvas → JPEG): телефонное 3–8 МБ → ~200–400 КБ.
+// Сервер картинки не обрабатывает — только сохраняет файл. Экономит трафик и диск.
+function compressImage(file, maxDim=1600, quality=0.82){
+  return new Promise(resolve => {
+    if (!file.type || !file.type.startsWith('image/')) return resolve(file);
+    const img = new Image();
+    img.onload = () => {
+      let w = img.width, h = img.height;
+      if (Math.max(w, h) > maxDim){ const s = maxDim / Math.max(w, h); w = Math.round(w*s); h = Math.round(h*s); }
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      cv.getContext('2d').drawImage(img, 0, 0, w, h);
+      cv.toBlob(b => resolve(b || file), 'image/jpeg', quality);
+      URL.revokeObjectURL(img.src);
+    };
+    img.onerror = () => resolve(file);
+    img.src = URL.createObjectURL(file);
+  });
+}
+async function uploadPhotos(id, fileList){
+  for (const f of fileList){
+    const blob = await compressImage(f);
+    const fd = new FormData();
+    fd.append('photo', blob, (f.name.replace(/\.[^.]+$/, '') || 'photo') + '.jpg');
+    await fetch(`/api/defects/${id}/photo`, {method:'POST', body: fd});
+  }
+}
 
 // ── init ──
 fetch('/api/me').then(r=>r.json()).then(me=>{
@@ -223,6 +258,7 @@ function cardHtml(d){
       <span class="where">№${esc(d.spot_number)}</span>
       <span class="muted">${model}${d.g_num ? ' · G.' + d.g_num : ''}${d.station_name && d.station_name!=='—' ? ' · ' + esc(d.station_name) : ''}</span>
       ${flags}
+      ${d.photo_count ? `<span class="muted" title="фото">📷${d.photo_count}</span>` : ''}
       <span class="spacer"></span>
       <span class="muted">${esc(d.df_date)}</span>
       <span class="stage-chip ${chipCls}">${chip}</span>
@@ -260,7 +296,7 @@ function renderDetail(res){
   }).join('')}</ul>` : '';
 
   const photos = `<div class="photos">${res.photos.map(p=>`<img src="/api/defects/photo/${p.UniqueID}" title="${esc(p.stage_dept||'')} ${esc(p.ts||'')}" onclick="window.open('/api/defects/photo/${p.UniqueID}','_blank')">`).join('')}
-    <label class="btn btn-ghost btn-sm" style="align-self:center">📷 Фото<input type="file" accept="image/*" hidden onchange="uploadPhoto(${d.UniqueID}, this)"></label></div>`;
+    <label class="btn btn-ghost btn-sm" style="align-self:center">📷 Фото<input type="file" accept="image/*" multiple hidden onchange="uploadPhoto(${d.UniqueID}, this)"></label></div>`;
 
   let actions = '';
   if (canAct && (d.status === 'in_review' || d.status === 'registered' || d.status === 'unresolved')){
@@ -319,13 +355,11 @@ window.act = function(id, action, extra){
     });
 };
 
-window.uploadPhoto = function(id, input){
-  const f = input.files[0]; if (!f) return;
-  const fd = new FormData(); fd.append('photo', f);
-  fetch(`/api/defects/${id}/photo`, {method:'POST', body: fd}).then(r=>r.json()).then(res=>{
-    if (res.status === 'success'){ fetch('/api/defects/'+id).then(r=>r.json()).then(renderDetail); }
-    else flash(id, 'danger', res.message);
-  });
+window.uploadPhoto = async function(id, input){
+  if (!input.files.length) return;
+  await uploadPhotos(id, input.files);
+  input.value = '';
+  fetch('/api/defects/'+id).then(r=>r.json()).then(renderDetail);
 };
 
 window.delDefect = function(id){
@@ -341,14 +375,18 @@ function initRegistration(){
   fetch('/api/defect_codes').then(r=>r.json()).then(codes => {
     [regCodeInput, manCodeInput].forEach(sel => codes.forEach(c => sel.add(new Option(`${c.code} — ${c.name}`, c.code))));
   });
+  regPhoto.addEventListener('change', () => { regPhotoName.textContent = regPhoto.files.length ? `выбрано фото: ${regPhoto.files.length}` : 'фото из WhatsApp — сожмётся и прикрепится к дефекту'; });
   $('regBtn').addEventListener('click', () => {
     const a = $('regAlert'), model = regModelSelect.value, spot = regSpotInput.value.trim(), code = regCodeInput.value;
     if (!model || !spot || !code){ showAlert(a, 'warn', 'Выберите модель, точку и код'); return; }
     fetch('/api/defects/register', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({model_id: model, spot_number: spot, problem_code: code})})
-      .then(r=>r.json()).then(res=>{
+      .then(r=>r.json()).then(async res=>{
         showAlert(a, res.status==='success' ? (res.serial ? 'warn' : (res.found_in_db===false ? 'warn':'success')) : 'danger', res.message);
-        if (res.status==='success'){ regSpotInput.value=''; regCodeInput.value=''; loadBoard(); }
+        if (res.status==='success'){
+          if (regPhoto.files.length && res.defect_id){ await uploadPhotos(res.defect_id, regPhoto.files); regPhoto.value=''; regPhotoName.textContent='фото из WhatsApp — сожмётся и прикрепится к дефекту'; }
+          regSpotInput.value=''; regCodeInput.value=''; loadBoard();
+        }
       });
   });
   regSpotInput.addEventListener('keydown', e => { if (e.key==='Enter') $('regBtn').click(); });
@@ -358,14 +396,18 @@ function initRegistration(){
     if (vis && manBrandSelect.options.length < 2)
       fetch('/api/brands').then(r=>r.json()).then(bs => bs.forEach(b => manBrandSelect.add(new Option(b.brand, b.UniqueID))));
   });
+  manPhoto.addEventListener('change', () => { manPhotoName.textContent = manPhoto.files.length ? `выбрано фото: ${manPhoto.files.length}` : ''; });
   $('manRegBtn').addEventListener('click', () => {
     const a = $('manRegAlert'), gnum = manGunNum.value.trim(), code = manCodeInput.value;
     if (!gnum || !code){ showAlert(a, 'warn', 'Укажите пистолет и код'); return; }
     fetch('/api/defects/register_manual', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({g_num: parseInt(gnum), problem_code: code})})
-      .then(r=>r.json()).then(res=>{
+      .then(r=>r.json()).then(async res=>{
         showAlert(a, res.status==='success' ? 'success' : 'danger', res.message);
-        if (res.status==='success'){ manGunNum.value=''; manCodeInput.value=''; loadBoard(); }
+        if (res.status==='success'){
+          if (manPhoto.files.length && res.defect_id){ await uploadPhotos(res.defect_id, manPhoto.files); manPhoto.value=''; manPhotoName.textContent=''; }
+          manGunNum.value=''; manCodeInput.value=''; loadBoard();
+        }
       });
   });
   manGunNum.addEventListener('keydown', e => { if (e.key==='Enter') $('manRegBtn').click(); });

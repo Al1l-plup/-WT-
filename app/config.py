@@ -25,6 +25,10 @@ class Config:
 
     SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-insecure-change-me')
 
+    # Верхняя граница размера запроса (защита от перегрузки): фото жмутся на клиенте до
+    # ~300 КБ, большая вставка WB — пара МБ JSON; 64 МБ — с запасом и без риска для них.
+    MAX_CONTENT_LENGTH = int(os.environ.get('MAX_CONTENT_LENGTH', 64 * 1024 * 1024))
+
     HOST = os.environ.get('HOST', '0.0.0.0')
     PORT = int(os.environ.get('PORT', '5000'))
 
