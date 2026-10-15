@@ -4,11 +4,52 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#161b22">
-  <meta name="description" content="WeldTeam MES — система управления точечной сваркой цеха BS">
+  <meta name="description" content="WeldTeam MES — дефекты: цепочка согласования 4M, этапы, фото">
   <title>Дефекты — WeldTeam MES</title>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/sheet.css">
   <script src="/static/theme.js"></script>
+  <style>
+    .dtabs{display:flex;gap:.3rem;flex-wrap:wrap;margin-bottom:1rem;border-bottom:1px solid var(--border);padding-bottom:.6rem}
+    .dtab{padding:6px 12px;border-radius:var(--r-sm);border:1px solid transparent;background:none;color:var(--muted);font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:.45rem}
+    .dtab:hover{color:var(--text);background:var(--card2)}
+    .dtab.active{color:var(--text);background:var(--card2);border-color:var(--border)}
+    .dtab .cnt{background:var(--bg);border-radius:20px;padding:0 7px;font-size:11px;font-weight:700;min-width:18px;text-align:center}
+    .dtab.active .cnt{background:var(--accent);color:#fff}
+    .dtab.mine.active .cnt{background:var(--success);color:#000}
+    .dcard{border:1px solid var(--border);border-radius:var(--r);background:var(--card2);margin-bottom:.6rem;overflow:hidden}
+    .dcard-head{display:flex;align-items:center;gap:.6rem;padding:.65rem .85rem;cursor:pointer;flex-wrap:wrap}
+    .dcard-head:hover{background:rgba(255,255,255,.025)}
+    .dcard.b-point{border-color:var(--danger);box-shadow:inset 4px 0 0 var(--danger)}
+    .dcard.serial{box-shadow:inset 4px 0 0 var(--warn)}
+    .dcard.b-point.serial{box-shadow:inset 4px 0 0 var(--danger),inset 8px 0 0 var(--warn)}
+    .dcard .code{font-weight:800;font-size:14px;font-variant-numeric:tabular-nums}
+    .dcard .where{font-size:13px;font-weight:600}
+    .dcard .muted{color:var(--muted);font-size:12px}
+    .stage-chip{font-size:11px;font-weight:700;background:var(--bg);border:1px solid var(--border);border-radius:20px;padding:2px 9px;white-space:nowrap}
+    .stage-chip.oto{border-color:var(--cyan);color:var(--cyan)}
+    .stage-chip.unresolved{border-color:var(--warn);color:var(--warn)}
+    .stage-chip.closed{border-color:var(--success);color:var(--success)}
+    .spacer{margin-left:auto}
+    .flag{font-size:10px;font-weight:800;border-radius:4px;padding:1px 6px;text-transform:uppercase;letter-spacing:.03em}
+    .flag.b{background:var(--danger);color:#fff}
+    .flag.s{background:var(--warn);color:#000}
+    .dcard-body{padding:.1rem .85rem .85rem;border-top:1px solid var(--border)}
+    .b-ribbon{background:color-mix(in srgb,var(--danger) 14%,transparent);border:1px solid var(--danger);color:var(--danger);font-weight:700;font-size:12px;border-radius:var(--r-sm);padding:.4rem .6rem;margin:.6rem 0}
+    .tl{list-style:none;margin:.6rem 0;padding:0}
+    .tl li{position:relative;padding:.3rem 0 .3rem 1.1rem;border-left:2px solid var(--border);margin-left:.3rem}
+    .tl li:last-child{border-left-color:transparent}
+    .tl li::before{content:'';position:absolute;left:-6px;top:.55rem;width:9px;height:9px;border-radius:50%;background:var(--accent);border:2px solid var(--card2)}
+    .tl li.open::before{background:var(--warn)}
+    .tl-dept{font-weight:700;font-size:12px}
+    .tl-meta{color:var(--muted);font-size:11px}
+    .tl-txt{font-size:12px;margin-top:2px;white-space:pre-wrap}
+    .photos{display:flex;gap:.4rem;flex-wrap:wrap;margin:.5rem 0}
+    .photos img{width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:pointer}
+    .act-bar{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.7rem}
+    .act-form{margin-top:.6rem;padding:.6rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--r-sm)}
+    .act-form textarea{min-height:52px}
+  </style>
 </head>
 <body>
 
@@ -29,11 +70,9 @@
 
 <div class="page">
 
-  <!-- ── РЕГИСТРАЦИЯ ДЕФЕКТА ── -->
-  <div class="card" style="margin-bottom:1rem">
+  <!-- ── РЕГИСТРАЦИЯ (только ОТК/WeldTeam) ── -->
+  <div class="card" id="regCard" style="margin-bottom:1rem" hidden>
     <div class="card-title danger">Зафиксировать дефект ОТК</div>
-
-    <!-- Автоматический режим (по точке) -->
     <div class="g3-reg">
       <div class="fgroup" style="margin:0">
         <label class="lbl">Модель авто</label>
@@ -52,8 +91,6 @@
       </div>
     </div>
     <div id="regAlert" class="hidden mt-alert"></div>
-
-    <!-- Мануальный режим (точка не в БД) -->
     <div style="margin-top:.5rem;text-align:right">
       <button class="btn btn-ghost btn-sm" id="toggleManualBtn" style="font-size:11px">Точка не найдена в БД? Ввести вручную →</button>
     </div>
@@ -80,355 +117,258 @@
     </div>
   </div>
 
-  <!-- ── ОТКРЫТЫЕ ДЕФЕКТЫ ── -->
-  <div class="card" style="margin-bottom:1rem">
+  <!-- ── ДОСКА ДЕФЕКТОВ ── -->
+  <div class="card">
     <div class="board-header">
-      <div class="board-title">
-        Открытые дефекты
-        <span class="board-count zero" id="cntOpen">0</span>
-      </div>
+      <div class="board-title">Дефекты · цепочка 4M <span class="text-muted" id="whoami" style="font-size:11px;font-weight:400;text-transform:none"></span></div>
       <button class="btn btn-ghost btn-sm" id="refreshBtn">↻ Обновить</button>
     </div>
 
-    <div class="tbl-wrap">
-      <table class="tbl tbl-mobile" id="openTable">
-        <thead>
-          <tr>
-            <th>Дата</th><th>Модель</th><th>Станция</th><th>Точка</th>
-            <th>Ган №&nbsp;[тип]</th><th>Код</th><th>Статус</th><th></th>
-          </tr>
-        </thead>
-        <tbody id="openBody">
-          <tr class="empty-row"><td colspan="7">Загрузка...</td></tr>
-        </tbody>
-      </table>
+    <div class="dtabs" id="dtabs">
+      <button class="dtab mine active" data-tab="mine">📥 Мои входящие <span class="cnt" id="c-mine">0</span></button>
+      <button class="dtab" data-tab="all">Все открытые <span class="cnt" id="c-all">0</span></button>
+      <button class="dtab" data-tab="serial">🔁 Серийные <span class="cnt" id="c-serial">0</span></button>
+      <button class="dtab" data-tab="unresolved">⚠ Не выявленные <span class="cnt" id="c-unres">0</span></button>
+      <button class="dtab" data-tab="closed">✓ Закрытые <span class="cnt" id="c-closed">0</span></button>
     </div>
 
-    <!-- Панель: Закрыть дефект -->
-    <div id="boardActionPanel" class="action-panel hidden">
-      <div class="action-panel-title">
-        <span>Закрыть дефект <strong id="panelCloseId"></strong></span>
-        <button class="action-panel-close" id="panelCloseCancelBtn">✕</button>
-      </div>
-
-      <!-- Форма обогащения (точка не в БД) -->
-      <div id="enrichForm" class="hidden" style="margin-bottom:.75rem;padding:.75rem;background:rgba(210,153,34,.08);border:1px solid var(--warn);border-radius:6px">
-        <div style="font-size:11px;font-weight:700;color:var(--warn);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.5rem">⚠ Точка не найдена в БД — уточните данные</div>
-        <div class="g2" style="margin-bottom:.5rem">
-          <div class="fgroup" style="margin:0">
-            <label class="lbl">Номер точки</label>
-            <input type="text" id="enrichSpotNum" readonly style="background:var(--bg);opacity:.7">
-          </div>
-          <div class="fgroup" style="margin:0">
-            <label class="lbl">Модель авто</label>
-            <select id="enrichModelSelect"><option value="">Выберите модель...</option></select>
-          </div>
-        </div>
-        <div class="fgroup" style="margin:0">
-          <label class="lbl">Номер пистолета (G.XXX)</label>
-          <input type="number" id="enrichGunNum" placeholder="Например: 11" min="1">
-        </div>
-      </div>
-
-      <div class="g2">
-        <div class="fgroup">
-          <label class="lbl">Кто устранил</label>
-          <select id="closeWorkerSelect"><option value="">Выберите сотрудника...</option></select>
-        </div>
-        <div class="fgroup">
-          <label class="lbl">Коренная причина</label>
-          <textarea id="closeRootCause" placeholder="Укажите причину дефекта..." style="min-height:60px"></textarea>
-        </div>
-      </div>
-      <div class="fgroup">
-        <label class="lbl">Контрмера / Решение</label>
-        <textarea id="closeSolution" placeholder="Опишите что было сделано..." style="min-height:60px"></textarea>
-      </div>
-      <div id="closeAlert" class="hidden mt-alert"></div>
-      <button class="btn btn-success btn-full" id="confirmCloseBtn">Закрыть дефект</button>
-    </div>
+    <div id="defectList"><div class="empty-row" style="padding:1.5rem;text-align:center;color:var(--muted)">Загрузка…</div></div>
   </div>
 
-  <!-- ── ЗАКРЫТЫЕ ДЕФЕКТЫ ── -->
-  <div class="card">
-    <div class="board-header">
-      <div class="board-title">Закрытые дефекты <span class="text-muted" style="font-size:11px;font-weight:400;text-transform:none">(последние 50)</span></div>
-    </div>
-    <div class="tbl-wrap">
-      <table class="tbl tbl-mobile">
-        <thead>
-          <tr>
-            <th>Дата</th><th>Модель</th><th>Станция</th><th>Точка</th><th>Ган №</th>
-            <th>Код</th><th>Причина</th><th>Контрмера</th><th>Закрыл</th><th></th>
-          </tr>
-        </thead>
-        <tbody id="closedBody">
-          <tr class="empty-row"><td colspan="10">Загрузка...</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- Редактор дефектов (тот же движок, что и «Редактор»: правка/копипаст/аудит) -->
-  <div class="card" style="margin-top:1rem">
+  <!-- Редактор дефектов (движок «Редактора»: правка/копипаст/аудит) -->
+  <div class="card" id="editorCard" style="margin-top:1rem" hidden>
     <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;flex-wrap:wrap">
       <div class="card-title" style="margin:0">Редактор дефектов</div>
       <button class="btn btn-ghost btn-sm" id="factEditToggle" aria-expanded="false">✎ Открыть редактор</button>
     </div>
-    <p class="text-muted text-sm" style="margin:.4rem 0 0">Правьте дефекты прямо в таблице, как в «Редакторе»: <b>Ctrl+C/V</b> — копирование (в т.ч. из Excel), правая кнопка — добавить/удалить строку. Каждая правка попадает в <a href="/history">Журнал</a> с автором и датой и откатывается. Привязку точки меняйте в «Редакторе»/Weld Balance.</p>
+    <p class="text-muted text-sm" style="margin:.4rem 0 0">Правка дефектов в таблице, как в «Редакторе»: <b>Ctrl+C/V</b>, правая кнопка — строки. Всё в <a href="/history">Журнал</a> с откатом.</p>
     <div id="defectEditor" style="margin-top:.75rem" hidden></div>
   </div>
 
 </div>
 
 <script>
-let allWorkers = [];
-let activeDefectId = null;
-let openDefectsMap = {};  // id → defect object
+const $ = id => document.getElementById(id);
+let ME = {}, BOARD = {open:[], unresolved:[], closed:[]}, TAB = 'mine', openId = null;
+const DEPTS = ['Производство', 'WeldTeam', 'ИТО', 'ОТО'];
+const STAGE_LABEL = {closed:'закрыл', passed:'передал дальше', returned:'вернул на доработку',
+                     to_oto:'передал в ОТО', oto_done:'контрмера ОТО', reopened:'переоткрыл'};
 
-function loadAll() {
-  fetch('/api/defects/all').then(r => r.json()).then(data => {
-    allWorkers = data.workers;
-    closeWorkerSelect.innerHTML = '<option value="">Выберите сотрудника...</option>';
-    allWorkers.forEach(w => closeWorkerSelect.add(new Option(`${w.surname} ${w.name}`, w.UniqueID)));
-    openDefectsMap = {};
-    data.open.forEach(d => { openDefectsMap[d.UniqueID] = d; });
-    renderOpen(data.open);
-    renderClosed(data.closed);
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); }
+function showAlert(el, type, msg){ el.className = `alert alert-${type}`; el.textContent = msg; }
+
+// ── init ──
+fetch('/api/me').then(r=>r.json()).then(me=>{
+  ME = me;
+  const canReg = me.dept === 'ОТК' || me.privileged || me.is_admin || me.dept === 'WeldTeam';
+  if (canReg) { $('regCard').hidden = false; initRegistration(); }
+  if (me.can_edit_docs) $('editorCard').hidden = false;
+  $('whoami').textContent = me.dept ? `· вы: ${me.dept}` : '';
+  loadBoard();
+});
+
+$('refreshBtn').addEventListener('click', loadBoard);
+$('dtabs').addEventListener('click', e => {
+  const b = e.target.closest('.dtab'); if (!b) return;
+  TAB = b.dataset.tab; openId = null;
+  document.querySelectorAll('.dtab').forEach(t => t.classList.toggle('active', t === b));
+  renderList();
+});
+
+function priv(){ return !!(ME.is_admin || ME.privileged || ME.dept === 'WeldTeam'); }
+
+function loadBoard(){
+  fetch('/api/defects/all').then(r=>r.json()).then(d=>{
+    BOARD = d;
+    const mine = d.open.filter(x => x.mine).length;
+    const serial = d.open.filter(x => x.is_serial).length;
+    $('c-mine').textContent = mine;
+    $('c-all').textContent = d.open.length;
+    $('c-serial').textContent = serial;
+    $('c-unres').textContent = d.unresolved.length;
+    $('c-closed').textContent = d.closed.length;
+    renderList();
   });
 }
-loadAll();
-document.getElementById('refreshBtn').addEventListener('click', loadAll);
 
-// ── Загрузка моделей авто и кодов дефектов ──
-let allModels = [];
-fetch('/api/models').then(r => r.json()).then(data => {
-  allModels = data;
-  data.forEach(m => regModelSelect.add(new Option(m.display_name, m.UniqueID)));
-});
-
-fetch('/api/defect_codes').then(r => r.json()).then(codes => {
-  [regCodeInput, manCodeInput].forEach(sel => {
-    codes.forEach(c => sel.add(new Option(`${c.code} — ${c.name}`, c.code)));
-  });
-});
-
-// ── Регистрация дефекта ──
-document.getElementById('regBtn').addEventListener('click', () => {
-  const alertEl = document.getElementById('regAlert');
-  const model = regModelSelect.value;
-  const spot  = regSpotInput.value.trim();
-  const code  = regCodeInput.value;
-  if (!model || !spot || !code) { showAlert(alertEl, 'warn', 'Выберите модель авто, номер точки и код дефекта'); return; }
-  fetch('/api/defects/register', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ model_id: model, spot_number: spot, problem_code: code })
-  }).then(r => r.json()).then(res => {
-    const alertType = res.status === 'success'
-      ? (res.found_in_db === false ? 'warn' : 'success')
-      : 'danger';
-    showAlert(alertEl, alertType, res.message);
-    if (res.status === 'success') {
-      regSpotInput.value = ''; regCodeInput.value = '';
-      loadAll();
-    }
-  });
-});
-regSpotInput.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('regBtn').click(); });
-
-// ── Мануальная регистрация ──
-document.getElementById('toggleManualBtn').addEventListener('click', () => {
-  const form = document.getElementById('manualRegForm');
-  const visible = !form.classList.toggle('hidden');
-  document.getElementById('toggleManualBtn').textContent =
-    visible ? '← Скрыть мануальный ввод' : 'Точка не найдена в БД? Ввести вручную →';
-  if (visible) {
-    const sel = document.getElementById('manBrandSelect');
-    if (sel.options.length < 2) {
-      fetch('/api/brands').then(r => r.json()).then(brands => {
-        brands.forEach(b => sel.add(new Option(b.brand, b.UniqueID)));
-      });
-    }
-  }
-});
-
-document.getElementById('manRegBtn').addEventListener('click', () => {
-  const alertEl = document.getElementById('manRegAlert');
-  const gnum = document.getElementById('manGunNum').value.trim();
-  const code = document.getElementById('manCodeInput').value;
-  if (!gnum || !code) { showAlert(alertEl, 'warn', 'Укажите номер пистолета и код дефекта'); return; }
-  fetch('/api/defects/register_manual', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ g_num: parseInt(gnum), problem_code: code })
-  }).then(r => r.json()).then(res => {
-    showAlert(alertEl, res.status === 'success' ? 'success' : 'danger', res.message);
-    if (res.status === 'success') {
-      document.getElementById('manGunNum').value = '';
-      document.getElementById('manCodeInput').value = '';
-      loadAll();
-    }
-  });
-});
-document.getElementById('manGunNum').addEventListener('keydown', e => {
-  if (e.key === 'Enter') document.getElementById('manRegBtn').click();
-});
-
-// ── Рендер открытых дефектов ──
-function renderOpen(defects) {
-  const tbody   = document.getElementById('openBody');
-  const cntOpen = document.getElementById('cntOpen');
-  cntOpen.textContent = defects.length;
-  cntOpen.className   = defects.length ? 'board-count danger' : 'board-count zero';
-
-  if (!defects.length) {
-    tbody.innerHTML = '<tr class="empty-row"><td colspan="9">Нет открытых дефектов</td></tr>';
-    return;
-  }
-  tbody.innerHTML = defects.map(d => {
-    const badge = d.status === 'in_work'
-      ? '<span class="badge bw">В работе</span>'
-      : '<span class="badge bd">Новый</span>';
-    const warnBadge = d.needs_enrichment
-      ? ' <span class="badge" style="background:rgba(210,153,34,.15);color:var(--warn);border:1px solid var(--warn)" title="Точка не в БД — требует уточнения">⚠</span>'
-      : '';
-    const spotDisplay = d.needs_enrichment
-      ? `<span style="color:var(--warn)">№${d.spot_number}</span>`
-      : `№${d.spot_number}`;
-    return `<tr id="row-${d.UniqueID}">
-      <td data-label="Дата" class="text-sm">${d.df_date}</td>
-      <td data-label="Модель" class="text-sm">${d.model_name||d.brand||'—'}${(d.model_type&&d.model_type.toLowerCase()!=='single')?' '+d.model_type:''}</td>
-      <td data-label="Станция" class="text-sm text-muted">${d.station_name||'—'}</td>
-      <td data-label="Точка" class="fw-bold">${spotDisplay}${warnBadge}</td>
-      <td data-label="Ган" class="text-sm fw-bold">№${d.g_num || '—'} <span class="text-muted">[${d.gun_model||'—'}]</span></td>
-      <td data-label="Код"><span class="badge bd">${d.problem_code}</span></td>
-      <td data-label="Статус">${badge}</td>
-      <td data-label="">
-        <button class="btn btn-success btn-sm" onclick="openClosePanel(${d.UniqueID})">Закрыть</button>
-        <button class="btn btn-ghost btn-sm" onclick="delDefect(${d.UniqueID})" title="Удалить">✕</button>
-      </td>
-    </tr>`;
-  }).join('');
-  closePanels();
+function listFor(tab){
+  if (tab === 'mine') return BOARD.open.filter(x => x.mine);
+  if (tab === 'all') return BOARD.open;
+  if (tab === 'serial') return BOARD.open.filter(x => x.is_serial);
+  if (tab === 'unresolved') return BOARD.unresolved;
+  return BOARD.closed;
 }
 
-// ── Рендер закрытых дефектов ──
-function renderClosed(defects) {
-  const tbody = document.getElementById('closedBody');
-  if (!defects.length) {
-    tbody.innerHTML = '<tr class="empty-row"><td colspan="10">Нет закрытых дефектов</td></tr>';  // 10 колонок
-    return;
-  }
-  tbody.innerHTML = defects.map(d => `<tr>
-    <td data-label="Дата" class="text-sm">${d.df_date}</td>
-    <td data-label="Модель" class="text-sm">${d.model_name||d.brand||'—'}${(d.model_type&&d.model_type.toLowerCase()!=='single')?' '+d.model_type:''}</td>
-    <td data-label="Станция" class="text-sm text-muted">${d.station_name||'—'}</td>
-    <td data-label="Точка" class="fw-bold">№${d.spot_number}</td>
-    <td data-label="Ган" class="text-sm">№${d.g_num || '—'}</td>
-    <td data-label="Код"><span class="badge bd">${d.problem_code}</span></td>
-    <td data-label="Причина" class="text-sm text-muted">${d.root_cause || '—'}</td>
-    <td data-label="Контрмера" class="text-sm">${d.solution || '—'}</td>
-    <td data-label="Закрыл" class="text-sm">${d.solv_surname || '—'}</td>
-    <td data-label=""><button class="btn btn-ghost btn-sm" onclick="delDefect(${d.UniqueID})" title="Удалить">✕</button></td>
-  </tr>`).join('');
+function renderList(){
+  const host = $('defectList');
+  const rows = listFor(TAB);
+  if (!rows.length){ host.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--muted)">Пусто</div>`; return; }
+  host.innerHTML = rows.map(cardHtml).join('');
 }
 
-// ── Action panels ──
-window.openClosePanel = function(id) {
-  activeDefectId = id;
-  highlightRow(id);
-  document.getElementById('panelCloseId').textContent = `#${id}`;
-  document.getElementById('closeAlert').className = 'hidden';
-  document.getElementById('closeWorkerSelect').value = '';
-  document.getElementById('closeRootCause').value = '';
-  document.getElementById('closeSolution').value = '';
+function cardHtml(d){
+  const cls = ['dcard', d.is_b_point ? 'b-point' : '', d.is_serial ? 'serial' : ''].filter(Boolean).join(' ');
+  const model = esc(d.model_name || d.brand || '—') + (d.model_type && d.model_type.toLowerCase() !== 'single' ? ' ' + esc(d.model_type) : '');
+  const flags = (d.is_b_point ? '<span class="flag b">точка B</span> ' : '')
+              + (d.is_serial ? `<span class="flag s">серийный${d.return_count ? ' ×' + d.return_count : ''}</span> ` : '');
+  let chip, chipCls = '';
+  if (d.status === 'closed'){ chip = '✓ закрыт'; chipCls = 'closed'; }
+  else if (d.status === 'unresolved'){ chip = '⚠ не выявлен'; chipCls = 'unresolved'; }
+  else if (d.status === 'at_oto'){ chip = '🔧 ОТО'; chipCls = 'oto'; }
+  else chip = '→ ' + esc(d.current_stage_dept || '—');
+  const open = openId === d.UniqueID;
+  return `<div class="${cls}" data-id="${d.UniqueID}">
+    <div class="dcard-head" onclick="toggleCard(${d.UniqueID})">
+      <span class="code">${esc(d.problem_code)}</span>
+      <span class="where">№${esc(d.spot_number)}</span>
+      <span class="muted">${model}${d.g_num ? ' · G.' + d.g_num : ''}${d.station_name && d.station_name!=='—' ? ' · ' + esc(d.station_name) : ''}</span>
+      ${flags}
+      <span class="spacer"></span>
+      <span class="muted">${esc(d.df_date)}</span>
+      <span class="stage-chip ${chipCls}">${chip}</span>
+    </div>
+    <div class="dcard-body" id="body-${d.UniqueID}" ${open ? '' : 'hidden'}></div>
+  </div>`;
+}
 
-  const defect = openDefectsMap[id];
-  const enrichForm = document.getElementById('enrichForm');
-  if (defect && defect.needs_enrichment) {
-    enrichForm.classList.remove('hidden');
-    document.getElementById('enrichSpotNum').value = defect.manual_spot_number || '';
-    document.getElementById('enrichGunNum').value = '';
-    const modelSel = document.getElementById('enrichModelSelect');
-    modelSel.innerHTML = '<option value="">Выберите модель...</option>';
-    if (defect.manual_model_id) {
-      fetch('/api/models').then(r => r.json()).then(models => {
-        models.forEach(m => modelSel.add(new Option(m.display_name, m.UniqueID)));
-        modelSel.value = defect.manual_model_id;
-        modelSel.disabled = true;
-      });
-    } else if (defect.manual_brand_id) {
-      fetch(`/api/models?brand_id=${defect.manual_brand_id}`).then(r => r.json()).then(models => {
-        models.forEach(m => modelSel.add(new Option(m.display_name, m.UniqueID)));
-        modelSel.disabled = false;
-      });
-    } else {
-      fetch('/api/models').then(r => r.json()).then(models => {
-        models.forEach(m => modelSel.add(new Option(m.display_name, m.UniqueID)));
-        modelSel.disabled = false;
-      });
-    }
-  } else {
-    enrichForm.classList.add('hidden');
-    document.getElementById('enrichModelSelect').disabled = false;
-  }
-
-  document.getElementById('boardActionPanel').classList.remove('hidden');
-  document.getElementById('boardActionPanel').scrollIntoView({behavior:'smooth',block:'nearest'});
+window.toggleCard = function(id){
+  if (openId === id){ openId = null; const b = $('body-'+id); if (b){ b.hidden = true; b.innerHTML=''; } return; }
+  openId = id;
+  document.querySelectorAll('.dcard-body').forEach(b => { b.hidden = true; b.innerHTML = ''; });
+  const body = $('body-'+id); if (!body) return;
+  body.hidden = false; body.innerHTML = '<div class="muted" style="padding:.6rem 0">Загрузка…</div>';
+  fetch('/api/defects/'+id).then(r=>r.json()).then(renderDetail);
 };
 
-function closePanels() {
-  document.getElementById('boardActionPanel').classList.add('hidden');
-  document.querySelectorAll('.board-row-active').forEach(r => r.classList.remove('board-row-active'));
-  activeDefectId = null;
-}
-function highlightRow(id) {
-  document.querySelectorAll('.board-row-active').forEach(r => r.classList.remove('board-row-active'));
-  const row = document.getElementById(`row-${id}`);
-  if (row) row.classList.add('board-row-active');
-}
+function renderDetail(res){
+  if (res.status !== 'success') return;
+  const d = res.defect, body = $('body-'+d.UniqueID); if (!body) return;
+  const canAct = priv() || (ME.dept && ME.dept === d.current_stage_dept);
+  const canOto = d.status === 'at_oto' && (ME.dept === 'ОТО' || priv());
 
-document.getElementById('panelCloseCancelBtn').addEventListener('click', closePanels);
+  const ribbon = d.is_b_point ? `<div class="b-ribbon">⚠ ТОЧКА ГРУППЫ B — требует немедленного вмешательства</div>` : '';
+  const occ = res.occurrences.length > 1 ? `<div class="muted">Появлений: ${res.occurrences.length} (${res.occurrences.map(esc).join(', ')})</div>` : '';
 
-document.getElementById('confirmCloseBtn').addEventListener('click', () => {
-  const alertEl = document.getElementById('closeAlert');
-  const wId   = document.getElementById('closeWorkerSelect').value;
-  const cause = document.getElementById('closeRootCause').value.trim();
-  const text  = document.getElementById('closeSolution').value.trim();
-  if (!wId)  { showAlert(alertEl, 'warn', 'Выберите сотрудника'); return; }
-  if (!text) { showAlert(alertEl, 'warn', 'Введите контрмеру/решение'); return; }
+  const timeline = res.stages.length ? `<ul class="tl">${res.stages.map(s=>{
+    const act = s.left_at ? (STAGE_LABEL[s.outcome] || s.outcome || '') : 'на рассмотрении';
+    const txt = [s.cause && 'Причина: '+s.cause, s.countermeasure && 'Контрмера: '+s.countermeasure, s.note && s.note].filter(Boolean).map(esc).join('\n');
+    return `<li class="${s.left_at ? '' : 'open'}">
+      <div class="tl-dept">${esc(s.dept)} <span class="tl-meta">— ${esc(act)}${s.actor ? ', '+esc(s.actor) : ''}</span></div>
+      ${txt ? `<div class="tl-txt">${txt}</div>` : ''}
+      <div class="tl-meta">${esc((s.entered_at||'').replace('T',' '))}${s.left_at ? ' → '+esc(s.left_at.replace('T',' ')) : ''}</div>
+    </li>`;
+  }).join('')}</ul>` : '';
 
-  const defect = openDefectsMap[activeDefectId];
-  const payload = { defect_id: activeDefectId, worker_solve_id: wId, root_cause: cause, solution: text };
+  const photos = `<div class="photos">${res.photos.map(p=>`<img src="/api/defects/photo/${p.UniqueID}" title="${esc(p.stage_dept||'')} ${esc(p.ts||'')}" onclick="window.open('/api/defects/photo/${p.UniqueID}','_blank')">`).join('')}
+    <label class="btn btn-ghost btn-sm" style="align-self:center">📷 Фото<input type="file" accept="image/*" hidden onchange="uploadPhoto(${d.UniqueID}, this)"></label></div>`;
 
-  if (defect && defect.needs_enrichment) {
-    const modelId = document.getElementById('enrichModelSelect').value;
-    const gunNum  = document.getElementById('enrichGunNum').value.trim();
-    if (!modelId) { showAlert(alertEl, 'warn', 'Выберите модель авто'); return; }
-    if (!gunNum)  { showAlert(alertEl, 'warn', 'Укажите номер пистолета'); return; }
-    payload.model_id = modelId;
-    payload.gun_num  = parseInt(gunNum);
+  let actions = '';
+  if (canAct && (d.status === 'in_review' || d.status === 'registered' || d.status === 'unresolved')){
+    actions = `
+      <div class="act-bar">
+        <button class="btn btn-success btn-sm" onclick="toggleForm('close-${d.UniqueID}')">✓ Закрыть</button>
+        <button class="btn btn-ghost btn-sm" onclick="act(${d.UniqueID},'pass',{})">→ Передать дальше</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleForm('bounce-${d.UniqueID}')">↩ Вернуть</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleForm('oto-${d.UniqueID}')">🔧 В ОТО</button>
+      </div>
+      <div class="act-form" id="close-${d.UniqueID}" hidden>
+        <div class="fgroup"><label class="lbl">Коренная причина</label><textarea id="cause-${d.UniqueID}" placeholder="предполагаемая причина…"></textarea></div>
+        <div class="fgroup"><label class="lbl">Контрмера (обязательно)</label><textarea id="cm-${d.UniqueID}" placeholder="что сделано…"></textarea></div>
+        <button class="btn btn-success btn-sm" onclick="act(${d.UniqueID},'close',{cause:val('cause-${d.UniqueID}'),countermeasure:val('cm-${d.UniqueID}')})">Закрыть дефект</button>
+      </div>
+      <div class="act-form" id="bounce-${d.UniqueID}" hidden>
+        <div class="fgroup"><label class="lbl">Вернуть отделу</label><select id="to-${d.UniqueID}">${DEPTS.map(x=>`<option value="${x}">${x}</option>`).join('')}</select></div>
+        <div class="fgroup"><label class="lbl">Причина возврата</label><textarea id="brsn-${d.UniqueID}" placeholder="почему возвращаете…"></textarea></div>
+        <button class="btn btn-warn btn-sm" onclick="act(${d.UniqueID},'bounce',{to_dept:val('to-${d.UniqueID}'),reason:val('brsn-${d.UniqueID}')})">Вернуть</button>
+      </div>
+      <div class="act-form" id="oto-${d.UniqueID}" hidden>
+        <div class="fgroup"><label class="lbl">Что передать в ОТО (оборудование)</label><textarea id="orsn-${d.UniqueID}" placeholder="напр. несоосность клещей G.043…"></textarea></div>
+        <button class="btn btn-sm" style="background:var(--cyan);color:#000" onclick="act(${d.UniqueID},'delegate_oto',{reason:val('orsn-${d.UniqueID}')})">Передать в ОТО</button>
+      </div>`;
   }
+  if (canOto){
+    actions += `
+      <div class="act-form" style="margin-top:.7rem">
+        <div class="fgroup"><label class="lbl">Контрмера ОТО (оборудование)</label><textarea id="otocm-${d.UniqueID}" placeholder="что сделали с оборудованием…"></textarea></div>
+        <button class="btn btn-sm" style="background:var(--cyan);color:#000" onclick="act(${d.UniqueID},'oto',{countermeasure:val('otocm-${d.UniqueID}')})">Контрмера ОТО → вернуть отправителю</button>
+      </div>`;
+  }
+  if (d.status === 'closed' && priv()){
+    actions += `<div class="act-bar"><button class="btn btn-ghost btn-sm" onclick="act(${d.UniqueID},'reopen',{})">↺ Переоткрыть</button></div>`;
+  }
+  if (!actions && d.status !== 'closed') actions = `<div class="muted" style="margin-top:.5rem">Сейчас дефект на этапе «${esc(d.current_stage_dept||'—')}» — действия доступны этому отделу.</div>`;
 
-  fetch('/api/defects/close', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify(payload)
-  }).then(r => r.json()).then(res => {
-    if (res.status === 'success') { closePanels(); loadAll(); }
-    else showAlert(alertEl, 'danger', res.message);
-  });
-});
+  const delBtn = priv() ? `<button class="btn btn-ghost btn-sm" style="float:right" onclick="delDefect(${d.UniqueID})">✕ Удалить</button>` : '';
 
-window.delDefect = function(id) {
-  if (!confirm(`Удалить дефект #${id}?`)) return;
-  fetch(`/api/defects/${id}`, { method: 'DELETE' })
-    .then(r => r.json()).then(res => {
-      if (res.status === 'success') loadAll();
+  body.innerHTML = ribbon + occ + timeline + photos + actions + delBtn + `<div id="alert-${d.UniqueID}" class="hidden mt-alert"></div>`;
+}
+
+window.toggleForm = function(id){ const f = $(id); if (f) f.hidden = !f.hidden; };
+window.val = id => { const e = $(id); return e ? e.value.trim() : ''; };
+
+window.act = function(id, action, extra){
+  if (action === 'close' && !extra.countermeasure){ return flash(id, 'warn', 'Укажите контрмеру'); }
+  if (action === 'bounce' && !extra.to_dept){ return flash(id, 'warn', 'Выберите отдел'); }
+  if (action === 'oto' && !extra.countermeasure){ return flash(id, 'warn', 'Укажите контрмеру ОТО'); }
+  if (action === 'pass' && !confirm('Причина не выявлена — передать дальше по цепочке?')) return;
+  fetch(`/api/defects/${id}/act`, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(Object.assign({action}, extra))})
+    .then(r=>r.json()).then(res=>{
+      if (res.status === 'success'){ openId = null; loadBoard(); }
+      else flash(id, 'danger', res.message);
     });
 };
 
-function showAlert(el, type, msg) {
-  el.className = `alert alert-${type}`;
-  el.textContent = msg;
+window.uploadPhoto = function(id, input){
+  const f = input.files[0]; if (!f) return;
+  const fd = new FormData(); fd.append('photo', f);
+  fetch(`/api/defects/${id}/photo`, {method:'POST', body: fd}).then(r=>r.json()).then(res=>{
+    if (res.status === 'success'){ fetch('/api/defects/'+id).then(r=>r.json()).then(renderDetail); }
+    else flash(id, 'danger', res.message);
+  });
+};
+
+window.delDefect = function(id){
+  if (!confirm(`Удалить дефект #${id}?`)) return;
+  fetch(`/api/defects/${id}`, {method:'DELETE'}).then(r=>r.json()).then(res=>{ if (res.status==='success'){ openId=null; loadBoard(); } });
+};
+
+function flash(id, type, msg){ const el = $('alert-'+id); if (el) showAlert(el, type, msg); }
+
+// ── Регистрация (ОТК) ──
+function initRegistration(){
+  fetch('/api/models').then(r=>r.json()).then(data => data.forEach(m => regModelSelect.add(new Option(m.display_name, m.UniqueID))));
+  fetch('/api/defect_codes').then(r=>r.json()).then(codes => {
+    [regCodeInput, manCodeInput].forEach(sel => codes.forEach(c => sel.add(new Option(`${c.code} — ${c.name}`, c.code))));
+  });
+  $('regBtn').addEventListener('click', () => {
+    const a = $('regAlert'), model = regModelSelect.value, spot = regSpotInput.value.trim(), code = regCodeInput.value;
+    if (!model || !spot || !code){ showAlert(a, 'warn', 'Выберите модель, точку и код'); return; }
+    fetch('/api/defects/register', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({model_id: model, spot_number: spot, problem_code: code})})
+      .then(r=>r.json()).then(res=>{
+        showAlert(a, res.status==='success' ? (res.serial ? 'warn' : (res.found_in_db===false ? 'warn':'success')) : 'danger', res.message);
+        if (res.status==='success'){ regSpotInput.value=''; regCodeInput.value=''; loadBoard(); }
+      });
+  });
+  regSpotInput.addEventListener('keydown', e => { if (e.key==='Enter') $('regBtn').click(); });
+  $('toggleManualBtn').addEventListener('click', () => {
+    const form = $('manualRegForm'), vis = !form.classList.toggle('hidden');
+    $('toggleManualBtn').textContent = vis ? '← Скрыть мануальный ввод' : 'Точка не найдена в БД? Ввести вручную →';
+    if (vis && manBrandSelect.options.length < 2)
+      fetch('/api/brands').then(r=>r.json()).then(bs => bs.forEach(b => manBrandSelect.add(new Option(b.brand, b.UniqueID))));
+  });
+  $('manRegBtn').addEventListener('click', () => {
+    const a = $('manRegAlert'), gnum = manGunNum.value.trim(), code = manCodeInput.value;
+    if (!gnum || !code){ showAlert(a, 'warn', 'Укажите пистолет и код'); return; }
+    fetch('/api/defects/register_manual', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({g_num: parseInt(gnum), problem_code: code})})
+      .then(r=>r.json()).then(res=>{
+        showAlert(a, res.status==='success' ? 'success' : 'danger', res.message);
+        if (res.status==='success'){ manGunNum.value=''; manCodeInput.value=''; loadBoard(); }
+      });
+  });
+  manGunNum.addEventListener('keydown', e => { if (e.key==='Enter') $('manRegBtn').click(); });
 }
 </script>
 <script src="/static/sheet.js?v=11"></script>
@@ -437,6 +377,7 @@ function showAlert(el, type, msg) {
 (function(){
   const t = document.getElementById('factEditToggle'), host = document.getElementById('defectEditor');
   let mounted = false;
+  if (!t) return;
   t.addEventListener('click', async () => {
     const show = host.hidden;
     host.hidden = !show;

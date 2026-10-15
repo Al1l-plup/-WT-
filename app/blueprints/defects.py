@@ -81,6 +81,8 @@ def register_defect():
 
 @bp.route('/api/defects/add', methods=['POST'])
 def add_defect():
+    if not _ctx()[3]:
+        return jsonify({'status': 'error', 'message': 'Устаревшее действие доступно только WeldTeam'}), 403
     data = request.json or {}
     db = get_db()
     try:
@@ -169,6 +171,8 @@ def defects_all():
 
 @bp.route('/api/defects/take', methods=['POST'])
 def take_defect():
+    if not _ctx()[3]:
+        return jsonify({'status': 'error', 'message': 'Устаревшее действие доступно только WeldTeam'}), 403
     data = request.json or {}
     db = get_db()
     try:
@@ -187,6 +191,8 @@ def take_defect():
 
 @bp.route('/api/defects/update', methods=['POST'])
 def update_defect():
+    if not _ctx()[3]:
+        return jsonify({'status': 'error', 'message': 'Устаревшее действие доступно только WeldTeam'}), 403
     data = request.json or {}
     db = get_db()
     try:
@@ -203,6 +209,8 @@ def update_defect():
 
 @bp.route('/api/defects/close', methods=['POST'])
 def close_defect():
+    if not _ctx()[3]:
+        return jsonify({'status': 'error', 'message': 'Устаревшее действие доступно только WeldTeam'}), 403
     data            = request.json or {}
     defect_id       = data.get('defect_id')
     worker_solve_id = data.get('worker_solve_id')
@@ -274,6 +282,8 @@ def close_defect():
 
 @bp.route('/api/defects/<int:defect_id>', methods=['DELETE'])
 def delete_defect(defect_id):
+    if not _ctx()[3]:
+        return jsonify({'status': 'error', 'message': 'Устаревшее действие доступно только WeldTeam'}), 403
     db = get_db()
     try:
         defect = db.execute(
@@ -301,6 +311,8 @@ def delete_defect(defect_id):
 
 @bp.route('/api/defects/enrich', methods=['POST'])
 def enrich_defect():
+    if not _ctx()[3]:
+        return jsonify({'status': 'error', 'message': 'Устаревшее действие доступно только WeldTeam'}), 403
     data       = request.json or {}
     defect_id  = data.get('defect_id')
     model_id   = data.get('model_id')
