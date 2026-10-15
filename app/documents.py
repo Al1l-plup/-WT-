@@ -280,6 +280,43 @@ _DEFECTS_DOC = {
     ],
 }
 
+# Маршрут согласования дефектов (цепочка отделов по коду) — редактируется здесь.
+_DEFECT_ROUTE_DOC = {
+    'title': 'Маршруты дефектов (4M)',
+    'base': 'FROM defect_route r',
+    'pks': {'defect_route': 'r.UniqueID'},
+    'primary': 'defect_route',
+    'order': "CASE WHEN r.code='*' THEN 0 ELSE 1 END, r.code, r.position",
+    'columns': [
+        {'label': 'Код дефекта', 'field': 'code', 'expr': 'r.code', 'edit': True,
+         'table': 'defect_route', 'col': 'code',
+         'hint': 'Код дефекта (CR, BT, EO, MN…) или * — маршрут по умолчанию для всех остальных кодов.'},
+        {'label': 'Позиция', 'field': 'position', 'expr': 'r.position', 'edit': True,
+         'table': 'defect_route', 'col': 'position',
+         'hint': 'Порядок этапа в цепочке: 0 — первый отдел, 1 — второй и т.д.'},
+        {'label': 'Отдел', 'field': 'dept', 'expr': 'r.dept', 'edit': True,
+         'table': 'defect_route', 'col': 'dept',
+         'hint': 'Производство / WeldTeam / ИТО / ОТО. Так задаётся, кто и в каком порядке рассматривает.'},
+    ],
+}
+
+# Параметры процесса дефектов (окно серийности и т.п.) — редактируются здесь.
+_DEFECT_CONFIG_DOC = {
+    'title': 'Параметры дефектов',
+    'base': 'FROM defect_config c',
+    'pks': {'defect_config': 'c.key'},
+    'primary': 'defect_config',
+    'order': 'c.key',
+    'columns': [
+        {'label': 'Параметр', 'field': 'key', 'expr': 'c.key', 'edit': True,
+         'table': 'defect_config', 'col': 'key', 'hint': 'Имя параметра (менять не требуется).'},
+        {'label': 'Значение', 'field': 'value', 'expr': 'c.value', 'edit': True,
+         'table': 'defect_config', 'col': 'value',
+         'hint': 'serial_window_days — окно серийности в днях: повтор на той же точке в этой же '
+                 'группе кодов в пределах стольких дней считается серией.'},
+    ],
+}
+
 # Токен вкладки WB: только буквы/цифры/._- (защита от SQL-инъекции в LIKE-фильтре).
 TOKEN_RE = re.compile(r'^[A-Za-z0-9_.\-]+$')
 
@@ -297,6 +334,8 @@ def get_documents(db) -> dict:
     docs['parameters'] = _PARAMETERS_DOC
     docs['maintenance'] = _MAINTENANCE_DOC
     docs['defects'] = _DEFECTS_DOC
+    docs['defect_route'] = _DEFECT_ROUTE_DOC
+    docs['defect_config'] = _DEFECT_CONFIG_DOC
     return docs
 
 
