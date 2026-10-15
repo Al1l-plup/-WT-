@@ -86,12 +86,41 @@
   </div>
 
   <!-- ── ПО СТАНЦИЯМ ── -->
-  <div class="card">
+  <div class="card" style="margin-bottom:1rem">
     <div class="card-title">По станциям</div>
     <div class="tbl-wrap">
       <table class="tbl tbl-mobile">
         <thead><tr><th>Бренд</th><th>Станция</th><th>Код</th><th>Кол-во</th><th>Расшифровка</th></tr></thead>
         <tbody id="stationTable"><tr class="empty-row"><td colspan="5">Нет данных</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── ПРОЦЕСС 4M ── -->
+  <div class="sep">Процесс согласования 4M</div>
+  <div class="g3" style="margin-bottom:1rem">
+    <div class="stat"><div class="stat-val warn" id="pSerial">—</div><div class="stat-lbl">Серийных</div></div>
+    <div class="stat"><div class="stat-val danger" id="pUnres">—</div><div class="stat-lbl">Не выявленных (сейчас)</div></div>
+    <div class="stat"><div class="stat-val accent" id="pReturns">—</div><div class="stat-lbl">Возвратов</div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:1rem">
+    <div class="card-title">Отделы — среднее время рассмотрения этапа</div>
+    <div class="tbl-wrap">
+      <table class="tbl tbl-mobile">
+        <thead><tr><th>Отдел</th><th>Ср. время этапа</th><th>Этапов</th><th>Закрыто</th><th>Возвратов</th><th>Сейчас на рассм.</th></tr></thead>
+        <tbody id="deptTable"><tr class="empty-row"><td colspan="6">Нет данных</td></tr></tbody>
+      </table>
+    </div>
+    <p class="text-muted text-sm" style="margin:.5rem 0 0">Время — по завершённым этапам дефектов периода; «сейчас на рассмотрении» — текущая загрузка отдела. Основа для оценки производительности.</p>
+  </div>
+
+  <div class="card" id="serialCard" style="margin-bottom:1rem" hidden>
+    <div class="card-title warn">Серийные дефекты (повторы)</div>
+    <div class="tbl-wrap">
+      <table class="tbl tbl-mobile">
+        <thead><tr><th>Код</th><th>Точка</th><th>Возвратов</th><th>Этап</th><th>Дата</th></tr></thead>
+        <tbody id="serialTable"></tbody>
       </table>
     </div>
   </div>
@@ -156,6 +185,41 @@ function applyFilters() {
   if (station) url += `&station_id=${station}`;
 
   fetch(url).then(r => r.json()).then(render);
+  loadProcess(from, to);
+}
+
+function fmtHours(h) {
+  if (h == null) return '—';
+  if (h < 1)  return Math.round(h * 60) + ' мин';
+  if (h < 24) return h + ' ч';
+  return Math.floor(h / 24) + ' д ' + Math.round(h % 24) + ' ч';
+}
+function loadProcess(from, to) {
+  fetch(`/api/analytics/process?date_from=${from}&date_to=${to}`).then(r => r.json()).then(d => {
+    document.getElementById('pSerial').textContent  = d.serial;
+    document.getElementById('pUnres').textContent   = d.unresolved;
+    document.getElementById('pReturns').textContent = d.returns_total;
+    const dt = document.getElementById('deptTable');
+    dt.innerHTML = d.by_dept.length ? d.by_dept.map(r => `<tr>
+      <td data-label="Отдел" class="fw-bold">${r.dept}</td>
+      <td data-label="Ср. время">${fmtHours(r.avg_hours)}</td>
+      <td data-label="Этапов">${r.stages_done}</td>
+      <td data-label="Закрыто" class="text-success">${r.closed}</td>
+      <td data-label="Возвратов" class="${r.returned ? 'text-warn fw-bold' : 'text-muted'}">${r.returned}</td>
+      <td data-label="Сейчас">${r.open_now}</td>
+    </tr>`).join('') : '<tr class="empty-row"><td colspan="6">Нет данных</td></tr>';
+    const sc = document.getElementById('serialCard'), st = document.getElementById('serialTable');
+    if (d.serial_list && d.serial_list.length) {
+      sc.hidden = false;
+      st.innerHTML = d.serial_list.map(r => `<tr>
+        <td data-label="Код"><span class="badge bd">${r.code}</span></td>
+        <td data-label="Точка" class="fw-bold">№${r.spot}</td>
+        <td data-label="Возвратов" class="text-warn fw-bold">${r.returns}</td>
+        <td data-label="Этап" class="text-sm text-muted">${r.stage}</td>
+        <td data-label="Дата" class="text-sm">${r.date}</td>
+      </tr>`).join('');
+    } else { sc.hidden = true; st.innerHTML = ''; }
+  });
 }
 
 function render(data) {

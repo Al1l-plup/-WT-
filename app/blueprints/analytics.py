@@ -58,6 +58,61 @@ def analytics_defects():
                     'by_station': [dict(r) for r in by_station]})
 
 
+@bp.route('/api/analytics/process')
+def analytics_process():
+    """Аналитика процесса 4M: среднее время этапа по отделам, текущая загрузка,
+    возвраты (bounce), серийные и не выявленные дефекты."""
+    db = get_db()
+    date_from = request.args.get('date_from', '').strip() or datetime.now().strftime('%Y-%m-01')
+    date_to   = request.args.get('date_to', '').strip() or datetime.now().strftime('%Y-%m-31')
+    rng = (date_from, date_to)
+
+    # Среднее время этапа по отделам (завершённые этапы дефектов периода). Таймстемпы ISO
+    # (с 'T') → приводим к виду SQLite для julianday; разница в часах.
+    by_dept = db.execute("""
+        SELECT st.dept AS dept,
+               ROUND(AVG((julianday(replace(st.left_at,'T',' ')) - julianday(replace(st.entered_at,'T',' '))) * 24.0), 1) AS avg_hours,
+               COUNT(*) AS stages_done,
+               SUM(CASE WHEN st.outcome='closed'   THEN 1 ELSE 0 END) AS closed_cnt,
+               SUM(CASE WHEN st.outcome='returned' THEN 1 ELSE 0 END) AS returned_cnt
+        FROM defect_stage st JOIN defects d ON st.defect_id = d.UniqueID
+        WHERE st.left_at IS NOT NULL AND d.df_date BETWEEN ? AND ?
+        GROUP BY st.dept ORDER BY stages_done DESC
+    """, rng).fetchall()
+
+    # Текущая загрузка — сколько дефектов СЕЙЧАС на этапе отдела (без фильтра дат).
+    wl = {r['dept']: r['cnt'] for r in db.execute("""
+        SELECT current_stage_dept AS dept, COUNT(*) AS cnt FROM defects
+        WHERE COALESCE(status,'') IN ('in_review','at_oto') AND current_stage_dept IS NOT NULL
+        GROUP BY current_stage_dept""").fetchall()}
+
+    dept_rows = [{'dept': r['dept'], 'avg_hours': r['avg_hours'], 'stages_done': r['stages_done'],
+                  'closed': r['closed_cnt'], 'returned': r['returned_cnt'], 'open_now': wl.get(r['dept'], 0)}
+                 for r in by_dept]
+    for dept, cnt in wl.items():                       # отделы с загрузкой, но без завершённых этапов
+        if not any(x['dept'] == dept for x in dept_rows):
+            dept_rows.append({'dept': dept, 'avg_hours': None, 'stages_done': 0,
+                              'closed': 0, 'returned': 0, 'open_now': cnt})
+
+    serial = db.execute("SELECT COUNT(*) FROM defects WHERE is_serial=1 AND df_date BETWEEN ? AND ?", rng).fetchone()[0]
+    returns_t = db.execute("""SELECT COUNT(*) FROM defect_stage st JOIN defects d ON st.defect_id=d.UniqueID
+                              WHERE st.outcome='returned' AND d.df_date BETWEEN ? AND ?""", rng).fetchone()[0]
+    unresolved = db.execute("SELECT COUNT(*) FROM defects WHERE COALESCE(status,'')='unresolved'").fetchone()[0]
+
+    serial_list = db.execute("""
+        SELECT d.problem_code AS code,
+               COALESCE(d.snap_spot_number, s.spot_number, d.manual_spot_number, '—') AS spot,
+               COALESCE(d.return_count,0) AS returns, d.df_date AS date,
+               COALESCE(d.current_stage_dept,'—') AS stage
+        FROM defects d LEFT JOIN spot s ON d.spot_id=s.UniqueID
+        WHERE d.is_serial=1 AND d.df_date BETWEEN ? AND ?
+        ORDER BY d.return_count DESC, d.df_date DESC LIMIT 20""", rng).fetchall()
+
+    return jsonify({'date_from': date_from, 'date_to': date_to, 'by_dept': dept_rows,
+                    'serial': serial, 'unresolved': unresolved, 'returns_total': returns_t,
+                    'serial_list': [dict(r) for r in serial_list]})
+
+
 @bp.route('/api/stats')
 def get_stats():
     db = get_db()
