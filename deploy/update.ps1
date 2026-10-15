@@ -25,6 +25,15 @@ if (-not (Test-Path "$Dir\.git")) {
   Write-Host "No git checkout in $Dir - run deploy\setup_git.ps1 first." -ForegroundColor Red; exit 1
 }
 
+# Allow git to operate on the folder even when update is run by a different user than
+# the repo owner (owner is usually BUILTIN\Administrators -> otherwise "dubious ownership").
+# Idempotent: add the safe.directory entry only if it is not present yet.
+$gitDir = ($Dir -replace '\\','/')
+$ErrorActionPreference = 'Continue'
+$safe = & git config --global --get-all safe.directory 2>$null
+if ($safe -notcontains $gitDir) { & git config --global --add safe.directory $gitDir | Out-Null }
+$ErrorActionPreference = 'Stop'
+
 Info "Updating to latest ($Branch) ..."
 Git-Do -C $Dir fetch origin $Branch
 Git-Do -C $Dir checkout -f $Branch
