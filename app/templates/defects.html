@@ -91,8 +91,8 @@
       </div>
     </div>
     <div style="margin-top:.5rem;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
-      <label class="btn btn-ghost btn-sm">📷 Прикрепить фото<input type="file" id="regPhoto" accept="image/*" multiple hidden></label>
-      <span class="text-sm text-muted" id="regPhotoName">фото из WhatsApp — сожмётся и прикрепится к дефекту</span>
+      <label class="btn btn-ghost btn-sm">📷 Фото дефекта <span style="color:var(--danger)">*</span><input type="file" id="regPhoto" accept="image/*" multiple hidden></label>
+      <span class="text-sm text-muted" id="regPhotoName">фото обязательно (из WhatsApp) — сожмётся на устройстве</span>
     </div>
     <div id="regAlert" class="hidden mt-alert"></div>
     <div style="margin-top:.5rem;text-align:right">
@@ -118,8 +118,8 @@
         </div>
       </div>
       <div style="margin-top:.5rem">
-        <label class="btn btn-ghost btn-sm">📷 Прикрепить фото<input type="file" id="manPhoto" accept="image/*" multiple hidden></label>
-        <span class="text-sm text-muted" id="manPhotoName" style="margin-left:.5rem"></span>
+        <label class="btn btn-ghost btn-sm">📷 Фото дефекта <span style="color:var(--danger)">*</span><input type="file" id="manPhoto" accept="image/*" multiple hidden></label>
+        <span class="text-sm text-muted" id="manPhotoName" style="margin-left:.5rem">фото обязательно</span>
       </div>
       <div id="manRegAlert" class="hidden mt-alert"></div>
     </div>
@@ -375,19 +375,18 @@ function initRegistration(){
   fetch('/api/defect_codes').then(r=>r.json()).then(codes => {
     [regCodeInput, manCodeInput].forEach(sel => codes.forEach(c => sel.add(new Option(`${c.code} — ${c.name}`, c.code))));
   });
-  regPhoto.addEventListener('change', () => { regPhotoName.textContent = regPhoto.files.length ? `выбрано фото: ${regPhoto.files.length}` : 'фото из WhatsApp — сожмётся и прикрепится к дефекту'; });
-  $('regBtn').addEventListener('click', () => {
+  const REG_HINT = 'фото обязательно (из WhatsApp) — сожмётся на устройстве';
+  regPhoto.addEventListener('change', () => { regPhotoName.textContent = regPhoto.files.length ? `выбрано фото: ${regPhoto.files.length}` : REG_HINT; });
+  $('regBtn').addEventListener('click', async () => {
     const a = $('regAlert'), model = regModelSelect.value, spot = regSpotInput.value.trim(), code = regCodeInput.value;
     if (!model || !spot || !code){ showAlert(a, 'warn', 'Выберите модель, точку и код'); return; }
-    fetch('/api/defects/register', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({model_id: model, spot_number: spot, problem_code: code})})
-      .then(r=>r.json()).then(async res=>{
-        showAlert(a, res.status==='success' ? (res.serial ? 'warn' : (res.found_in_db===false ? 'warn':'success')) : 'danger', res.message);
-        if (res.status==='success'){
-          if (regPhoto.files.length && res.defect_id){ await uploadPhotos(res.defect_id, regPhoto.files); regPhoto.value=''; regPhotoName.textContent='фото из WhatsApp — сожмётся и прикрепится к дефекту'; }
-          regSpotInput.value=''; regCodeInput.value=''; loadBoard();
-        }
-      });
+    if (!regPhoto.files.length){ showAlert(a, 'warn', 'Приложите фото дефекта — при фиксации это обязательно'); return; }
+    const fd = new FormData();
+    fd.append('model_id', model); fd.append('spot_number', spot); fd.append('problem_code', code);
+    for (const f of regPhoto.files) fd.append('photo', await compressImage(f), (f.name.replace(/\.[^.]+$/, '') || 'photo') + '.jpg');
+    const res = await fetch('/api/defects/register', {method:'POST', body: fd}).then(r=>r.json());
+    showAlert(a, res.status==='success' ? (res.serial ? 'warn' : (res.found_in_db===false ? 'warn':'success')) : 'danger', res.message);
+    if (res.status==='success'){ regSpotInput.value=''; regCodeInput.value=''; regPhoto.value=''; regPhotoName.textContent=REG_HINT; loadBoard(); }
   });
   regSpotInput.addEventListener('keydown', e => { if (e.key==='Enter') $('regBtn').click(); });
   $('toggleManualBtn').addEventListener('click', () => {
@@ -396,19 +395,17 @@ function initRegistration(){
     if (vis && manBrandSelect.options.length < 2)
       fetch('/api/brands').then(r=>r.json()).then(bs => bs.forEach(b => manBrandSelect.add(new Option(b.brand, b.UniqueID))));
   });
-  manPhoto.addEventListener('change', () => { manPhotoName.textContent = manPhoto.files.length ? `выбрано фото: ${manPhoto.files.length}` : ''; });
-  $('manRegBtn').addEventListener('click', () => {
+  manPhoto.addEventListener('change', () => { manPhotoName.textContent = manPhoto.files.length ? `выбрано фото: ${manPhoto.files.length}` : 'фото обязательно'; });
+  $('manRegBtn').addEventListener('click', async () => {
     const a = $('manRegAlert'), gnum = manGunNum.value.trim(), code = manCodeInput.value;
     if (!gnum || !code){ showAlert(a, 'warn', 'Укажите пистолет и код'); return; }
-    fetch('/api/defects/register_manual', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({g_num: parseInt(gnum), problem_code: code})})
-      .then(r=>r.json()).then(async res=>{
-        showAlert(a, res.status==='success' ? 'success' : 'danger', res.message);
-        if (res.status==='success'){
-          if (manPhoto.files.length && res.defect_id){ await uploadPhotos(res.defect_id, manPhoto.files); manPhoto.value=''; manPhotoName.textContent=''; }
-          manGunNum.value=''; manCodeInput.value=''; loadBoard();
-        }
-      });
+    if (!manPhoto.files.length){ showAlert(a, 'warn', 'Приложите фото дефекта — при фиксации это обязательно'); return; }
+    const fd = new FormData();
+    fd.append('g_num', gnum); fd.append('problem_code', code);
+    for (const f of manPhoto.files) fd.append('photo', await compressImage(f), (f.name.replace(/\.[^.]+$/, '') || 'photo') + '.jpg');
+    const res = await fetch('/api/defects/register_manual', {method:'POST', body: fd}).then(r=>r.json());
+    showAlert(a, res.status==='success' ? 'success' : 'danger', res.message);
+    if (res.status==='success'){ manGunNum.value=''; manCodeInput.value=''; manPhoto.value=''; manPhotoName.textContent='фото обязательно'; loadBoard(); }
   });
   manGunNum.addEventListener('keydown', e => { if (e.key==='Enter') $('manRegBtn').click(); });
 }

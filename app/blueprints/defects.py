@@ -36,18 +36,49 @@ def _photo_dir():
     return d
 
 
+def _valid_photo(f):
+    return bool(f and f.filename and os.path.splitext(f.filename)[1].lower() in _IMG_EXT)
+
+
+def _reg_input():
+    """Поля регистрации + список валидных фото. Поддержка multipart (форма ОТК с фото)
+    и JSON (программно/тесты)."""
+    if (request.content_type or '').startswith('multipart/'):
+        return request.form, [f for f in request.files.getlist('photo') if _valid_photo(f)]
+    return (request.get_json(silent=True) or {}), []
+
+
+def _save_photos(db, defect_id, photos, uid, dept):
+    for f in photos:
+        ext = os.path.splitext(f.filename)[1].lower()
+        fname = f'{defect_id}_{uuid.uuid4().hex}{ext}'
+        f.save(os.path.join(_photo_dir(), fname))
+        db.execute('INSERT INTO defect_photo (defect_id, path, uploaded_by, stage_dept, ts) VALUES (?,?,?,?,?)',
+                   (defect_id, fname, uid, dept, df._now()))
+
+
+def _photo_required_error(photos):
+    """Response-кортеж, если фото обязательно, но его нет; иначе None."""
+    if current_app.config.get('REQUIRE_DEFECT_PHOTO', True) and not photos:
+        return jsonify({'status': 'error', 'message': 'Приложите фото дефекта — при фиксации это обязательно'}), 400
+    return None
+
+
 @bp.route('/api/defects/register', methods=['POST'])
 def register_defect():
     uid, dept, _is_admin, priv = _ctx()
     if not (dept == 'ОТК' or priv):
         return jsonify({'status': 'error', 'message': 'Регистрировать дефекты может ОТК'}), 403
-    data = request.json or {}
+    data, photos = _reg_input()
     model_id     = data.get('model_id', '')
     spot_number  = str(data.get('spot_number', '')).strip()
     problem_code = str(data.get('problem_code', '')).strip().upper()
 
     if not model_id or not spot_number or not problem_code:
         return jsonify({'status': 'error', 'message': 'Укажите модель авто, номер точки и код дефекта'}), 400
+    err = _photo_required_error(photos)
+    if err:
+        return err
 
     db = get_db()
     row = db.execute("""
@@ -70,6 +101,7 @@ def register_defect():
         if res['serial']:
             msg = (f'⚠ ПОВТОР (серийный)! Дефект {problem_code} на точке №{spot_number} '
                    f'вернулся отделу «{res["stage"]}» на перерассмотрение.')
+        _save_photos(db, res['defect_id'], photos, uid, dept)
         snapshot_defect(db, res['defect_id'])
         db.commit()
         return jsonify({'status': 'success', 'message': msg, 'serial': res['serial'],
@@ -393,11 +425,14 @@ def register_defect_manual():
     uid, dept, _is_admin, priv = _ctx()
     if not (dept == 'ОТК' or priv):
         return jsonify({'status': 'error', 'message': 'Регистрировать дефекты может ОТК'}), 403
-    data         = request.json or {}
+    data, photos = _reg_input()
     g_num        = data.get('g_num')
     problem_code = str(data.get('problem_code', '')).strip().upper()
     if not g_num or not problem_code:
         return jsonify({'status': 'error', 'message': 'Укажите номер пистолета и код дефекта'}), 400
+    err = _photo_required_error(photos)
+    if err:
+        return err
     db  = get_db()
     try:
         gun = db.execute('SELECT UniqueID FROM gun WHERE g_num=?', (int(g_num),)).fetchone()
@@ -407,6 +442,7 @@ def register_defect_manual():
             gun_id = db.execute("INSERT INTO gun (g_num, gun_type) VALUES (?, 'Ручной ввод')",
                                 (int(g_num),)).lastrowid
         res = df.register_occurrence(db, problem_code=problem_code, gun_id=gun_id, registered_by=uid)
+        _save_photos(db, res['defect_id'], photos, uid, dept)
         snapshot_defect(db, res['defect_id'])
         db.commit()
         return jsonify({'status': 'success', 'stage': res['stage'], 'serial': res['serial'], 'defect_id': res['defect_id'],

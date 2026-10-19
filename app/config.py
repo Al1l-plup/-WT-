@@ -29,6 +29,11 @@ class Config:
     # ~300 КБ, большая вставка WB — пара МБ JSON; 64 МБ — с запасом и без риска для них.
     MAX_CONTENT_LENGTH = int(os.environ.get('MAX_CONTENT_LENGTH', 64 * 1024 * 1024))
 
+    # Фото обязательно при фиксации дефекта (ОТК прикладывает снимок). Сервер отклоняет
+    # регистрацию без фото. В тестах выключается (TestingConfig), чтобы не тащить картинку
+    # в каждый сценарий — требование проверяется отдельным тестом.
+    REQUIRE_DEFECT_PHOTO = os.environ.get('REQUIRE_DEFECT_PHOTO', '1') not in ('0', 'false', 'False', '')
+
     HOST = os.environ.get('HOST', '0.0.0.0')
     PORT = int(os.environ.get('PORT', '5000'))
 
@@ -60,6 +65,7 @@ class ProductionConfig(Config):
 class TestingConfig(Config):
     TESTING = True
     # В тестах путь к БД задаёт фикстура (копия боевой базы во временный файл).
+    REQUIRE_DEFECT_PHOTO = False   # требование фото проверяется отдельным тестом (включая флаг)
 
 
 _CONFIG_BY_NAME = {

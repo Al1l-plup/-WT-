@@ -88,6 +88,23 @@ def test_detail_and_photo(register_client):
     assert otk.get(f'/api/defects/photo/{pid}').status_code == 200
 
 
+def test_photo_required_on_registration(app):
+    """При включённом REQUIRE_DEFECT_PHOTO регистрация без фото отклоняется (400),
+    с фото (multipart) — проходит и фото прикрепляется."""
+    app.config['REQUIRE_DEFECT_PHOTO'] = True
+    c = app.test_client()
+    c.post('/register', data={'surname': 'Ф', 'name': 'О', 'department': 'ОТК',
+                              'login': 'photoreq@x.kz', 'password': 'test1234', 'password2': 'test1234'})
+    # без фото → 400
+    r = c.post('/api/defects/register_manual', json={'g_num': 70900, 'problem_code': 'CR'})
+    assert r.status_code == 400 and 'фото' in r.get_json()['message'].lower()
+    # с фото (multipart) → успех + фото в карточке
+    data = {'g_num': '70900', 'problem_code': 'CR', 'photo': (io.BytesIO(b'\x89PNG\r\n\x1a\nx'), 'd.png')}
+    j = c.post('/api/defects/register_manual', data=data, content_type='multipart/form-data').get_json()
+    assert j['status'] == 'success'
+    assert len(c.get(f"/api/defects/{j['defect_id']}").get_json()['photos']) == 1
+
+
 def test_board_mine_flag_and_priority(register_client, app):
     otk = register_client(department='ОТК')
     _reg(otk, 70060)   # встаёт на Производство
