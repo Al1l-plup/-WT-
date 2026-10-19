@@ -75,6 +75,8 @@ def me():
         'can_edit_docs': can_edit_docs(dept, is_admin),
         'pages': visible_pages(dept, is_admin),
         'must_change': bool(session.get('must_change')),
+        # обязательно ли фото при фиксации дефекта (фронт подстраивается под этот флаг)
+        'require_defect_photo': bool(current_app.config.get('REQUIRE_DEFECT_PHOTO', True)),
     })
 
 

@@ -91,7 +91,7 @@
       </div>
     </div>
     <div style="margin-top:.5rem;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
-      <label class="btn btn-ghost btn-sm">📷 Фото дефекта <span style="color:var(--danger)">*</span><input type="file" id="regPhoto" accept="image/*" multiple hidden></label>
+      <label class="btn btn-ghost btn-sm">📷 Фото дефекта <span id="regPhotoStar" style="color:var(--danger)">*</span><input type="file" id="regPhoto" accept="image/*" multiple hidden></label>
       <span class="text-sm text-muted" id="regPhotoName">фото обязательно (из WhatsApp) — сожмётся на устройстве</span>
     </div>
     <div id="regAlert" class="hidden mt-alert"></div>
@@ -118,7 +118,7 @@
         </div>
       </div>
       <div style="margin-top:.5rem">
-        <label class="btn btn-ghost btn-sm">📷 Фото дефекта <span style="color:var(--danger)">*</span><input type="file" id="manPhoto" accept="image/*" multiple hidden></label>
+        <label class="btn btn-ghost btn-sm">📷 Фото дефекта <span id="manPhotoStar" style="color:var(--danger)">*</span><input type="file" id="manPhoto" accept="image/*" multiple hidden></label>
         <span class="text-sm text-muted" id="manPhotoName" style="margin-left:.5rem">фото обязательно</span>
       </div>
       <div id="manRegAlert" class="hidden mt-alert"></div>
@@ -375,12 +375,19 @@ function initRegistration(){
   fetch('/api/defect_codes').then(r=>r.json()).then(codes => {
     [regCodeInput, manCodeInput].forEach(sel => codes.forEach(c => sel.add(new Option(`${c.code} — ${c.name}`, c.code))));
   });
-  const REG_HINT = 'фото обязательно (из WhatsApp) — сожмётся на устройстве';
+  const reqPhoto = !!ME.require_defect_photo;             // обязательность фото — из /api/me
+  const REG_HINT = reqPhoto ? 'фото обязательно (из WhatsApp) — сожмётся на устройстве' : 'фото (необязательно) — можно прикрепить';
+  const MAN_HINT = reqPhoto ? 'фото обязательно' : 'фото (необязательно)';
+  if (!reqPhoto){
+    if ($('regPhotoStar')) $('regPhotoStar').style.display = 'none';
+    if ($('manPhotoStar')) $('manPhotoStar').style.display = 'none';
+    regPhotoName.textContent = REG_HINT; manPhotoName.textContent = MAN_HINT;
+  }
   regPhoto.addEventListener('change', () => { regPhotoName.textContent = regPhoto.files.length ? `выбрано фото: ${regPhoto.files.length}` : REG_HINT; });
   $('regBtn').addEventListener('click', async () => {
     const a = $('regAlert'), model = regModelSelect.value, spot = regSpotInput.value.trim(), code = regCodeInput.value;
     if (!model || !spot || !code){ showAlert(a, 'warn', 'Выберите модель, точку и код'); return; }
-    if (!regPhoto.files.length){ showAlert(a, 'warn', 'Приложите фото дефекта — при фиксации это обязательно'); return; }
+    if (reqPhoto && !regPhoto.files.length){ showAlert(a, 'warn', 'Приложите фото дефекта — при фиксации это обязательно'); return; }
     const fd = new FormData();
     fd.append('model_id', model); fd.append('spot_number', spot); fd.append('problem_code', code);
     for (const f of regPhoto.files) fd.append('photo', await compressImage(f), (f.name.replace(/\.[^.]+$/, '') || 'photo') + '.jpg');
@@ -395,11 +402,11 @@ function initRegistration(){
     if (vis && manBrandSelect.options.length < 2)
       fetch('/api/brands').then(r=>r.json()).then(bs => bs.forEach(b => manBrandSelect.add(new Option(b.brand, b.UniqueID))));
   });
-  manPhoto.addEventListener('change', () => { manPhotoName.textContent = manPhoto.files.length ? `выбрано фото: ${manPhoto.files.length}` : 'фото обязательно'; });
+  manPhoto.addEventListener('change', () => { manPhotoName.textContent = manPhoto.files.length ? `выбрано фото: ${manPhoto.files.length}` : MAN_HINT; });
   $('manRegBtn').addEventListener('click', async () => {
     const a = $('manRegAlert'), gnum = manGunNum.value.trim(), code = manCodeInput.value;
     if (!gnum || !code){ showAlert(a, 'warn', 'Укажите пистолет и код'); return; }
-    if (!manPhoto.files.length){ showAlert(a, 'warn', 'Приложите фото дефекта — при фиксации это обязательно'); return; }
+    if (reqPhoto && !manPhoto.files.length){ showAlert(a, 'warn', 'Приложите фото дефекта — при фиксации это обязательно'); return; }
     const fd = new FormData();
     fd.append('g_num', gnum); fd.append('problem_code', code);
     for (const f of manPhoto.files) fd.append('photo', await compressImage(f), (f.name.replace(/\.[^.]+$/, '') || 'photo') + '.jpg');
