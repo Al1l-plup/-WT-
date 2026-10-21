@@ -173,8 +173,11 @@ def defects_all():
         LEFT JOIN worker w_asgn  ON d.assigned_worker_id  = w_asgn.UniqueID
         LEFT JOIN worker w_solv  ON d.worker_solve_id     = w_solv.UniqueID
     """
+    # GROUP BY d.UniqueID — одна строка на дефект: иначе джойн gun→трансформатор→станция
+    # размножает дефект, если у гана несколько активных назначений трансформатора.
     # Приоритет списка: 1) точки B → 2) серийные → 3) остальные.
-    priority = """ORDER BY CASE WHEN is_b_point THEN 0 WHEN is_serial THEN 1 ELSE 2 END,
+    priority = """GROUP BY d.UniqueID
+                  ORDER BY CASE WHEN is_b_point THEN 0 WHEN is_serial THEN 1 ELSE 2 END,
                            d.df_date DESC, d.UniqueID DESC"""
     open_rows = db.execute(base + """
         WHERE COALESCE(d.status,'registered') IN ('registered','in_work','in_review','at_oto')
@@ -184,6 +187,7 @@ def defects_all():
     """ + priority).fetchall()
     closed_rows = db.execute(base + """
         WHERE COALESCE(d.status,'registered') = 'closed'
+        GROUP BY d.UniqueID
         ORDER BY d.df_date DESC, d.UniqueID DESC LIMIT 50
     """).fetchall()
     workers = db.execute('SELECT UniqueID, surname, name FROM worker WHERE is_active=1').fetchall()

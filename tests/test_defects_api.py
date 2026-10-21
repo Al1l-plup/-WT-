@@ -1,5 +1,6 @@
 """API процесса дефектов 4M: регистрация→цепочка, действия этапа, ОТО, RBAC, фото."""
 import io
+import sqlite3
 
 
 def _reg(otk, g_num, code='CR'):
@@ -103,6 +104,25 @@ def test_photo_required_on_registration(app):
     j = c.post('/api/defects/register_manual', data=data, content_type='multipart/form-data').get_json()
     assert j['status'] == 'success'
     assert len(c.get(f"/api/defects/{j['defect_id']}").get_json()['photos']) == 1
+
+
+def test_board_no_duplicate_on_multi_assignment(client, app):
+    """Дефект на гане с НЕСКОЛЬКИМИ активными назначениями трансформатора не должен
+    дублироваться в доске (регрессия: джойн gun→трансформатор→станция размножал строки)."""
+    db = sqlite3.connect(app.config['DB_PATH'])
+    gun_id, gnum = db.execute('SELECT UniqueID, g_num FROM gun LIMIT 1').fetchone()
+    trans = [r[0] for r in db.execute('SELECT UniqueID FROM trans LIMIT 2').fetchall()]
+    if len(trans) < 2:
+        return
+    for t in trans:   # два активных назначения этому гану → раньше дефект дублировался
+        db.execute("""INSERT INTO gun_transformer_assignment
+            (start_date, end_date, is_active, comments, gun_id, transformer_id)
+            VALUES (date('now'), NULL, 1, '', ?, ?)""", (gun_id, t))
+    db.commit()
+    did = client.post('/api/defects/register_manual',
+                      json={'g_num': gnum, 'problem_code': 'CR'}).get_json()['defect_id']
+    board = client.get('/api/defects/all').get_json()
+    assert sum(1 for d in board['open'] if d['UniqueID'] == did) == 1   # ровно один раз
 
 
 def test_board_mine_flag_and_priority(register_client, app):
