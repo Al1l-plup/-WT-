@@ -158,7 +158,7 @@
 <script>
 const $ = id => document.getElementById(id);
 let ME = {}, BOARD = {open:[], unresolved:[], closed:[]}, TAB = 'mine', openId = null;
-const DEPTS = ['Производство', 'WeldTeam', 'ИТО', 'ОТО'];
+const DEPTS = ['Производство', 'WeldTeam', 'ИТО', 'ОТО', 'ОТК'];   // ОТК — чтобы можно было вернуть на исправление данных
 const STAGE_LABEL = {closed:'закрыл (на согласование ОТК)', passed:'передал дальше', returned:'вернул на доработку',
                      to_oto:'передал в ОТО', oto_done:'контрмера ОТО', reopened:'переоткрыл',
                      otk_approved:'ОТК согласовал закрытие', otk_rejected:'ОТК не согласовал — возврат'};
@@ -288,17 +288,32 @@ function renderDetail(res){
   const occ = res.occurrences.length > 1 ? `<div class="muted">Появлений: ${res.occurrences.length} (${res.occurrences.map(esc).join(', ')})</div>` : '';
   const reg = `<div class="muted" style="margin:.2rem 0">Поступил: ${esc((d.created_at||'').replace('T',' ')) || '—'}${res.station_name ? ' · станция ' + esc(res.station_name) : ''}</div>`;
 
-  const canEditStage = s => priv() || (ME.dept && s.dept === ME.dept && !s.left_at);
-  const canDelPhoto = p => priv() || (ME.dept && p.stage_dept === ME.dept && d.current_stage_dept === ME.dept);
+  const admin = !!ME.is_admin;   // правка/удаление записей: обходит ограничения только реальный админ (не WeldTeam-отдел)
+  const canEditStage = s => admin || (ME.dept && s.dept === ME.dept && !s.left_at);
+  const canDelPhoto = p => admin || (ME.dept && p.stage_dept === ME.dept && d.current_stage_dept === ME.dept);
+
+  // фото показываем ВНУТРИ этапа, где оно было добавлено (по stage_id)
+  const photoChip = p => `<span style="position:relative;display:inline-block">
+      <img src="/api/defects/photo/${p.UniqueID}" title="${esc(p.stage_dept||'')} ${esc((p.ts||'').replace('T',' '))}" onclick="window.open('/api/defects/photo/${p.UniqueID}','_blank')">
+      ${canDelPhoto(p) ? `<button title="Удалить фото" onclick="delPhoto(${d.UniqueID},${p.UniqueID})" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;line-height:1;cursor:pointer">✕</button>` : ''}
+    </span>`;
+  const stageIds = new Set(res.stages.map(s => s.stage_id));
+  const byStage = {};
+  res.photos.forEach(p => { const k = stageIds.has(p.stage_id) ? p.stage_id : 'none'; (byStage[k] = byStage[k] || []).push(p); });
+  const uploadCtl = `<label class="btn btn-ghost btn-sm" style="align-self:center">📷 Добавить фото<input type="file" accept="image/*" multiple hidden onchange="uploadPhoto(${d.UniqueID}, this)"></label>`;
 
   const timeline = res.stages.length ? `<ul class="tl">${res.stages.map(s=>{
     const act = s.left_at ? (STAGE_LABEL[s.outcome] || s.outcome || '') : 'на рассмотрении';
     const txt = [s.cause && 'Причина: '+s.cause, s.countermeasure && 'Контрмера: '+s.countermeasure, s.note && s.note].filter(Boolean).map(esc).join('\n');
     const ed = canEditStage(s);
+    const sp = byStage[s.stage_id] || [];
+    const canAddHere = !s.left_at && (admin || ME.dept === 'ОТК' || ME.dept === d.current_stage_dept);  // фото цепляется к текущему (открытому) этапу
+    const photosRow = (sp.length || canAddHere) ? `<div class="photos" style="margin-top:.4rem">${sp.map(photoChip).join('')}${canAddHere ? uploadCtl : ''}</div>` : '';
     return `<li class="${s.left_at ? '' : 'open'}">
       <div class="tl-dept">${esc(s.dept)} <span class="tl-meta">— ${esc(act)}${s.actor ? ', '+esc(s.actor) : ''}</span>${ed ? ` <button class="btn btn-ghost btn-sm" style="padding:0 .35rem" title="Править запись этапа" onclick="toggleForm('stedit-${s.stage_id}')">✎</button>` : ''}</div>
       ${txt ? `<div class="tl-txt">${txt}</div>` : ''}
       <div class="tl-meta">${esc((s.entered_at||'').replace('T',' '))}${s.left_at ? ' → '+esc(s.left_at.replace('T',' ')) : ''}</div>
+      ${photosRow}
       ${ed ? `<div class="act-form" id="stedit-${s.stage_id}" hidden style="margin-top:.4rem">
         <div class="fgroup"><label class="lbl">Причина</label><textarea id="stc-${s.stage_id}">${esc(s.cause)}</textarea></div>
         <div class="fgroup"><label class="lbl">Контрмера</label><textarea id="stm-${s.stage_id}">${esc(s.countermeasure)}</textarea></div>
@@ -308,14 +323,27 @@ function renderDetail(res){
     </li>`;
   }).join('')}</ul>` : '';
 
-  const photos = `<div class="photos">${res.photos.map(p=>`<span style="position:relative;display:inline-block">
-      <img src="/api/defects/photo/${p.UniqueID}" title="${esc(p.stage_dept||'')} ${esc((p.ts||'').replace('T',' '))}" onclick="window.open('/api/defects/photo/${p.UniqueID}','_blank')">
-      ${canDelPhoto(p) ? `<button title="Удалить фото" onclick="delPhoto(${d.UniqueID},${p.UniqueID})" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;line-height:1;cursor:pointer">✕</button>` : ''}
-    </span>`).join('')}
-    <label class="btn btn-ghost btn-sm" style="align-self:center">📷 Фото<input type="file" accept="image/*" multiple hidden onchange="uploadPhoto(${d.UniqueID}, this)"></label></div>`;
+  // старые фото без привязки к этапу — отдельным блоком снизу
+  const orphan = byStage['none'] || [];
+  const photos = orphan.length ? `<div class="muted" style="margin-top:.5rem">Фото без этапа:</div><div class="photos">${orphan.map(photoChip).join('')}</div>` : '';
 
   let actions = '';
-  if (canAct && (d.status === 'in_review' || d.status === 'registered' || d.status === 'unresolved')){
+  const otkFix = canAct && d.current_stage_dept === 'ОТК' && d.status !== 'pending_otk';   // возвращён в ОТК на исправление данных
+  if (otkFix){
+    actions = `
+      <div class="muted" style="margin:.4rem 0">Возвращено в ОТК на исправление. Поправьте код / точку / фото и передайте дальше.</div>
+      <div class="act-form">
+        <div class="fgroup"><label class="lbl">Модель</label><select id="corModel-${d.UniqueID}"></select></div>
+        <div class="fgroup"><label class="lbl">Номер точки</label><input type="text" id="corSpot-${d.UniqueID}" value="${esc(d.spot_number||'')}"></div>
+        <div class="fgroup"><label class="lbl">Код дефекта</label><input type="text" id="corCode-${d.UniqueID}" value="${esc(d.problem_code||'')}"></div>
+        <button class="btn btn-sm" onclick="correctDefect(${d.UniqueID})">Сохранить исправления</button>
+      </div>
+      <div class="act-bar"><button class="btn btn-ghost btn-sm" onclick="toggleForm('pass-${d.UniqueID}')">→ Передать дальше (в производство)</button></div>
+      <div class="act-form" id="pass-${d.UniqueID}" hidden>
+        <div class="fgroup"><label class="lbl">Комментарий (обязательно): что исправили</label><textarea id="passn-${d.UniqueID}" placeholder="напр. верный номер точки/код…"></textarea></div>
+        <button class="btn btn-ghost btn-sm" onclick="act(${d.UniqueID},'pass',{note:val('passn-${d.UniqueID}')})">Передать дальше</button>
+      </div>`;
+  } else if (canAct && (d.status === 'in_review' || d.status === 'registered' || d.status === 'unresolved')){
     actions = `
       <div class="act-bar">
         <button class="btn btn-success btn-sm" onclick="toggleForm('close-${d.UniqueID}')">✓ Закрыть</button>
@@ -378,6 +406,15 @@ function renderDetail(res){
   const delBtn = priv() ? `<button class="btn btn-ghost btn-sm" style="float:right" onclick="delDefect(${d.UniqueID})">✕ Удалить</button>` : '';
 
   body.innerHTML = ribbon + reg + occ + timeline + photos + actions + delBtn + `<div id="alert-${d.UniqueID}" class="hidden mt-alert"></div>`;
+
+  // форма исправления ОТК: подгрузить модели и предвыбрать текущую
+  const corSel = $('corModel-' + d.UniqueID);
+  if (corSel){
+    fetch('/api/models').then(r=>r.json()).then(ms=>{
+      ms.forEach(m => corSel.add(new Option(m.display_name, m.UniqueID)));
+      if (d.model_id) corSel.value = d.model_id;
+    });
+  }
 }
 
 window.toggleForm = function(id){ const f = $(id); if (f) f.hidden = !f.hidden; };
@@ -428,6 +465,17 @@ window.delPhoto = function(did, pid){
     if (res.status === 'success') fetch('/api/defects/'+did).then(r=>r.json()).then(renderDetail);
     else alert(res.message);
   });
+};
+
+window.correctDefect = function(did){
+  const model = val('corModel-'+did), spot = val('corSpot-'+did), code = val('corCode-'+did);
+  if (!model || !spot || !code) return flash(did, 'warn', 'Укажите модель, точку и код');
+  fetch(`/api/defects/${did}/correct`, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({model_id:model, spot_number:spot, problem_code:code})})
+    .then(r=>r.json()).then(res=>{
+      if (res.status === 'success') fetch('/api/defects/'+did).then(r=>r.json()).then(renderDetail);
+      else flash(did, 'danger', res.message);
+    });
 };
 
 window.saveStage = function(did, sid){

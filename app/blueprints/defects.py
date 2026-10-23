@@ -60,10 +60,10 @@ def _del_photo_file(fname):
         pass
 
 
-def _can_edit_own(owner_dept, current_stage_dept, my_dept, priv):
-    """Правило п.2 бэклога: править/удалять СВОЁ (записи/фото своего отдела), пока дефект
-    на МОЁМ этапе; после передачи — заморожено. Админ/WeldTeam (priv) — всегда."""
-    return bool(priv) or (owner_dept is not None and owner_dept == my_dept and current_stage_dept == my_dept)
+def _can_edit_own(owner_dept, current_stage_dept, my_dept, is_admin):
+    """Править/удалять СВОЁ (записи/фото своего отдела), пока дефект на МОЁМ этапе; после
+    передачи — заморожено. Эти ограничения обходит ТОЛЬКО реальный админ (не WeldTeam-как-отдел)."""
+    return bool(is_admin) or (owner_dept is not None and owner_dept == my_dept and current_stage_dept == my_dept)
 
 
 def _denied_edit():
@@ -622,6 +622,7 @@ def defect_detail(defect_id):
                d.current_stage_dept, d.delegated_from_dept, d.closed_by_dept,
                COALESCE(d.is_serial,0) as is_serial, COALESCE(d.return_count,0) as return_count,
                COALESCE(d.vin,'') as vin, COALESCE(d.created_at, d.df_date, '') as created_at,
+               COALESCE(d.manual_model_id, d.snap_model_id) as model_id,
                COALESCE(d.root_cause,'') as root_cause, COALESCE(d.solution,'') as solution,
                COALESCE(d.snap_spot_number, s.spot_number, d.manual_spot_number, '—') as spot_number,
                COALESCE(d.snap_model_name, m.model_name, '—') as model_name,
@@ -686,15 +687,16 @@ def defect_photo_upload(defect_id):
 
 @bp.route('/api/defects/<int:defect_id>/photo/<int:photo_id>', methods=['DELETE'])
 def defect_photo_delete(defect_id, photo_id):
-    """Удалить своё фото, пока дефект на этапе моего отдела (админ — любое). Чистит и файл."""
-    _uid, dept, _is_admin, priv = _ctx()
+    """Удалить своё фото (фото своего отдела), пока дефект на этапе моего отдела. Только
+    реальный админ удаляет любое. Чистит и файл."""
+    _uid, dept, is_admin, _priv = _ctx()
     db = get_db()
     p = db.execute("""SELECT dp.path, dp.stage_dept, d.current_stage_dept
                       FROM defect_photo dp JOIN defects d ON d.UniqueID=dp.defect_id
                       WHERE dp.UniqueID=? AND dp.defect_id=?""", (photo_id, defect_id)).fetchone()
     if not p:
         return jsonify({'status': 'error', 'message': 'Фото не найдено'}), 404
-    if not _can_edit_own(p['stage_dept'], p['current_stage_dept'], dept, priv):
+    if not _can_edit_own(p['stage_dept'], p['current_stage_dept'], dept, is_admin):
         return _denied_edit()
     try:
         db.execute('DELETE FROM defect_photo WHERE UniqueID=?', (photo_id,))
@@ -708,9 +710,9 @@ def defect_photo_delete(defect_id, photo_id):
 
 @bp.route('/api/defects/<int:defect_id>/stage/<int:stage_id>', methods=['PATCH', 'POST'])
 def defect_stage_edit(defect_id, stage_id):
-    """Правка комментария своего этапа (cause/countermeasure/note), пока дефект на моём
-    этапе (этап не закрыт). Чужой/замороженный этап — только админ. Правка идёт в аудит."""
-    _uid, dept, _is_admin, priv = _ctx()
+    """Правка комментария СВОЕГО этапа (cause/countermeasure/note), пока дефект на моём
+    этапе (этап не закрыт). Чужой/замороженный этап — только реальный админ. Правка — в аудит."""
+    _uid, dept, is_admin, _priv = _ctx()
     data = request.json or {}
     db = get_db()
     st = db.execute("""SELECT s.dept, s.left_at, d.current_stage_dept
@@ -719,7 +721,7 @@ def defect_stage_edit(defect_id, stage_id):
     if not st:
         return jsonify({'status': 'error', 'message': 'Этап не найден'}), 404
     frozen = st['left_at'] is not None            # этап закрыт и передан дальше → заморожен
-    if not (priv or (st['dept'] == dept and not frozen)):
+    if not (is_admin or (st['dept'] == dept and not frozen)):
         return _denied_edit()
     fields = {k: (data.get(k) or '').strip() for k in ('cause', 'countermeasure', 'note') if k in data}
     if not fields:
@@ -729,6 +731,49 @@ def defect_stage_edit(defect_id, stage_id):
         db.execute(f'UPDATE defect_stage SET {sets} WHERE UniqueID=?', (*fields.values(), stage_id))
         db.commit()
         return jsonify({'status': 'success', 'message': 'Запись этапа обновлена'})
+    except Exception as e:
+        db.rollback()
+        return api_error(e)
+
+
+@bp.route('/api/defects/<int:defect_id>/correct', methods=['POST'])
+def defect_correct(defect_id):
+    """ОТК исправляет справочные данные дефекта (код/модель/номер точки), пока дефект ВОЗВРАЩЁН
+    на этап ОТК (bounce в ОТК). Точку перепривязываем как при регистрации, снимок переснимаем.
+    Можно приложить фото (ляжет на текущий этап ОТК). Реальный админ — всегда."""
+    uid, dept, is_admin, _priv = _ctx()
+    data, photos = _reg_input()
+    db = get_db()
+    d = db.execute('SELECT current_stage_dept FROM defects WHERE UniqueID=?', (defect_id,)).fetchone()
+    if not d:
+        return jsonify({'status': 'error', 'message': 'Дефект не найден'}), 404
+    if not (is_admin or (dept == 'ОТК' and d['current_stage_dept'] == 'ОТК')):
+        return jsonify({'status': 'error',
+                        'message': 'Исправлять данные может ОТК, пока дефект возвращён на этап ОТК'}), 403
+    code = str(data.get('problem_code', '')).strip().upper()
+    spot_number = str(data.get('spot_number', '')).strip()
+    model_id = data.get('model_id')
+    if not code or not spot_number or not model_id:
+        return jsonify({'status': 'error', 'message': 'Укажите код, модель и номер точки'}), 400
+    try:
+        row = db.execute("""SELECT s.UniqueID as spot_id, ws.gun_id FROM spot s
+                            JOIN welding_setup ws ON s.UniqueID = ws.spot_id AND ws.is_active = 1
+                            WHERE s.spot_number=? AND s.model_id=? LIMIT 1""",
+                         (spot_number, int(model_id))).fetchone()
+        if row:
+            db.execute("""UPDATE defects SET problem_code=?, spot_id=?, gun_id=?,
+                            manual_spot_number=NULL, manual_model_id=NULL WHERE UniqueID=?""",
+                       (code, row['spot_id'], row['gun_id'], defect_id))
+        else:
+            db.execute("""UPDATE defects SET problem_code=?, spot_id=NULL, gun_id=NULL,
+                            manual_spot_number=?, manual_model_id=? WHERE UniqueID=?""",
+                       (code, spot_number, int(model_id), defect_id))
+        if photos:
+            _save_photos(db, defect_id, photos, uid)
+        snapshot_defect(db, defect_id)
+        db.commit()
+        msg = 'Данные исправлены' if row else 'Данные исправлены (точка не найдена в БД — сохранена как ручная)'
+        return jsonify({'status': 'success', 'message': msg, 'found_in_db': bool(row)})
     except Exception as e:
         db.rollback()
         return api_error(e)

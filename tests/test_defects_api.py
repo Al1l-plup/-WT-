@@ -151,6 +151,33 @@ def test_otk_reject_photo_flag_off(register_client, app):
                     json={'action': 'otk_reject', 'reason': 'x'}).get_json()['status'] == 'success'   # без фото ок
 
 
+def test_otk_correct_point_and_code(register_client, app):
+    """Производство возвращает в ОТК → ОТК правит код/точку → снимок обновлён → передаёт в цепочку."""
+    otk = register_client(department='ОТК')
+    prod = register_client(department='Производство', login='cor_prod@x.kz')
+    did = _reg(otk, 95500)['defect_id']   # дефект на Производстве
+    # вернуть в ОТК (bounce, комментарий обязателен)
+    assert prod.post(f'/api/defects/{did}/act',
+                     json={'action': 'bounce', 'to_dept': 'ОТК', 'reason': 'не та точка'}).get_json()['status'] == 'success'
+    assert otk.get(f'/api/defects/{did}').get_json()['defect']['current_stage_dept'] == 'ОТК'
+    db = sqlite3.connect(app.config['DB_PATH'])
+    spot_number, model_id = db.execute("""SELECT s.spot_number, s.model_id FROM spot s
+        JOIN welding_setup ws ON ws.spot_id=s.UniqueID AND ws.is_active=1 LIMIT 1""").fetchone()
+    db.close()
+    # чужой отдел исправлять не может
+    assert prod.post(f'/api/defects/{did}/correct',
+                     json={'problem_code': 'LP', 'model_id': model_id, 'spot_number': str(spot_number)}).status_code == 403
+    # ОТК исправляет код + точку → точка перепривязана, снимок обновлён
+    r = otk.post(f'/api/defects/{did}/correct',
+                 json={'problem_code': 'LP', 'model_id': model_id, 'spot_number': str(spot_number)}).get_json()
+    assert r['status'] == 'success' and r['found_in_db'] is True
+    det = otk.get(f'/api/defects/{did}').get_json()['defect']
+    assert det['problem_code'] == 'LP' and det['spot_number'] == str(spot_number)
+    # ОТК передаёт дальше → Производство (начало цепочки)
+    assert 'Производство' in otk.post(f'/api/defects/{did}/act',
+                                      json={'action': 'pass', 'note': 'исправлено'}).get_json()['message']
+
+
 def test_pass_to_unresolved(register_client):
     otk = register_client(department='ОТК')
     did = _reg(otk, 70040)['defect_id']
