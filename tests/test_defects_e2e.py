@@ -55,9 +55,8 @@ def test_e2e_full_chain_and_stage_rbac(register_client):
     assert _act(u['prod'], did, 'pass', note='оператор ок, параметры в норме').get_json()['message'].find('WeldTeam') >= 0
     # теперь Производство уже не на этапе
     assert _act(u['prod'], did, 'pass', note='x').status_code == 403
-    # WeldTeam закрывает (нужна контрмера и VIN) → на согласование ОТК
-    assert _act(u['wt'], did, 'close').status_code == 400
-    assert _act(u['wt'], did, 'close', cause='перегрев', countermeasure='снизили ток').status_code == 400  # без VIN
+    # WeldTeam закрывает (нужна контрмера; VIN — по станции, здесь передаём) → на согласование ОТК
+    assert _act(u['wt'], did, 'close').status_code == 400           # без контрмеры
     assert _act(u['wt'], did, 'close', cause='перегрев', countermeasure='снизили ток', vin='XW8AN2').get_json()['status'] == 'success'
     # пока на согласовании ОТК — ещё не в закрытых
     assert not any(d['UniqueID'] == did for d in u['otk'].get('/api/defects/all').get_json()['closed'])

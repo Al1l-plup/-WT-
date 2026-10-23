@@ -282,6 +282,7 @@ function renderDetail(res){
   const d = res.defect, body = $('body-'+d.UniqueID); if (!body) return;
   const canAct = priv() || (ME.dept && ME.dept === d.current_stage_dept);
   const canOto = d.status === 'at_oto' && (ME.dept === 'ОТО' || priv());
+  const vinReq = !!res.vin_required;   // VIN нужен только для станций MB/UB
 
   const ribbon = d.is_b_point ? `<div class="b-ribbon">⚠ ТОЧКА ГРУППЫ B — требует немедленного вмешательства</div>` : '';
   const occ = res.occurrences.length > 1 ? `<div class="muted">Появлений: ${res.occurrences.length} (${res.occurrences.map(esc).join(', ')})</div>` : '';
@@ -324,7 +325,9 @@ function renderDetail(res){
       <div class="act-form" id="close-${d.UniqueID}" hidden>
         <div class="fgroup"><label class="lbl">Коренная причина</label><textarea id="cause-${d.UniqueID}" placeholder="предполагаемая причина…"></textarea></div>
         <div class="fgroup"><label class="lbl">Контрмера (обязательно)</label><textarea id="cm-${d.UniqueID}" placeholder="что сделано…"></textarea></div>
-        <div class="fgroup"><label class="lbl">VIN — на каком авто проверили и решили закрыть (обязательно)</label><input type="text" id="vin-${d.UniqueID}" placeholder="VIN или последние 4"></div>
+        ${vinReq
+          ? `<div class="fgroup"><label class="lbl">VIN — на каком авто проверили и решили закрыть (обязательно, станция MB/UB)</label><input type="text" id="vin-${d.UniqueID}" placeholder="VIN или последние 4"></div>`
+          : `<div class="muted" style="margin:.2rem 0">Станция «${esc(res.station_name || '—')}» — VIN не нужен, достаточно контрмеры (время фиксируется автоматически).</div>`}
         <button class="btn btn-success btn-sm" onclick="act(${d.UniqueID},'close',{cause:val('cause-${d.UniqueID}'),countermeasure:val('cm-${d.UniqueID}'),vin:val('vin-${d.UniqueID}')})">Закрыть → на согласование ОТК</button>
       </div>
       <div class="act-form" id="pass-${d.UniqueID}" hidden>
@@ -380,7 +383,7 @@ window.val = id => { const e = $(id); return e ? e.value.trim() : ''; };
 
 window.act = function(id, action, extra){
   if (action === 'close' && !extra.countermeasure){ return flash(id, 'warn', 'Укажите контрмеру'); }
-  if (action === 'close' && !extra.vin){ return flash(id, 'warn', 'Укажите VIN — на каком авто решили закрыть'); }
+  if (action === 'close' && $('vin-'+id) && !extra.vin){ return flash(id, 'warn', 'Станция MB/UB — укажите VIN'); }
   if (action === 'otk_reject' && !extra.reason){ return flash(id, 'warn', 'Добавьте комментарий — почему не согласовано'); }
   if (action === 'bounce' && !extra.to_dept){ return flash(id, 'warn', 'Выберите отдел'); }
   if (action === 'bounce' && !extra.reason){ return flash(id, 'warn', 'Добавьте комментарий — причину возврата'); }

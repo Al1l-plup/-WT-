@@ -60,6 +60,46 @@ def serial_window_days(conn):
         return 2
 
 
+# ── VIN по типу станции ──────────────────────────────────────────────────────
+def station_segment(name):
+    """Сегмент-токен имени станции: 'GW-MB-150'→'MB', 'GW-BS R-40'→'BS'. Пусто → ''."""
+    if not name:
+        return ''
+    parts = str(name).split('-')
+    if len(parts) < 2:
+        return ''
+    return parts[1].split()[0].strip().upper()
+
+
+def vin_required_segments(conn):
+    """Множество сегментов станций, при которых закрытие требует VIN (по умолчанию MB/UB).
+    Редактируется в «Редакторе» → «Параметры дефектов» (defect_config.vin_required_segments)."""
+    r = conn.execute("SELECT value FROM defect_config WHERE key='vin_required_segments'").fetchone()
+    raw = r[0] if r and r[0] else 'MB,UB'
+    return {s.strip().upper() for s in raw.split(',') if s.strip()}
+
+
+def station_name_for(conn, defect_id):
+    """Имя станции дефекта: снимок snap_station_name; иначе live через gun→трансформатор→станцию.
+    Для ручных/пистолетных дефектов может быть None (станция не определена)."""
+    r = conn.execute('SELECT snap_station_name FROM defects WHERE UniqueID=?', (defect_id,)).fetchone()
+    if r and r[0]:
+        return r[0]
+    r2 = conn.execute("""SELECT st.station_name
+        FROM defects d JOIN gun g ON d.gun_id=g.UniqueID
+        JOIN gun_transformer_assignment gta ON gta.gun_id=g.UniqueID AND gta.is_active=1
+        JOIN transformer_station_assignment tsa ON tsa.transformer_id=gta.transformer_id AND tsa.is_active=1
+        JOIN station st ON st.UniqueID=tsa.station_id
+        WHERE d.UniqueID=? LIMIT 1""", (defect_id,)).fetchone()
+    return r2[0] if r2 else None
+
+
+def vin_required(conn, defect_id):
+    """Нужен ли VIN при закрытии этого дефекта: True только для станций MB/UB (по конфигу).
+    Подсборка и неизвестная станция → False (хватит контрмеры/комментария; время — автоматом)."""
+    return station_segment(station_name_for(conn, defect_id)) in vin_required_segments(conn)
+
+
 # ── этапы (defect_stage) ─────────────────────────────────────────────────────
 def _open_stage(conn, defect_id, dept, actor_id=None, note=None):
     conn.execute('INSERT INTO defect_stage (defect_id, dept, entered_at, actor_id, note) VALUES (?,?,?,?,?)',

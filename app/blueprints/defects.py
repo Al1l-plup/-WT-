@@ -523,9 +523,9 @@ def defect_act(defect_id):
             if not cm:
                 return jsonify({'status': 'error', 'message': 'Укажите контрмеру'}), 400
             vin = (data.get('vin') or '').strip()
-            if not vin:
+            if df.vin_required(db, defect_id) and not vin:
                 return jsonify({'status': 'error',
-                                'message': 'Укажите VIN — на каком авто проверили и решили закрыть'}), 400
+                                'message': 'Станция MB/UB — укажите VIN (на каком авто проверили и решили закрыть)'}), 400
             df.act_close(db, defect_id, acting, uid, (data.get('cause') or '').strip(), cm, vin)
             msg = 'Закрыто отделом — отправлено на согласование в ОТК'
         elif action == 'otk_approve':
@@ -640,6 +640,8 @@ def defect_detail(defect_id):
                     'stages': [dict(r) for r in stages],
                     'occurrences': [r['occ_date'] for r in occ],
                     'photos': [dict(p) for p in photos],
+                    'vin_required': df.vin_required(db, defect_id),
+                    'station_name': df.station_name_for(db, defect_id),
                     'my_dept': session.get('dept'),
                     'privileged': bool(session.get('is_admin') or session.get('dept') == 'WeldTeam')})
 

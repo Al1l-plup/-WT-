@@ -33,10 +33,8 @@ def test_stage_flow_and_rbac(register_client):
     assert r['status'] == 'success' and 'WeldTeam' in r['message']
     # теперь Производство не на этапе → 403
     assert prod.post(f'/api/defects/{did}/act', json={'action': 'close', 'countermeasure': 'x'}).status_code == 403
-    # закрытие требует контрмеру…
+    # закрытие требует контрмеру
     assert wt.post(f'/api/defects/{did}/act', json={'action': 'close'}).status_code == 400
-    # …и VIN
-    assert wt.post(f'/api/defects/{did}/act', json={'action': 'close', 'countermeasure': 'm'}).status_code == 400
     # WeldTeam закрывает (с VIN) → на согласование ОТК (pending_otk)
     assert wt.post(f'/api/defects/{did}/act',
                    json={'action': 'close', 'cause': 'c', 'countermeasure': 'm', 'vin': 'XW8Z0001'}).get_json()['status'] == 'success'
@@ -93,10 +91,8 @@ def test_close_requires_vin_and_otk_approval(register_client):
     не согласует → возврат отделу, который закрывал (+возврат в счётчик)."""
     otk = register_client(department='ОТК')
     prod = register_client(department='Производство', login='vin_prod@x.kz')
-    # ── ветка «ОТК согласовал» ──
+    # ── ветка «ОТК согласовал» ── (VIN принимается; требование VIN по станции см. test_defect_station_vin)
     did = _reg(otk, 70080)['defect_id']
-    assert prod.post(f'/api/defects/{did}/act',
-                     json={'action': 'close', 'countermeasure': 'm'}).status_code == 400   # без VIN
     assert prod.post(f'/api/defects/{did}/act',
                      json={'action': 'close', 'countermeasure': 'm', 'vin': 'XW8ABC1234'}).get_json()['status'] == 'success'
     det = otk.get(f'/api/defects/{did}').get_json()
