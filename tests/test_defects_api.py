@@ -110,11 +110,45 @@ def test_close_requires_vin_and_otk_approval(register_client):
     did2 = _reg(otk, 70081)['defect_id']
     prod.post(f'/api/defects/{did2}/act', json={'action': 'close', 'countermeasure': 'm', 'vin': 'Z'})
     assert otk.post(f'/api/defects/{did2}/act', json={'action': 'otk_reject'}).status_code == 400   # нужен комментарий
+    # при reject обязательно фото — приложим (попадёт на этап ОТК)
+    otk.post(f'/api/defects/{did2}/photo',
+             data={'photo': (io.BytesIO(b'\x89PNG\r\n\x1a\nx'), 'r.png')}, content_type='multipart/form-data')
     r = otk.post(f'/api/defects/{did2}/act', json={'action': 'otk_reject', 'reason': 'точка дефектная'}).get_json()
     assert r['status'] == 'success' and 'Производство' in r['message']
     det2 = prod.get(f'/api/defects/{did2}').get_json()
     assert det2['defect']['status'] == 'in_review' and det2['defect']['current_stage_dept'] == 'Производство'
     assert det2['defect']['return_count'] == 1
+
+
+def test_otk_reject_requires_photo(register_client):
+    """ОТК при «не согласовано» обязан приложить фото (+ комментарий)."""
+    otk = register_client(department='ОТК')
+    prod = register_client(department='Производство', login='rp_prod@x.kz')
+    did = _reg(otk, 70090)['defect_id']
+    assert prod.post(f'/api/defects/{did}/act',
+                     json={'action': 'close', 'countermeasure': 'ок', 'vin': 'X'}).get_json()['status'] == 'success'
+    # reject без фото → 400 (комментарий есть, фото нет)
+    assert otk.post(f'/api/defects/{did}/act',
+                    json={'action': 'otk_reject', 'reason': 'точка не держит'}).status_code == 400
+    # приложить фото (попадёт на этап ОТК) → reject проходит
+    otk.post(f'/api/defects/{did}/photo',
+             data={'photo': (io.BytesIO(b'\x89PNG\r\n\x1a\nx'), 'r.png')}, content_type='multipart/form-data')
+    assert otk.post(f'/api/defects/{did}/act',
+                    json={'action': 'otk_reject', 'reason': 'точка не держит'}).get_json()['status'] == 'success'
+
+
+def test_otk_reject_photo_flag_off(register_client, app):
+    """Флаг require_reject_photo='0' (правится в Редакторе) → фото при reject не требуется."""
+    c = sqlite3.connect(app.config['DB_PATH'])
+    c.execute("UPDATE defect_config SET value='0' WHERE key='require_reject_photo'")
+    c.commit()
+    c.close()
+    otk = register_client(department='ОТК')
+    prod = register_client(department='Производство', login='rpf_prod@x.kz')
+    did = _reg(otk, 70091)['defect_id']
+    prod.post(f'/api/defects/{did}/act', json={'action': 'close', 'countermeasure': 'ок', 'vin': 'X'})
+    assert otk.post(f'/api/defects/{did}/act',
+                    json={'action': 'otk_reject', 'reason': 'x'}).get_json()['status'] == 'success'   # без фото ок
 
 
 def test_pass_to_unresolved(register_client):

@@ -100,6 +100,14 @@ def vin_required(conn, defect_id):
     return station_segment(station_name_for(conn, defect_id)) in vin_required_segments(conn)
 
 
+def config_flag(conn, key, default=True):
+    """Булев флаг из defect_config (редактируется в Редакторе). '0'/'false'/'no'/'off'/'' → False."""
+    r = conn.execute('SELECT value FROM defect_config WHERE key=?', (key,)).fetchone()
+    if not r or r[0] is None:
+        return bool(default)
+    return str(r[0]).strip().lower() not in ('0', 'false', 'no', 'off', '')
+
+
 # ── этапы (defect_stage) ─────────────────────────────────────────────────────
 def _open_stage(conn, defect_id, dept, actor_id=None, note=None):
     conn.execute('INSERT INTO defect_stage (defect_id, dept, entered_at, actor_id, note) VALUES (?,?,?,?,?)',

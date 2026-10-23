@@ -160,7 +160,10 @@ def test_e2e_otk_approval_cycle(register_client):
     # Производство закрывает с VIN → на согласование ОТК (pending_otk)
     assert _act(u['prod'], did, 'close', cause='x', countermeasure='y', vin='VINAAA').get_json()['status'] == 'success'
     # ОТК не согласовал (нужен комментарий) → возврат Производству
-    assert _act(u['otk'], did, 'otk_reject').status_code == 400
+    assert _act(u['otk'], did, 'otk_reject').status_code == 400   # без комментария
+    # при reject ОТК обязан приложить фото (попадёт на этап ОТК)
+    u['otk'].post(f'/api/defects/{did}/photo',
+                  data={'photo': (io.BytesIO(b'\x89PNG\r\n\x1a\nx'), 'r.png')}, content_type='multipart/form-data')
     assert _act(u['otk'], did, 'otk_reject', reason='точка не держит').get_json()['message'].find('Производство') >= 0
     det = u['otk'].get(f'/api/defects/{did}').get_json()
     assert det['defect']['status'] == 'in_review' and det['defect']['current_stage_dept'] == 'Производство'

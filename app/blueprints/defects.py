@@ -544,6 +544,13 @@ def defect_act(defect_id):
             if not reason:
                 return jsonify({'status': 'error',
                                 'message': 'Добавьте комментарий — почему закрытие не согласовано'}), 400
+            if df.config_flag(db, 'require_reject_photo', True):
+                sid, _ = _photo_stage(db, defect_id)      # текущий открытый этап = ОТК
+                has_photo = db.execute('SELECT 1 FROM defect_photo WHERE defect_id=? AND stage_id=? LIMIT 1',
+                                       (defect_id, sid)).fetchone()
+                if not has_photo:
+                    return jsonify({'status': 'error',
+                                    'message': 'Приложите фото — подтвердите, что точка не закрыта'}), 400
             back = df.act_otk_reject(db, defect_id, uid, reason)
             msg = f'Закрытие не согласовано — возврат отделу «{back}»'
         elif action == 'pass':

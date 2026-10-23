@@ -353,7 +353,8 @@ function renderDetail(res){
       </div>
       <div class="act-form" id="otkrej-${d.UniqueID}" hidden>
         <div class="fgroup"><label class="lbl">Почему не согласовано (обязательно)</label><textarea id="otkr-${d.UniqueID}" placeholder="что не так с точкой…"></textarea></div>
-        <button class="btn btn-warn btn-sm" onclick="act(${d.UniqueID},'otk_reject',{reason:val('otkr-${d.UniqueID}')})">Вернуть закрывшему отделу</button>
+        <div class="fgroup"><label class="lbl">Фото (обязательно) — подтвердите, что точка не закрыта</label><input type="file" accept="image/*" multiple id="otkrejph-${d.UniqueID}"></div>
+        <button class="btn btn-warn btn-sm" onclick="rejectOtk(${d.UniqueID})">Вернуть закрывшему отделу</button>
       </div>`;
   }
   if (canOto){
@@ -404,6 +405,20 @@ window.uploadPhoto = async function(id, input){
   await uploadPhotos(id, input.files);
   input.value = '';
   fetch('/api/defects/'+id).then(r=>r.json()).then(renderDetail);
+};
+
+window.rejectOtk = async function(did){
+  const reason = val('otkr-'+did);
+  if (!reason) return flash(did, 'warn', 'Добавьте комментарий — почему не согласовано');
+  const inp = $('otkrejph-'+did);
+  if (!inp || !inp.files.length) return flash(did, 'warn', 'Приложите фото — подтвердите, что точка не закрыта');
+  await uploadPhotos(did, inp.files);   // фото прикрепится к этапу ОТК (текущему)
+  fetch(`/api/defects/${did}/act`, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'otk_reject', reason})})
+    .then(r=>r.json()).then(res=>{
+      if (res.status === 'success'){ openId = null; loadBoard(); }
+      else flash(did, 'danger', res.message);
+    });
 };
 
 window.delPhoto = function(did, pid){
