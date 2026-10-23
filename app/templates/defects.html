@@ -286,6 +286,7 @@ function renderDetail(res){
 
   const ribbon = d.is_b_point ? `<div class="b-ribbon">⚠ ТОЧКА ГРУППЫ B — требует немедленного вмешательства</div>` : '';
   const occ = res.occurrences.length > 1 ? `<div class="muted">Появлений: ${res.occurrences.length} (${res.occurrences.map(esc).join(', ')})</div>` : '';
+  const reg = `<div class="muted" style="margin:.2rem 0">Поступил: ${esc((d.created_at||'').replace('T',' ')) || '—'}${res.station_name ? ' · станция ' + esc(res.station_name) : ''}</div>`;
 
   const canEditStage = s => priv() || (ME.dept && s.dept === ME.dept && !s.left_at);
   const canDelPhoto = p => priv() || (ME.dept && p.stage_dept === ME.dept && d.current_stage_dept === ME.dept);
@@ -376,7 +377,7 @@ function renderDetail(res){
 
   const delBtn = priv() ? `<button class="btn btn-ghost btn-sm" style="float:right" onclick="delDefect(${d.UniqueID})">✕ Удалить</button>` : '';
 
-  body.innerHTML = ribbon + occ + timeline + photos + actions + delBtn + `<div id="alert-${d.UniqueID}" class="hidden mt-alert"></div>`;
+  body.innerHTML = ribbon + reg + occ + timeline + photos + actions + delBtn + `<div id="alert-${d.UniqueID}" class="hidden mt-alert"></div>`;
 }
 
 window.toggleForm = function(id){ const f = $(id); if (f) f.hidden = !f.hidden; };

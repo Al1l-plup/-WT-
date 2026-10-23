@@ -20,6 +20,7 @@ from flask import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from app import defect_flow as df
 from app.constants import DEPARTMENTS
 from app.db import get_db
 from app.errors import api_error
@@ -75,8 +76,9 @@ def me():
         'can_edit_docs': can_edit_docs(dept, is_admin),
         'pages': visible_pages(dept, is_admin),
         'must_change': bool(session.get('must_change')),
-        # обязательно ли фото при фиксации дефекта (фронт подстраивается под этот флаг)
-        'require_defect_photo': bool(current_app.config.get('REQUIRE_DEFECT_PHOTO', True)),
+        # обязательно ли фото при фиксации дефекта (из defect_config, правится в Редакторе)
+        'require_defect_photo': df.config_flag(get_db(), 'require_defect_photo',
+                                               current_app.config.get('REQUIRE_DEFECT_PHOTO', False)),
     })
 
 

@@ -94,9 +94,11 @@ def _save_photos(db, defect_id, photos, uid):
                    (defect_id, fname, uid, sdept, sid, df._now()))
 
 
-def _photo_required_error(photos):
-    """Response-кортеж, если фото обязательно, но его нет; иначе None."""
-    if current_app.config.get('REQUIRE_DEFECT_PHOTO', True) and not photos:
+def _photo_required_error(db, photos):
+    """Response-кортеж, если фото при регистрации обязательно, но его нет; иначе None.
+    Флаг require_defect_photo — из defect_config (правится в Редакторе); дефолт — из config."""
+    default = current_app.config.get('REQUIRE_DEFECT_PHOTO', False)
+    if df.config_flag(db, 'require_defect_photo', default) and not photos:
         return jsonify({'status': 'error', 'message': 'Приложите фото дефекта — при фиксации это обязательно'}), 400
     return None
 
@@ -113,7 +115,7 @@ def register_defect():
 
     if not model_id or not spot_number or not problem_code:
         return jsonify({'status': 'error', 'message': 'Укажите модель авто, номер точки и код дефекта'}), 400
-    err = _photo_required_error(photos)
+    err = _photo_required_error(get_db(), photos)
     if err:
         return err
 
@@ -479,7 +481,7 @@ def register_defect_manual():
     problem_code = str(data.get('problem_code', '')).strip().upper()
     if not g_num or not problem_code:
         return jsonify({'status': 'error', 'message': 'Укажите номер пистолета и код дефекта'}), 400
-    err = _photo_required_error(photos)
+    err = _photo_required_error(get_db(), photos)
     if err:
         return err
     db  = get_db()
@@ -619,7 +621,7 @@ def defect_detail(defect_id):
         SELECT d.UniqueID, d.df_date, d.problem_code, COALESCE(d.status,'registered') as status,
                d.current_stage_dept, d.delegated_from_dept, d.closed_by_dept,
                COALESCE(d.is_serial,0) as is_serial, COALESCE(d.return_count,0) as return_count,
-               COALESCE(d.vin,'') as vin,
+               COALESCE(d.vin,'') as vin, COALESCE(d.created_at, d.df_date, '') as created_at,
                COALESCE(d.root_cause,'') as root_cause, COALESCE(d.solution,'') as solution,
                COALESCE(d.snap_spot_number, s.spot_number, d.manual_spot_number, '—') as spot_number,
                COALESCE(d.snap_model_name, m.model_name, '—') as model_name,

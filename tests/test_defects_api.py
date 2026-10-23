@@ -188,9 +188,12 @@ def test_detail_and_photo(register_client):
 
 
 def test_photo_required_on_registration(app):
-    """При включённом REQUIRE_DEFECT_PHOTO регистрация без фото отклоняется (400),
-    с фото (multipart) — проходит и фото прикрепляется."""
-    app.config['REQUIRE_DEFECT_PHOTO'] = True
+    """При require_defect_photo='1' (из defect_config, правится в Редакторе) регистрация без
+    фото отклоняется (400); с фото (multipart) — проходит и фото прикрепляется."""
+    db = sqlite3.connect(app.config['DB_PATH'])
+    db.execute("INSERT OR REPLACE INTO defect_config (key, value) VALUES ('require_defect_photo', '1')")
+    db.commit()
+    db.close()
     c = app.test_client()
     c.post('/register', data={'surname': 'Ф', 'name': 'О', 'department': 'ОТК',
                               'login': 'photoreq@x.kz', 'password': 'test1234', 'password2': 'test1234'})
@@ -202,6 +205,14 @@ def test_photo_required_on_registration(app):
     j = c.post('/api/defects/register_manual', data=data, content_type='multipart/form-data').get_json()
     assert j['status'] == 'success'
     assert len(c.get(f"/api/defects/{j['defect_id']}").get_json()['photos']) == 1
+
+
+def test_registration_sets_created_at(client):
+    """Время поступления дефекта фиксируется (created_at — ISO datetime со временем)."""
+    did = client.post('/api/defects/register_manual',
+                      json={'g_num': 70950, 'problem_code': 'CR'}).get_json()['defect_id']
+    ca = client.get(f'/api/defects/{did}').get_json()['defect']['created_at']
+    assert ca and 'T' in ca   # не только дата, но и время
 
 
 def test_board_no_duplicate_on_multi_assignment(client, app):

@@ -276,10 +276,10 @@ def register_occurrence(conn, *, problem_code, spot_id=None, gun_id=None, regist
         back = reopen_as_serial(conn, parent, when, registered_by)
         return {'defect_id': parent, 'serial': True, 'stage': back}
     cur = conn.execute("""INSERT INTO defects
-            (problem_code, root_cause, solution, df_date, spot_id, gun_id, status,
+            (problem_code, root_cause, solution, df_date, created_at, spot_id, gun_id, status,
              manual_spot_number, manual_model_id, worker_register_id)
-            VALUES (?, '', '', ?, ?, ?, 'registered', ?, ?, ?)""",
-                       (code, when, spot_id, gun_id, manual_spot_number, manual_model_id, registered_by))
+            VALUES (?, '', '', ?, ?, ?, ?, 'registered', ?, ?, ?)""",
+                       (code, when, _now(), spot_id, gun_id, manual_spot_number, manual_model_id, registered_by))
     did = cur.lastrowid
     conn.execute('INSERT INTO defect_occurrence (defect_id, occ_date, registered_by) VALUES (?,?,?)',
                  (did, when, registered_by))
