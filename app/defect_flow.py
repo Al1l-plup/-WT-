@@ -231,13 +231,15 @@ def act_oto_countermeasure(conn, defect_id, actor_id, countermeasure):
 
 # ── серийность / регистрация ─────────────────────────────────────────────────
 def find_serial_parent(conn, spot_id, code, when):
-    """Недавно ЗАКРЫТЫЙ дефект на той же точке в той же группе в пределах окна — иначе None."""
+    """Недавний дефект на ТОЙ ЖЕ точке в ТОЙ ЖЕ группе в пределах окна — иначе None.
+    Недельное правило: повтор на точке = серия ВСЕГДА, независимо от статуса прежнего
+    (открыт он или уже закрыт). Берём самый свежий подходящий дефект на точке."""
     if not spot_id:
         return None
     grp = series_group(code)
     win = serial_window_days(conn)
     rows = conn.execute("""SELECT UniqueID, problem_code, df_date FROM defects
-                           WHERE spot_id=? AND COALESCE(status,'') IN ('closed','pending_otk')
+                           WHERE spot_id=?
                            ORDER BY df_date DESC, UniqueID DESC LIMIT 30""", (spot_id,)).fetchall()
     for did, pcode, ddate in rows:
         if series_group(pcode) != grp:
@@ -246,6 +248,14 @@ def find_serial_parent(conn, spot_id, code, when):
         if _days_between(last or ddate, when) <= win:
             return did
     return None
+
+
+def merge_into_open(conn, parent_id, when, registered_by):
+    """Повтор на ещё ОТКРЫТОМ дефекте: доливаем появление и помечаем серийным, этап/статус
+    не трогаем (дефект уже у кого-то на рассмотрении) — новую карточку не плодим."""
+    conn.execute('UPDATE defects SET is_serial=1 WHERE UniqueID=?', (parent_id,))
+    conn.execute('INSERT INTO defect_occurrence (defect_id, occ_date, registered_by) VALUES (?,?,?)',
+                 (parent_id, when, registered_by))
 
 
 def reopen_as_serial(conn, parent_id, when, registered_by):
@@ -267,13 +277,20 @@ def reopen_as_serial(conn, parent_id, when, registered_by):
 
 def register_occurrence(conn, *, problem_code, spot_id=None, gun_id=None, registered_by=None,
                         when=None, manual_spot_number=None, manual_model_id=None):
-    """Зафиксировать дефект: если это серийный повтор — переоткрыть родителя; иначе создать
-    новый и завести в цепочку. Возвращает {defect_id, serial, stage}."""
+    """Зафиксировать дефект. Серийный повтор на той же точке (в окне, та же группа):
+    — если прежний дефект уже закрыт/не выявлен → переоткрыть его как серийный;
+    — если он ещё открыт → долить появление в него (не плодя карточку).
+    Иначе — создать новый и завести в цепочку. Возвращает {defect_id, serial, stage}."""
     when = when or date.today().isoformat()
     code = (problem_code or '').strip().upper()
     parent = find_serial_parent(conn, spot_id, code, when)
     if parent:
-        back = reopen_as_serial(conn, parent, when, registered_by)
+        pstatus = conn.execute('SELECT COALESCE(status,"") FROM defects WHERE UniqueID=?', (parent,)).fetchone()[0]
+        if pstatus in ('closed', 'pending_otk', 'unresolved'):
+            back = reopen_as_serial(conn, parent, when, registered_by)      # закрытый/не выявленный → переоткрыть
+        else:
+            merge_into_open(conn, parent, when, registered_by)              # ещё открыт → долить в него
+            back = conn.execute('SELECT current_stage_dept FROM defects WHERE UniqueID=?', (parent,)).fetchone()[0]
         return {'defect_id': parent, 'serial': True, 'stage': back}
     cur = conn.execute("""INSERT INTO defects
             (problem_code, root_cause, solution, df_date, created_at, spot_id, gun_id, status,

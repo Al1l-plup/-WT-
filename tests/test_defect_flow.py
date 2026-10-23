@@ -110,6 +110,22 @@ def test_serial_same_group_reopens_parent(app):
                      (r1['defect_id'],)).fetchone()[0] == 2       # второе появление, нового дефекта нет
 
 
+def test_serial_merges_into_open_parent(app):
+    """Недельное правило: повтор на той же точке, пока прежний дефект ещё ОТКРЫТ, доливается
+    в него (серийный, +появление), а не плодит новую карточку."""
+    c = _conn(app); sp = _clean_spot(c)
+    r1 = df.register_occurrence(c, problem_code='BT', spot_id=sp, registered_by=1)   # не закрываем
+    assert c.execute('SELECT status FROM defects WHERE UniqueID=?', (r1['defect_id'],)).fetchone()[0] == 'in_review'
+    r2 = df.register_occurrence(c, problem_code='LP', spot_id=sp, registered_by=2)   # та же группа OTHER, в окне
+    assert r2['serial'] is True and r2['defect_id'] == r1['defect_id']               # слилось в тот же дефект
+    is_serial, status = c.execute('SELECT is_serial, status FROM defects WHERE UniqueID=?',
+                                  (r1['defect_id'],)).fetchone()
+    assert is_serial == 1 and status == 'in_review'                                  # помечен серийным, этап не изменился
+    assert c.execute('SELECT COUNT(*) FROM defect_occurrence WHERE defect_id=?',
+                     (r1['defect_id'],)).fetchone()[0] == 2                          # два появления
+    assert c.execute('SELECT COUNT(*) FROM defects WHERE spot_id=?', (sp,)).fetchone()[0] == 1   # новой карточки нет
+
+
 def test_serial_different_group_is_new(app):
     c = _conn(app); sp = _clean_spot(c)
     r1 = df.register_occurrence(c, problem_code='BT', spot_id=sp, registered_by=1)
