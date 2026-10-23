@@ -159,8 +159,9 @@
 const $ = id => document.getElementById(id);
 let ME = {}, BOARD = {open:[], unresolved:[], closed:[]}, TAB = 'mine', openId = null;
 const DEPTS = ['Производство', 'WeldTeam', 'ИТО', 'ОТО'];
-const STAGE_LABEL = {closed:'закрыл', passed:'передал дальше', returned:'вернул на доработку',
-                     to_oto:'передал в ОТО', oto_done:'контрмера ОТО', reopened:'переоткрыл'};
+const STAGE_LABEL = {closed:'закрыл (на согласование ОТК)', passed:'передал дальше', returned:'вернул на доработку',
+                     to_oto:'передал в ОТО', oto_done:'контрмера ОТО', reopened:'переоткрыл',
+                     otk_approved:'ОТК согласовал закрытие', otk_rejected:'ОТК не согласовал — возврат'};
 
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); }
 function showAlert(el, type, msg){ el.className = `alert alert-${type}`; el.textContent = msg; }
@@ -303,23 +304,40 @@ function renderDetail(res){
     actions = `
       <div class="act-bar">
         <button class="btn btn-success btn-sm" onclick="toggleForm('close-${d.UniqueID}')">✓ Закрыть</button>
-        <button class="btn btn-ghost btn-sm" onclick="act(${d.UniqueID},'pass',{})">→ Передать дальше</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleForm('pass-${d.UniqueID}')">→ Передать дальше</button>
         <button class="btn btn-ghost btn-sm" onclick="toggleForm('bounce-${d.UniqueID}')">↩ Вернуть</button>
         <button class="btn btn-ghost btn-sm" onclick="toggleForm('oto-${d.UniqueID}')">🔧 В ОТО</button>
       </div>
       <div class="act-form" id="close-${d.UniqueID}" hidden>
         <div class="fgroup"><label class="lbl">Коренная причина</label><textarea id="cause-${d.UniqueID}" placeholder="предполагаемая причина…"></textarea></div>
         <div class="fgroup"><label class="lbl">Контрмера (обязательно)</label><textarea id="cm-${d.UniqueID}" placeholder="что сделано…"></textarea></div>
-        <button class="btn btn-success btn-sm" onclick="act(${d.UniqueID},'close',{cause:val('cause-${d.UniqueID}'),countermeasure:val('cm-${d.UniqueID}')})">Закрыть дефект</button>
+        <div class="fgroup"><label class="lbl">VIN — на каком авто проверили и решили закрыть (обязательно)</label><input type="text" id="vin-${d.UniqueID}" placeholder="VIN или последние 4"></div>
+        <button class="btn btn-success btn-sm" onclick="act(${d.UniqueID},'close',{cause:val('cause-${d.UniqueID}'),countermeasure:val('cm-${d.UniqueID}'),vin:val('vin-${d.UniqueID}')})">Закрыть → на согласование ОТК</button>
+      </div>
+      <div class="act-form" id="pass-${d.UniqueID}" hidden>
+        <div class="fgroup"><label class="lbl">Комментарий (обязательно): что проверили, почему передаёте</label><textarea id="passn-${d.UniqueID}" placeholder="напр. параметры в норме — причина не в сварке…"></textarea></div>
+        <button class="btn btn-ghost btn-sm" onclick="act(${d.UniqueID},'pass',{note:val('passn-${d.UniqueID}')})">Передать дальше</button>
       </div>
       <div class="act-form" id="bounce-${d.UniqueID}" hidden>
         <div class="fgroup"><label class="lbl">Вернуть отделу</label><select id="to-${d.UniqueID}">${DEPTS.map(x=>`<option value="${x}">${x}</option>`).join('')}</select></div>
-        <div class="fgroup"><label class="lbl">Причина возврата</label><textarea id="brsn-${d.UniqueID}" placeholder="почему возвращаете…"></textarea></div>
+        <div class="fgroup"><label class="lbl">Причина возврата (обязательно)</label><textarea id="brsn-${d.UniqueID}" placeholder="почему возвращаете…"></textarea></div>
         <button class="btn btn-warn btn-sm" onclick="act(${d.UniqueID},'bounce',{to_dept:val('to-${d.UniqueID}'),reason:val('brsn-${d.UniqueID}')})">Вернуть</button>
       </div>
       <div class="act-form" id="oto-${d.UniqueID}" hidden>
-        <div class="fgroup"><label class="lbl">Что передать в ОТО (оборудование)</label><textarea id="orsn-${d.UniqueID}" placeholder="напр. несоосность клещей G.043…"></textarea></div>
+        <div class="fgroup"><label class="lbl">Что передать в ОТО (обязательно)</label><textarea id="orsn-${d.UniqueID}" placeholder="напр. несоосность клещей G.043…"></textarea></div>
         <button class="btn btn-sm" style="background:var(--cyan);color:#000" onclick="act(${d.UniqueID},'delegate_oto',{reason:val('orsn-${d.UniqueID}')})">Передать в ОТО</button>
+      </div>`;
+  }
+  if (canAct && d.status === 'pending_otk'){
+    actions += `
+      <div class="muted" style="margin:.4rem 0">На согласовании ОТК — перепроверьте точку${d.vin ? ` (закрыто на VIN <b>${esc(d.vin)}</b>)` : ''}.</div>
+      <div class="act-bar">
+        <button class="btn btn-success btn-sm" onclick="act(${d.UniqueID},'otk_approve',{})">✓ Согласовать закрытие</button>
+        <button class="btn btn-warn btn-sm" onclick="toggleForm('otkrej-${d.UniqueID}')">↩ Не согласовать</button>
+      </div>
+      <div class="act-form" id="otkrej-${d.UniqueID}" hidden>
+        <div class="fgroup"><label class="lbl">Почему не согласовано (обязательно)</label><textarea id="otkr-${d.UniqueID}" placeholder="что не так с точкой…"></textarea></div>
+        <button class="btn btn-warn btn-sm" onclick="act(${d.UniqueID},'otk_reject',{reason:val('otkr-${d.UniqueID}')})">Вернуть закрывшему отделу</button>
       </div>`;
   }
   if (canOto){
@@ -330,7 +348,12 @@ function renderDetail(res){
       </div>`;
   }
   if (d.status === 'closed' && priv()){
-    actions += `<div class="act-bar"><button class="btn btn-ghost btn-sm" onclick="act(${d.UniqueID},'reopen',{})">↺ Переоткрыть</button></div>`;
+    actions += `
+      <div class="act-bar"><button class="btn btn-ghost btn-sm" onclick="toggleForm('reopen-${d.UniqueID}')">↺ Переоткрыть</button></div>
+      <div class="act-form" id="reopen-${d.UniqueID}" hidden>
+        <div class="fgroup"><label class="lbl">Причина переоткрытия (обязательно)</label><textarea id="reopn-${d.UniqueID}" placeholder="почему переоткрываете…"></textarea></div>
+        <button class="btn btn-ghost btn-sm" onclick="act(${d.UniqueID},'reopen',{reason:val('reopn-${d.UniqueID}')})">Переоткрыть</button>
+      </div>`;
   }
   if (!actions && d.status !== 'closed') actions = `<div class="muted" style="margin-top:.5rem">Сейчас дефект на этапе «${esc(d.current_stage_dept||'—')}» — действия доступны этому отделу.</div>`;
 
@@ -344,9 +367,14 @@ window.val = id => { const e = $(id); return e ? e.value.trim() : ''; };
 
 window.act = function(id, action, extra){
   if (action === 'close' && !extra.countermeasure){ return flash(id, 'warn', 'Укажите контрмеру'); }
+  if (action === 'close' && !extra.vin){ return flash(id, 'warn', 'Укажите VIN — на каком авто решили закрыть'); }
+  if (action === 'otk_reject' && !extra.reason){ return flash(id, 'warn', 'Добавьте комментарий — почему не согласовано'); }
   if (action === 'bounce' && !extra.to_dept){ return flash(id, 'warn', 'Выберите отдел'); }
+  if (action === 'bounce' && !extra.reason){ return flash(id, 'warn', 'Добавьте комментарий — причину возврата'); }
+  if (action === 'pass' && !extra.note){ return flash(id, 'warn', 'Добавьте комментарий — что проверили и почему передаёте'); }
+  if (action === 'delegate_oto' && !extra.reason){ return flash(id, 'warn', 'Добавьте комментарий для ОТО'); }
   if (action === 'oto' && !extra.countermeasure){ return flash(id, 'warn', 'Укажите контрмеру ОТО'); }
-  if (action === 'pass' && !confirm('Причина не выявлена — передать дальше по цепочке?')) return;
+  if (action === 'reopen' && !extra.reason){ return flash(id, 'warn', 'Добавьте комментарий — причину переоткрытия'); }
   fetch(`/api/defects/${id}/act`, {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify(Object.assign({action}, extra))})
     .then(r=>r.json()).then(res=>{

@@ -8,8 +8,9 @@
   registered — только что создан (транзиентно), сразу входит в цепочку;
   in_review  — на рассмотрении у отдела current_stage_dept;
   at_oto      — передан в ОТО (оборудование); delegated_from_dept — кому вернуть;
+  pending_otk — закрыт отделом, ждёт перепроверки точки в ОТК (closed_by_dept — кто закрыл, vin — на чём);
   unresolved  — дошёл до конца цепочки без решения (на недельный разбор);
-  closed      — закрыт (closed_by_dept — кто закрыл).
+  closed      — закрыт окончательно (ОТК согласовал закрытие).
 
 Серийность: повтор на той же точке в той же ГРУППЕ кодов в пределах окна (дней).
 Группы: {MN}, {EO}, {все остальные вместе}. Пример (точка 124): BT→LP→BN = серия;
@@ -18,6 +19,7 @@ BT→MN = не серия. Достаточно 2-й фиксации.
 from datetime import date, datetime
 
 OTO = 'ОТО'
+OTK = 'ОТК'
 
 
 def _now():
@@ -59,9 +61,9 @@ def serial_window_days(conn):
 
 
 # ── этапы (defect_stage) ─────────────────────────────────────────────────────
-def _open_stage(conn, defect_id, dept, actor_id=None):
-    conn.execute('INSERT INTO defect_stage (defect_id, dept, entered_at, actor_id) VALUES (?,?,?,?)',
-                 (defect_id, dept, _now(), actor_id))
+def _open_stage(conn, defect_id, dept, actor_id=None, note=None):
+    conn.execute('INSERT INTO defect_stage (defect_id, dept, entered_at, actor_id, note) VALUES (?,?,?,?,?)',
+                 (defect_id, dept, _now(), actor_id, note))
 
 
 def _close_open_stage(conn, defect_id, outcome, actor_id=None, cause=None, countermeasure=None, note=None):
@@ -97,13 +99,36 @@ def enter_chain(conn, defect_id, actor_id=None):
 
 
 # ── действия на этапе ────────────────────────────────────────────────────────
-def act_close(conn, defect_id, dept, actor_id, cause, countermeasure):
-    """Контрмера принята → закрыть. Пишем и в legacy-поля root_cause/solution."""
+def act_close(conn, defect_id, dept, actor_id, cause, countermeasure, vin):
+    """Контрмера принята → закрытие отделом. Закрытие НЕ финальное: дефект уходит на
+    перепроверку точки в ОТК (статус pending_otk). vin — на каком авто отдел проверил и
+    решил закрыть («с какого решено»). Пишем и в legacy-поля root_cause/solution."""
     _close_open_stage(conn, defect_id, 'closed', actor_id, cause=cause, countermeasure=countermeasure)
-    conn.execute("""UPDATE defects SET status='closed', closed_by_dept=?, worker_solve_id=?,
-                      root_cause=?, solution=?, current_stage_dept=NULL
+    conn.execute("""UPDATE defects SET status='pending_otk', closed_by_dept=?, worker_solve_id=?,
+                      root_cause=?, solution=?, vin=?, current_stage_dept=?, stage_entered_at=?
                     WHERE UniqueID=?""",
-                 (dept, actor_id, cause or '', countermeasure or '', defect_id))
+                 (dept, actor_id, cause or '', countermeasure or '', vin or '', OTK, _now(), defect_id))
+    _open_stage(conn, defect_id, OTK, None)
+
+
+def act_otk_approve(conn, defect_id, actor_id, note=None):
+    """ОТК перепроверил точку и согласовал закрытие → дефект закрыт окончательно."""
+    _close_open_stage(conn, defect_id, 'otk_approved', actor_id, note=note)
+    conn.execute("UPDATE defects SET status='closed', current_stage_dept=NULL WHERE UniqueID=?", (defect_id,))
+
+
+def act_otk_reject(conn, defect_id, actor_id, reason):
+    """ОТК не согласовал закрытие → возврат отделу, который закрывал (как доработка, +возврат)."""
+    _close_open_stage(conn, defect_id, 'otk_rejected', actor_id, note=reason)
+    back = conn.execute('SELECT closed_by_dept FROM defects WHERE UniqueID=?', (defect_id,)).fetchone()[0]
+    if not back:
+        code = conn.execute('SELECT problem_code FROM defects WHERE UniqueID=?', (defect_id,)).fetchone()[0]
+        chain = route_for(conn, code)
+        back = chain[0] if chain else None
+    conn.execute("""UPDATE defects SET status='in_review', current_stage_dept=?, stage_entered_at=?,
+                      return_count=return_count+1 WHERE UniqueID=?""", (back, _now(), defect_id))
+    _open_stage(conn, defect_id, back, None)
+    return back
 
 
 def act_pass(conn, defect_id, actor_id, note=None):
@@ -164,7 +189,7 @@ def find_serial_parent(conn, spot_id, code, when):
     grp = series_group(code)
     win = serial_window_days(conn)
     rows = conn.execute("""SELECT UniqueID, problem_code, df_date FROM defects
-                           WHERE spot_id=? AND COALESCE(status,'')='closed'
+                           WHERE spot_id=? AND COALESCE(status,'') IN ('closed','pending_otk')
                            ORDER BY df_date DESC, UniqueID DESC LIMIT 30""", (spot_id,)).fetchall()
     for did, pcode, ddate in rows:
         if series_group(pcode) != grp:
@@ -214,16 +239,16 @@ def register_occurrence(conn, *, problem_code, spot_id=None, gun_id=None, regist
     return {'defect_id': did, 'serial': False, 'stage': stage}
 
 
-def reopen(conn, defect_id, actor_id=None):
+def reopen(conn, defect_id, actor_id=None, note=None):
     """Переоткрыть закрытый дефект (аварийный клапан WeldTeam) — вернуть отделу, что
-    закрывал (для ОТО-кейса — отделу, передававшему в ОТО)."""
+    закрывал (для ОТО-кейса — отделу, передававшему в ОТО). note — причина переоткрытия."""
     row = conn.execute('SELECT closed_by_dept, delegated_from_dept, problem_code FROM defects WHERE UniqueID=?',
                         (defect_id,)).fetchone()
     chain = route_for(conn, row[2])
     back = row[0] or row[1] or (chain[0] if chain else None)
     conn.execute("UPDATE defects SET status='in_review', current_stage_dept=?, stage_entered_at=? WHERE UniqueID=?",
                  (back, _now(), defect_id))
-    _open_stage(conn, defect_id, back, actor_id)
+    _open_stage(conn, defect_id, back, actor_id, note=note)
     return back
 
 

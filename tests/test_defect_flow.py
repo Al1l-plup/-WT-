@@ -52,12 +52,29 @@ def test_pass_through_to_unresolved(app):
                      (did,)).fetchone() == ('unresolved', None)
 
 
-def test_close_sets_legacy_fields(app):
+def test_close_goes_through_otk_then_closed(app):
     c = _conn(app); sp = _clean_spot(c)
     did = df.register_occurrence(c, problem_code='BT', spot_id=sp, registered_by=1)['defect_id']
-    df.act_close(c, did, dept='Производство', actor_id=5, cause='ошибка оператора', countermeasure='переобучение')
-    assert c.execute('SELECT status, closed_by_dept, root_cause, solution FROM defects WHERE UniqueID=?',
-                     (did,)).fetchone() == ('closed', 'Производство', 'ошибка оператора', 'переобучение')
+    df.act_close(c, did, dept='Производство', actor_id=5, cause='ошибка оператора',
+                 countermeasure='переобучение', vin='XW8ZZZ0001')
+    # закрыто отделом → на согласовании ОТК (не финал), сохранены legacy-поля и VIN
+    assert c.execute("""SELECT status, closed_by_dept, root_cause, solution, vin, current_stage_dept
+                        FROM defects WHERE UniqueID=?""", (did,)).fetchone() == \
+        ('pending_otk', 'Производство', 'ошибка оператора', 'переобучение', 'XW8ZZZ0001', 'ОТК')
+    # ОТК согласовал → закрыто окончательно
+    df.act_otk_approve(c, did, actor_id=7)
+    assert c.execute('SELECT status, current_stage_dept FROM defects WHERE UniqueID=?',
+                     (did,)).fetchone() == ('closed', None)
+
+
+def test_otk_reject_returns_to_closing_dept(app):
+    c = _conn(app); sp = _clean_spot(c)
+    did = df.register_occurrence(c, problem_code='CR', spot_id=sp, registered_by=1)['defect_id']
+    df.act_close(c, did, dept='Производство', actor_id=5, cause='x', countermeasure='y', vin='Z1')
+    back = df.act_otk_reject(c, did, actor_id=7, reason='точка всё ещё дефектная')
+    assert back == 'Производство'
+    assert c.execute('SELECT status, current_stage_dept, return_count FROM defects WHERE UniqueID=?',
+                     (did,)).fetchone() == ('in_review', 'Производство', 1)
 
 
 def test_bounce_to_chosen_dept(app):
@@ -83,7 +100,7 @@ def test_oto_delegate_and_return(app):
 def test_serial_same_group_reopens_parent(app):
     c = _conn(app); sp = _clean_spot(c)
     r1 = df.register_occurrence(c, problem_code='BT', spot_id=sp, registered_by=1)
-    df.act_close(c, r1['defect_id'], dept='Производство', actor_id=1, cause='x', countermeasure='y')
+    df.act_close(c, r1['defect_id'], dept='Производство', actor_id=1, cause='x', countermeasure='y', vin='Z1')
     # повтор LP на той же точке (та же группа OTHER) в окне → серия, переоткрытие родителя
     r2 = df.register_occurrence(c, problem_code='LP', spot_id=sp, registered_by=2)
     assert r2['serial'] is True and r2['defect_id'] == r1['defect_id']
@@ -96,7 +113,7 @@ def test_serial_same_group_reopens_parent(app):
 def test_serial_different_group_is_new(app):
     c = _conn(app); sp = _clean_spot(c)
     r1 = df.register_occurrence(c, problem_code='BT', spot_id=sp, registered_by=1)
-    df.act_close(c, r1['defect_id'], dept='Производство', actor_id=1, cause='x', countermeasure='y')
+    df.act_close(c, r1['defect_id'], dept='Производство', actor_id=1, cause='x', countermeasure='y', vin='Z1')
     r2 = df.register_occurrence(c, problem_code='MN', spot_id=sp, registered_by=2)   # другая группа
     assert r2['serial'] is False and r2['defect_id'] != r1['defect_id']
 
@@ -104,8 +121,8 @@ def test_serial_different_group_is_new(app):
 def test_serial_outside_window_is_new(app):
     c = _conn(app); sp = _clean_spot(c)
     r1 = df.register_occurrence(c, problem_code='BT', spot_id=sp, registered_by=1, when='2026-01-01')
-    df.act_close(c, r1['defect_id'], dept='Производство', actor_id=1, cause='x', countermeasure='y')
-    r2 = df.register_occurrence(c, problem_code='LP', spot_id=sp, registered_by=2, when='2026-01-11')  # >2 дней
+    df.act_close(c, r1['defect_id'], dept='Производство', actor_id=1, cause='x', countermeasure='y', vin='Z1')
+    r2 = df.register_occurrence(c, problem_code='LP', spot_id=sp, registered_by=2, when='2026-01-11')  # >неделя
     assert r2['serial'] is False and r2['defect_id'] != r1['defect_id']
 
 

@@ -26,19 +26,27 @@ def test_stage_flow_and_rbac(register_client):
 
     # не на этапе ИТО → 403
     assert ito.post(f'/api/defects/{did}/act', json={'action': 'close', 'countermeasure': 'x'}).status_code == 403
-    # Производство (текущий этап) передаёт дальше → WeldTeam
-    r = prod.post(f'/api/defects/{did}/act', json={'action': 'pass'}).get_json()
+    # кросс-процесс требует комментарий: pass без note → 400
+    assert prod.post(f'/api/defects/{did}/act', json={'action': 'pass'}).status_code == 400
+    # Производство (текущий этап) передаёт дальше (с комментарием) → WeldTeam
+    r = prod.post(f'/api/defects/{did}/act', json={'action': 'pass', 'note': 'параметры в норме'}).get_json()
     assert r['status'] == 'success' and 'WeldTeam' in r['message']
     # теперь Производство не на этапе → 403
     assert prod.post(f'/api/defects/{did}/act', json={'action': 'close', 'countermeasure': 'x'}).status_code == 403
-    # закрытие требует контрмеру
+    # закрытие требует контрмеру…
     assert wt.post(f'/api/defects/{did}/act', json={'action': 'close'}).status_code == 400
-    # WeldTeam закрывает
+    # …и VIN
+    assert wt.post(f'/api/defects/{did}/act', json={'action': 'close', 'countermeasure': 'm'}).status_code == 400
+    # WeldTeam закрывает (с VIN) → на согласование ОТК (pending_otk)
     assert wt.post(f'/api/defects/{did}/act',
-                   json={'action': 'close', 'cause': 'c', 'countermeasure': 'm'}).get_json()['status'] == 'success'
-    # переоткрывать может только WeldTeam
+                   json={'action': 'close', 'cause': 'c', 'countermeasure': 'm', 'vin': 'XW8Z0001'}).get_json()['status'] == 'success'
+    # ОТК согласует закрытие → закрыто окончательно
+    assert otk.post(f'/api/defects/{did}/act', json={'action': 'otk_approve'}).get_json()['status'] == 'success'
+    # переоткрывать может только WeldTeam, и тоже с комментарием
     assert ito.post(f'/api/defects/{did}/act', json={'action': 'reopen'}).status_code == 403
-    assert wt.post(f'/api/defects/{did}/act', json={'action': 'reopen'}).get_json()['status'] == 'success'
+    assert wt.post(f'/api/defects/{did}/act', json={'action': 'reopen'}).status_code == 400
+    assert wt.post(f'/api/defects/{did}/act',
+                   json={'action': 'reopen', 'reason': 'повтор'}).get_json()['status'] == 'success'
 
 
 def test_oto_delegation_api(register_client):
@@ -53,15 +61,75 @@ def test_oto_delegation_api(register_client):
     assert r['status'] == 'success' and 'Производство' in r['message']
 
 
+def test_cross_process_actions_require_comment(register_client):
+    """Любое кросс-процессное действие требует комментарий: pass / bounce / delegate_oto / reopen.
+    Комментарий сохраняется в этапе (виден в таймлайне)."""
+    otk = register_client(department='ОТК')
+    did = _reg(otk, 70070)['defect_id']
+    prod = register_client(department='Производство', login='cc_prod@x.kz')
+    wt = register_client(department='WeldTeam', login='cc_wt@x.kz')
+    # bounce без комментария (отдел выбран) → 400
+    assert prod.post(f'/api/defects/{did}/act',
+                     json={'action': 'bounce', 'to_dept': 'Производство'}).status_code == 400
+    # delegate_oto без комментария → 400
+    assert prod.post(f'/api/defects/{did}/act', json={'action': 'delegate_oto'}).status_code == 400
+    # pass без комментария → 400, с комментарием → успех
+    assert prod.post(f'/api/defects/{did}/act', json={'action': 'pass'}).status_code == 400
+    assert prod.post(f'/api/defects/{did}/act',
+                     json={'action': 'pass', 'note': 'оператор ок'}).get_json()['status'] == 'success'
+    # закрыли на WeldTeam (с VIN) → pending_otk; ОТК согласует → closed
+    wt.post(f'/api/defects/{did}/act', json={'action': 'close', 'countermeasure': 'm', 'vin': 'V1'})
+    otk.post(f'/api/defects/{did}/act', json={'action': 'otk_approve'})
+    assert wt.post(f'/api/defects/{did}/act', json={'action': 'reopen'}).status_code == 400
+    assert wt.post(f'/api/defects/{did}/act',
+                   json={'action': 'reopen', 'reason': 'повтор на линии'}).get_json()['status'] == 'success'
+    # комментарии осели в истории этапов
+    det = wt.get(f'/api/defects/{did}').get_json()
+    assert any((s.get('note') or '').strip() for s in det['stages'])
+
+
+def test_close_requires_vin_and_otk_approval(register_client):
+    """Закрытие требует VIN и уходит на согласование ОТК; ОТК согласует → closed,
+    не согласует → возврат отделу, который закрывал (+возврат в счётчик)."""
+    otk = register_client(department='ОТК')
+    prod = register_client(department='Производство', login='vin_prod@x.kz')
+    # ── ветка «ОТК согласовал» ──
+    did = _reg(otk, 70080)['defect_id']
+    assert prod.post(f'/api/defects/{did}/act',
+                     json={'action': 'close', 'countermeasure': 'm'}).status_code == 400   # без VIN
+    assert prod.post(f'/api/defects/{did}/act',
+                     json={'action': 'close', 'countermeasure': 'm', 'vin': 'XW8ABC1234'}).get_json()['status'] == 'success'
+    det = otk.get(f'/api/defects/{did}').get_json()
+    assert det['defect']['status'] == 'pending_otk' and det['defect']['current_stage_dept'] == 'ОТК'
+    assert det['defect']['vin'] == 'XW8ABC1234'
+    board = otk.get('/api/defects/all').get_json()
+    assert any(d['UniqueID'] == did for d in board['open'])            # в открытых, ещё не в закрытых
+    assert not any(d['UniqueID'] == did for d in board['closed'])
+    assert next(d for d in board['open'] if d['UniqueID'] == did)['mine'] is True   # во входящих у ОТК
+    assert prod.post(f'/api/defects/{did}/act', json={'action': 'otk_approve'}).status_code == 403  # не ОТК
+    assert otk.post(f'/api/defects/{did}/act', json={'action': 'otk_approve'}).get_json()['status'] == 'success'
+    assert any(d['UniqueID'] == did for d in otk.get('/api/defects/all').get_json()['closed'])
+
+    # ── ветка «ОТК не согласовал» → возврат закрывшему ──
+    did2 = _reg(otk, 70081)['defect_id']
+    prod.post(f'/api/defects/{did2}/act', json={'action': 'close', 'countermeasure': 'm', 'vin': 'Z'})
+    assert otk.post(f'/api/defects/{did2}/act', json={'action': 'otk_reject'}).status_code == 400   # нужен комментарий
+    r = otk.post(f'/api/defects/{did2}/act', json={'action': 'otk_reject', 'reason': 'точка дефектная'}).get_json()
+    assert r['status'] == 'success' and 'Производство' in r['message']
+    det2 = prod.get(f'/api/defects/{did2}').get_json()
+    assert det2['defect']['status'] == 'in_review' and det2['defect']['current_stage_dept'] == 'Производство'
+    assert det2['defect']['return_count'] == 1
+
+
 def test_pass_to_unresolved(register_client):
     otk = register_client(department='ОТК')
     did = _reg(otk, 70040)['defect_id']
     prod = register_client(department='Производство', login='un_prod@x.kz')
     wt = register_client(department='WeldTeam', login='un_wt@x.kz')
     ito = register_client(department='ИТО', login='un_ito@x.kz')
-    assert prod.post(f'/api/defects/{did}/act', json={'action': 'pass'}).get_json()['status'] == 'success'  # →WeldTeam
-    assert wt.post(f'/api/defects/{did}/act', json={'action': 'pass'}).get_json()['status'] == 'success'     # →ИТО
-    r = ito.post(f'/api/defects/{did}/act', json={'action': 'pass'}).get_json()                               # конец цепочки
+    assert prod.post(f'/api/defects/{did}/act', json={'action': 'pass', 'note': 'не оператор'}).get_json()['status'] == 'success'  # →WeldTeam
+    assert wt.post(f'/api/defects/{did}/act', json={'action': 'pass', 'note': 'параметры ок'}).get_json()['status'] == 'success'   # →ИТО
+    r = ito.post(f'/api/defects/{did}/act', json={'action': 'pass', 'note': 'причина не найдена'}).get_json()                       # конец цепочки
     assert r['status'] == 'success' and 'не выявлен' in r['message'].lower()
     # попал в список «не выявленные»
     board = otk.get('/api/defects/all').get_json()

@@ -74,7 +74,7 @@ def analytics_process():
                ROUND(AVG((julianday(replace(st.left_at,'T',' ')) - julianday(replace(st.entered_at,'T',' '))) * 24.0), 1) AS avg_hours,
                COUNT(*) AS stages_done,
                SUM(CASE WHEN st.outcome='closed'   THEN 1 ELSE 0 END) AS closed_cnt,
-               SUM(CASE WHEN st.outcome='returned' THEN 1 ELSE 0 END) AS returned_cnt
+               SUM(CASE WHEN st.outcome IN ('returned','otk_rejected') THEN 1 ELSE 0 END) AS returned_cnt
         FROM defect_stage st JOIN defects d ON st.defect_id = d.UniqueID
         WHERE st.left_at IS NOT NULL AND d.df_date BETWEEN ? AND ?
         GROUP BY st.dept ORDER BY stages_done DESC
@@ -83,7 +83,7 @@ def analytics_process():
     # Текущая загрузка — сколько дефектов СЕЙЧАС на этапе отдела (без фильтра дат).
     wl = {r['dept']: r['cnt'] for r in db.execute("""
         SELECT current_stage_dept AS dept, COUNT(*) AS cnt FROM defects
-        WHERE COALESCE(status,'') IN ('in_review','at_oto') AND current_stage_dept IS NOT NULL
+        WHERE COALESCE(status,'') IN ('in_review','at_oto','pending_otk') AND current_stage_dept IS NOT NULL
         GROUP BY current_stage_dept""").fetchall()}
 
     dept_rows = [{'dept': r['dept'], 'avg_hours': r['avg_hours'], 'stages_done': r['stages_done'],
@@ -96,7 +96,7 @@ def analytics_process():
 
     serial = db.execute("SELECT COUNT(*) FROM defects WHERE is_serial=1 AND df_date BETWEEN ? AND ?", rng).fetchone()[0]
     returns_t = db.execute("""SELECT COUNT(*) FROM defect_stage st JOIN defects d ON st.defect_id=d.UniqueID
-                              WHERE st.outcome='returned' AND d.df_date BETWEEN ? AND ?""", rng).fetchone()[0]
+                              WHERE st.outcome IN ('returned','otk_rejected') AND d.df_date BETWEEN ? AND ?""", rng).fetchone()[0]
     unresolved = db.execute("SELECT COUNT(*) FROM defects WHERE COALESCE(status,'')='unresolved'").fetchone()[0]
 
     serial_list = db.execute("""

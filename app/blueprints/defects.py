@@ -180,7 +180,7 @@ def defects_all():
                   ORDER BY CASE WHEN is_b_point THEN 0 WHEN is_serial THEN 1 ELSE 2 END,
                            d.df_date DESC, d.UniqueID DESC"""
     open_rows = db.execute(base + """
-        WHERE COALESCE(d.status,'registered') IN ('registered','in_work','in_review','at_oto')
+        WHERE COALESCE(d.status,'registered') IN ('registered','in_work','in_review','at_oto','pending_otk')
     """ + priority).fetchall()
     unresolved_rows = db.execute(base + """
         WHERE COALESCE(d.status,'') = 'unresolved'
@@ -477,12 +477,38 @@ def defect_act(defect_id):
             cm = (data.get('countermeasure') or '').strip()
             if not cm:
                 return jsonify({'status': 'error', 'message': 'Укажите контрмеру'}), 400
-            df.act_close(db, defect_id, acting, uid, (data.get('cause') or '').strip(), cm)
-            msg = 'Дефект закрыт'
+            vin = (data.get('vin') or '').strip()
+            if not vin:
+                return jsonify({'status': 'error',
+                                'message': 'Укажите VIN — на каком авто проверили и решили закрыть'}), 400
+            df.act_close(db, defect_id, acting, uid, (data.get('cause') or '').strip(), cm, vin)
+            msg = 'Закрыто отделом — отправлено на согласование в ОТК'
+        elif action == 'otk_approve':
+            if status != 'pending_otk':
+                return jsonify({'status': 'error', 'message': 'Дефект не на согласовании ОТК'}), 400
+            if not df.can_act_stage(cur_dept, dept, priv):
+                return _denied()
+            df.act_otk_approve(db, defect_id, uid, (data.get('note') or '').strip() or None)
+            msg = 'ОТК согласовал закрытие — дефект закрыт'
+        elif action == 'otk_reject':
+            if status != 'pending_otk':
+                return jsonify({'status': 'error', 'message': 'Дефект не на согласовании ОТК'}), 400
+            if not df.can_act_stage(cur_dept, dept, priv):
+                return _denied()
+            reason = (data.get('reason') or '').strip()
+            if not reason:
+                return jsonify({'status': 'error',
+                                'message': 'Добавьте комментарий — почему закрытие не согласовано'}), 400
+            back = df.act_otk_reject(db, defect_id, uid, reason)
+            msg = f'Закрытие не согласовано — возврат отделу «{back}»'
         elif action == 'pass':
             if not df.can_act_stage(cur_dept, dept, priv):
                 return _denied()
-            nxt = df.act_pass(db, defect_id, uid, (data.get('note') or '').strip() or None)
+            note = (data.get('note') or '').strip()
+            if not note:
+                return jsonify({'status': 'error',
+                                'message': 'Добавьте комментарий — что проверили и почему передаёте дальше'}), 400
+            nxt = df.act_pass(db, defect_id, uid, note)
             msg = (f'Передано отделу «{nxt}»' if nxt
                    else 'Причина не выявлена — дефект в списке «не выявленные» (на недельный разбор)')
         elif action == 'bounce':
@@ -491,12 +517,19 @@ def defect_act(defect_id):
             to = (data.get('to_dept') or '').strip()
             if not to:
                 return jsonify({'status': 'error', 'message': 'Выберите отдел для возврата'}), 400
-            df.act_bounce(db, defect_id, uid, to, (data.get('reason') or '').strip())
+            reason = (data.get('reason') or '').strip()
+            if not reason:
+                return jsonify({'status': 'error', 'message': 'Добавьте комментарий — причину возврата'}), 400
+            df.act_bounce(db, defect_id, uid, to, reason)
             msg = f'Возвращено отделу «{to}» на доработку'
         elif action == 'delegate_oto':
             if not df.can_act_stage(cur_dept, dept, priv):
                 return _denied()
-            df.act_delegate_oto(db, defect_id, acting, uid, (data.get('reason') or '').strip())
+            reason = (data.get('reason') or '').strip()
+            if not reason:
+                return jsonify({'status': 'error',
+                                'message': 'Добавьте комментарий для ОТО — что проверить/отрегулировать'}), 400
+            df.act_delegate_oto(db, defect_id, acting, uid, reason)
             msg = 'Заявка передана в ОТО (оборудование)'
         elif action == 'oto':
             if not (status == 'at_oto' and (dept == df.OTO or priv)):
@@ -511,7 +544,10 @@ def defect_act(defect_id):
                 return jsonify({'status': 'error', 'message': 'Переоткрывать дефекты может только WeldTeam'}), 403
             if status != 'closed':
                 return jsonify({'status': 'error', 'message': 'Переоткрыть можно только закрытый дефект'}), 400
-            back = df.reopen(db, defect_id, uid)
+            reason = (data.get('reason') or '').strip()
+            if not reason:
+                return jsonify({'status': 'error', 'message': 'Добавьте комментарий — причину переоткрытия'}), 400
+            back = df.reopen(db, defect_id, uid, reason)
             msg = f'Дефект переоткрыт → отдел «{back}»'
         else:
             return jsonify({'status': 'error', 'message': 'Неизвестное действие'}), 400
@@ -531,6 +567,7 @@ def defect_detail(defect_id):
         SELECT d.UniqueID, d.df_date, d.problem_code, COALESCE(d.status,'registered') as status,
                d.current_stage_dept, d.delegated_from_dept, d.closed_by_dept,
                COALESCE(d.is_serial,0) as is_serial, COALESCE(d.return_count,0) as return_count,
+               COALESCE(d.vin,'') as vin,
                COALESCE(d.root_cause,'') as root_cause, COALESCE(d.solution,'') as solution,
                COALESCE(d.snap_spot_number, s.spot_number, d.manual_spot_number, '—') as spot_number,
                COALESCE(d.snap_model_name, m.model_name, '—') as model_name,

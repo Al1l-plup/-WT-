@@ -49,14 +49,20 @@ def test_e2e_full_chain_and_stage_rbac(register_client):
     # этап Производство: ИТО/WeldTeam(не их этап, но WT привилегирован)/ОТО
     assert _act(u['ito'], did, 'close', countermeasure='x').status_code == 403      # не их этап
     assert _act(u['oto'], did, 'pass').status_code == 403
-    # Производство передаёт дальше → WeldTeam
-    assert _act(u['prod'], did, 'pass').get_json()['message'].find('WeldTeam') >= 0
+    # кросс-процесс требует комментарий: pass без note → 400
+    assert _act(u['prod'], did, 'pass').status_code == 400
+    # Производство передаёт дальше (с комментарием) → WeldTeam
+    assert _act(u['prod'], did, 'pass', note='оператор ок, параметры в норме').get_json()['message'].find('WeldTeam') >= 0
     # теперь Производство уже не на этапе
-    assert _act(u['prod'], did, 'pass').status_code == 403
-    # WeldTeam закрывает (нужна контрмера)
+    assert _act(u['prod'], did, 'pass', note='x').status_code == 403
+    # WeldTeam закрывает (нужна контрмера и VIN) → на согласование ОТК
     assert _act(u['wt'], did, 'close').status_code == 400
-    assert _act(u['wt'], did, 'close', cause='перегрев', countermeasure='снизили ток').get_json()['status'] == 'success'
-    # закрытый — в закрытых
+    assert _act(u['wt'], did, 'close', cause='перегрев', countermeasure='снизили ток').status_code == 400  # без VIN
+    assert _act(u['wt'], did, 'close', cause='перегрев', countermeasure='снизили ток', vin='XW8AN2').get_json()['status'] == 'success'
+    # пока на согласовании ОТК — ещё не в закрытых
+    assert not any(d['UniqueID'] == did for d in u['otk'].get('/api/defects/all').get_json()['closed'])
+    # ОТК перепроверил точку и согласовал → в закрытых
+    assert _act(u['otk'], did, 'otk_approve').get_json()['status'] == 'success'
     assert any(d['UniqueID'] == did for d in u['otk'].get('/api/defects/all').get_json()['closed'])
 
 
@@ -64,7 +70,7 @@ def test_e2e_full_chain_and_stage_rbac(register_client):
 def test_e2e_bounce_and_oto(register_client):
     u = _clients(register_client)
     did = _reg_gun(u['otk'], 80002)['defect_id']
-    _act(u['prod'], did, 'pass')                                   # → WeldTeam
+    _act(u['prod'], did, 'pass', note='передаём на проверку параметров')   # → WeldTeam
     # WeldTeam возвращает Производству
     assert _act(u['wt'], did, 'bounce', to_dept='Производство', reason='уточнить оператора').get_json()['status'] == 'success'
     det = u['otk'].get(f'/api/defects/{did}').get_json()
@@ -74,8 +80,9 @@ def test_e2e_bounce_and_oto(register_client):
     # ОТО действует; чужой отдел по ОТО-этапу — нет
     assert _act(u['ito'], did, 'oto', countermeasure='x').status_code == 403
     assert _act(u['oto'], did, 'oto', countermeasure='отрегулировали ось').get_json()['message'].find('Производство') >= 0
-    # вернулось отправителю (Производство) — оно закрывает
-    assert _act(u['prod'], did, 'close', cause='ось', countermeasure='ок').get_json()['status'] == 'success'
+    # вернулось отправителю (Производство) — оно закрывает (с VIN) → на согласование ОТК
+    assert _act(u['prod'], did, 'close', cause='ось', countermeasure='ок', vin='Z001').get_json()['status'] == 'success'
+    assert _act(u['otk'], did, 'otk_approve').get_json()['status'] == 'success'
 
 
 # ── 3. Маршрут EO (WeldTeam пропущен) + «не выявлено» в конце цепочки ────────
@@ -83,9 +90,9 @@ def test_e2e_eo_route_and_unresolved(register_client):
     u = _clients(register_client)
     did = _reg_gun(u['otk'], 80003, code='EO')['defect_id']        # EO: Производство → ИТО
     # WeldTeam не в цепочке; Производство передаёт → ИТО (не WeldTeam)
-    assert _act(u['prod'], did, 'pass').get_json()['message'].find('ИТО') >= 0
+    assert _act(u['prod'], did, 'pass', note='не оператор').get_json()['message'].find('ИТО') >= 0
     # ИТО не выявил → конец цепочки → «не выявлен»
-    assert _act(u['ito'], did, 'pass').get_json()['message'].lower().find('не выявл') >= 0
+    assert _act(u['ito'], did, 'pass', note='причина не найдена').get_json()['message'].lower().find('не выявл') >= 0
     assert any(d['UniqueID'] == did for d in u['otk'].get('/api/defects/all').get_json()['unresolved'])
 
 
@@ -98,8 +105,8 @@ def test_e2e_serial_and_reopen(register_client, app):
     u = _clients(register_client)
     r1 = _reg_spot(u['otk'], model_id, spot, code='CR')
     did = r1['defect_id']
-    # Производство закрывает
-    assert _act(u['prod'], did, 'close', cause='x', countermeasure='y').get_json()['status'] == 'success'
+    # Производство закрывает (с VIN) → pending_otk (для серийности считается уже решённым)
+    assert _act(u['prod'], did, 'close', cause='x', countermeasure='y', vin='Z1').get_json()['status'] == 'success'
     # повтор на той же точке той же группой (LP) → серийный, переоткрытие того же дефекта
     r2 = _reg_spot(u['otk'], model_id, spot, code='LP')
     assert r2['serial'] is True and r2['defect_id'] == did
@@ -109,10 +116,13 @@ def test_e2e_serial_and_reopen(register_client, app):
     # первым в списке должна идти точка B
     assert board['open'][0]['is_b_point'] == 1
 
-    # закрыть и переоткрыть: только WeldTeam
-    _act(u['prod'], did, 'close', cause='x', countermeasure='y')
+    # закрыть (с VIN) → ОТК согласует → затем переоткрыть: только WeldTeam
+    _act(u['prod'], did, 'close', cause='x', countermeasure='y', vin='Z2')
+    _act(u['otk'], did, 'otk_approve')
     assert _act(u['ito'], did, 'reopen').status_code == 403
-    assert _act(u['wt'], did, 'reopen').get_json()['status'] == 'success'
+    # переоткрытие тоже требует комментарий
+    assert _act(u['wt'], did, 'reopen').status_code == 400
+    assert _act(u['wt'], did, 'reopen', reason='повтор на линии').get_json()['status'] == 'success'
 
 
 # ── 5. Фото: загрузка (сжатый JPEG), счётчик, отдача ────────────────────────
@@ -135,9 +145,28 @@ def test_e2e_photo(register_client):
 def test_e2e_process_analytics(register_client):
     u = _clients(register_client)
     did = _reg_gun(u['otk'], 80006)['defect_id']
-    _act(u['prod'], did, 'pass')                                   # Производство прошло
-    _act(u['wt'], did, 'close', cause='c', countermeasure='m')     # WeldTeam закрыл
+    _act(u['prod'], did, 'pass', note='передаём дальше')           # Производство прошло
+    _act(u['wt'], did, 'close', cause='c', countermeasure='m', vin='Z3')  # WeldTeam закрыл → ОТК
+    _act(u['otk'], did, 'otk_approve')                             # ОТК согласовал
     res = u['otk'].get('/api/analytics/process?date_from=2000-01-01&date_to=2100-01-01').get_json()
     depts = {x['dept']: x for x in res['by_dept']}
     assert depts['WeldTeam']['closed'] >= 1 and depts['Производство']['stages_done'] >= 1
     assert 'serial' in res and 'returns_total' in res and 'unresolved' in res
+
+
+# ── 7. Согласование закрытия в ОТК: не согласовал → возврат → повторно → согласовал ──
+def test_e2e_otk_approval_cycle(register_client):
+    u = _clients(register_client)
+    did = _reg_gun(u['otk'], 80007)['defect_id']
+    # Производство закрывает с VIN → на согласование ОТК (pending_otk)
+    assert _act(u['prod'], did, 'close', cause='x', countermeasure='y', vin='VINAAA').get_json()['status'] == 'success'
+    # ОТК не согласовал (нужен комментарий) → возврат Производству
+    assert _act(u['otk'], did, 'otk_reject').status_code == 400
+    assert _act(u['otk'], did, 'otk_reject', reason='точка не держит').get_json()['message'].find('Производство') >= 0
+    det = u['otk'].get(f'/api/defects/{did}').get_json()
+    assert det['defect']['status'] == 'in_review' and det['defect']['current_stage_dept'] == 'Производство'
+    assert det['defect']['return_count'] == 1
+    # Производство закрывает повторно → ОТК согласовал → закрыто
+    assert _act(u['prod'], did, 'close', cause='x2', countermeasure='y2', vin='VINBBB').get_json()['status'] == 'success'
+    assert _act(u['otk'], did, 'otk_approve').get_json()['status'] == 'success'
+    assert any(d['UniqueID'] == did for d in u['otk'].get('/api/defects/all').get_json()['closed'])

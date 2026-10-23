@@ -17,7 +17,7 @@ def test_process_analytics(client, app):
     # дефект 1: Производство → (pass) WeldTeam → (close)
     d1 = df.register_occurrence(c, problem_code='CR', spot_id=sp[0], registered_by=1)['defect_id']
     df.act_pass(c, d1, actor_id=1)
-    df.act_close(c, d1, 'WeldTeam', 2, 'причина', 'контрмера')
+    df.act_close(c, d1, 'WeldTeam', 2, 'причина', 'контрмера', 'VIN1')
 
     # дефект 2: Производство → (pass) WeldTeam → (bounce к Производству)
     d2 = df.register_occurrence(c, problem_code='BT', spot_id=sp[1], registered_by=1)['defect_id']
