@@ -286,17 +286,30 @@ function renderDetail(res){
   const ribbon = d.is_b_point ? `<div class="b-ribbon">⚠ ТОЧКА ГРУППЫ B — требует немедленного вмешательства</div>` : '';
   const occ = res.occurrences.length > 1 ? `<div class="muted">Появлений: ${res.occurrences.length} (${res.occurrences.map(esc).join(', ')})</div>` : '';
 
+  const canEditStage = s => priv() || (ME.dept && s.dept === ME.dept && !s.left_at);
+  const canDelPhoto = p => priv() || (ME.dept && p.stage_dept === ME.dept && d.current_stage_dept === ME.dept);
+
   const timeline = res.stages.length ? `<ul class="tl">${res.stages.map(s=>{
     const act = s.left_at ? (STAGE_LABEL[s.outcome] || s.outcome || '') : 'на рассмотрении';
     const txt = [s.cause && 'Причина: '+s.cause, s.countermeasure && 'Контрмера: '+s.countermeasure, s.note && s.note].filter(Boolean).map(esc).join('\n');
+    const ed = canEditStage(s);
     return `<li class="${s.left_at ? '' : 'open'}">
-      <div class="tl-dept">${esc(s.dept)} <span class="tl-meta">— ${esc(act)}${s.actor ? ', '+esc(s.actor) : ''}</span></div>
+      <div class="tl-dept">${esc(s.dept)} <span class="tl-meta">— ${esc(act)}${s.actor ? ', '+esc(s.actor) : ''}</span>${ed ? ` <button class="btn btn-ghost btn-sm" style="padding:0 .35rem" title="Править запись этапа" onclick="toggleForm('stedit-${s.stage_id}')">✎</button>` : ''}</div>
       ${txt ? `<div class="tl-txt">${txt}</div>` : ''}
       <div class="tl-meta">${esc((s.entered_at||'').replace('T',' '))}${s.left_at ? ' → '+esc(s.left_at.replace('T',' ')) : ''}</div>
+      ${ed ? `<div class="act-form" id="stedit-${s.stage_id}" hidden style="margin-top:.4rem">
+        <div class="fgroup"><label class="lbl">Причина</label><textarea id="stc-${s.stage_id}">${esc(s.cause)}</textarea></div>
+        <div class="fgroup"><label class="lbl">Контрмера</label><textarea id="stm-${s.stage_id}">${esc(s.countermeasure)}</textarea></div>
+        <div class="fgroup"><label class="lbl">Комментарий</label><textarea id="stn-${s.stage_id}">${esc(s.note)}</textarea></div>
+        <button class="btn btn-sm" onclick="saveStage(${d.UniqueID},${s.stage_id})">Сохранить запись</button>
+      </div>` : ''}
     </li>`;
   }).join('')}</ul>` : '';
 
-  const photos = `<div class="photos">${res.photos.map(p=>`<img src="/api/defects/photo/${p.UniqueID}" title="${esc(p.stage_dept||'')} ${esc(p.ts||'')}" onclick="window.open('/api/defects/photo/${p.UniqueID}','_blank')">`).join('')}
+  const photos = `<div class="photos">${res.photos.map(p=>`<span style="position:relative;display:inline-block">
+      <img src="/api/defects/photo/${p.UniqueID}" title="${esc(p.stage_dept||'')} ${esc((p.ts||'').replace('T',' '))}" onclick="window.open('/api/defects/photo/${p.UniqueID}','_blank')">
+      ${canDelPhoto(p) ? `<button title="Удалить фото" onclick="delPhoto(${d.UniqueID},${p.UniqueID})" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;line-height:1;cursor:pointer">✕</button>` : ''}
+    </span>`).join('')}
     <label class="btn btn-ghost btn-sm" style="align-self:center">📷 Фото<input type="file" accept="image/*" multiple hidden onchange="uploadPhoto(${d.UniqueID}, this)"></label></div>`;
 
   let actions = '';
@@ -388,6 +401,23 @@ window.uploadPhoto = async function(id, input){
   await uploadPhotos(id, input.files);
   input.value = '';
   fetch('/api/defects/'+id).then(r=>r.json()).then(renderDetail);
+};
+
+window.delPhoto = function(did, pid){
+  if (!confirm('Удалить это фото?')) return;
+  fetch(`/api/defects/${did}/photo/${pid}`, {method:'DELETE'}).then(r=>r.json()).then(res=>{
+    if (res.status === 'success') fetch('/api/defects/'+did).then(r=>r.json()).then(renderDetail);
+    else alert(res.message);
+  });
+};
+
+window.saveStage = function(did, sid){
+  const body = {cause: val('stc-'+sid), countermeasure: val('stm-'+sid), note: val('stn-'+sid)};
+  fetch(`/api/defects/${did}/stage/${sid}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)})
+    .then(r=>r.json()).then(res=>{
+      if (res.status === 'success') fetch('/api/defects/'+did).then(r=>r.json()).then(renderDetail);
+      else alert(res.message);
+    });
 };
 
 window.delDefect = function(id){

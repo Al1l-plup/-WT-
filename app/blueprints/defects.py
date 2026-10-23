@@ -36,6 +36,41 @@ def _photo_dir():
     return d
 
 
+def _photo_stage(db, defect_id):
+    """(stage_id, stage_dept) этапа, на котором ДОБАВЛЯЕТСЯ фото: текущий открытый этап
+    дефекта (left_at IS NULL); иначе — последний этап; иначе — current_stage_dept."""
+    r = db.execute("""SELECT UniqueID, dept FROM defect_stage
+                      WHERE defect_id=? AND left_at IS NULL ORDER BY UniqueID DESC LIMIT 1""", (defect_id,)).fetchone()
+    if not r:
+        r = db.execute('SELECT UniqueID, dept FROM defect_stage WHERE defect_id=? ORDER BY UniqueID DESC LIMIT 1',
+                       (defect_id,)).fetchone()
+    if r:
+        return r['UniqueID'], r['dept']
+    cur = db.execute('SELECT current_stage_dept FROM defects WHERE UniqueID=?', (defect_id,)).fetchone()
+    return None, (cur['current_stage_dept'] if cur else None)
+
+
+def _del_photo_file(fname):
+    """Удалить файл фото с диска (безопасно: только по basename в папке фото)."""
+    try:
+        p = os.path.join(_photo_dir(), os.path.basename(fname or ''))
+        if fname and os.path.isfile(p):
+            os.remove(p)
+    except OSError:
+        pass
+
+
+def _can_edit_own(owner_dept, current_stage_dept, my_dept, priv):
+    """Правило п.2 бэклога: править/удалять СВОЁ (записи/фото своего отдела), пока дефект
+    на МОЁМ этапе; после передачи — заморожено. Админ/WeldTeam (priv) — всегда."""
+    return bool(priv) or (owner_dept is not None and owner_dept == my_dept and current_stage_dept == my_dept)
+
+
+def _denied_edit():
+    return jsonify({'status': 'error',
+                    'message': 'Править можно только свои записи/фото и только пока дефект на вашем этапе'}), 403
+
+
 def _valid_photo(f):
     return bool(f and f.filename and os.path.splitext(f.filename)[1].lower() in _IMG_EXT)
 
@@ -48,13 +83,15 @@ def _reg_input():
     return (request.get_json(silent=True) or {}), []
 
 
-def _save_photos(db, defect_id, photos, uid, dept):
+def _save_photos(db, defect_id, photos, uid):
+    """Сохранить фото, пометив их ЭТАПОМ ДЕФЕКТА (где оно добавлено), а не отделом загрузившего."""
+    sid, sdept = _photo_stage(db, defect_id)
     for f in photos:
         ext = os.path.splitext(f.filename)[1].lower()
         fname = f'{defect_id}_{uuid.uuid4().hex}{ext}'
         f.save(os.path.join(_photo_dir(), fname))
-        db.execute('INSERT INTO defect_photo (defect_id, path, uploaded_by, stage_dept, ts) VALUES (?,?,?,?,?)',
-                   (defect_id, fname, uid, dept, df._now()))
+        db.execute('INSERT INTO defect_photo (defect_id, path, uploaded_by, stage_dept, stage_id, ts) VALUES (?,?,?,?,?,?)',
+                   (defect_id, fname, uid, sdept, sid, df._now()))
 
 
 def _photo_required_error(photos):
@@ -101,7 +138,7 @@ def register_defect():
         if res['serial']:
             msg = (f'⚠ ПОВТОР (серийный)! Дефект {problem_code} на точке №{spot_number} '
                    f'вернулся отделу «{res["stage"]}» на перерассмотрение.')
-        _save_photos(db, res['defect_id'], photos, uid, dept)
+        _save_photos(db, res['defect_id'], photos, uid)
         snapshot_defect(db, res['defect_id'])
         db.commit()
         return jsonify({'status': 'success', 'message': msg, 'serial': res['serial'],
@@ -326,6 +363,12 @@ def delete_defect(defect_id):
         defect = db.execute(
             'SELECT auto_created_spot_id FROM defects WHERE UniqueID=?', (defect_id,)
         ).fetchone()
+        # почистить связанные фото (файлы + строки) — FK без каскада, иначе остаются orphan
+        photo_files = [r[0] for r in db.execute(
+            'SELECT path FROM defect_photo WHERE defect_id=?', (defect_id,)).fetchall()]
+        db.execute('DELETE FROM defect_photo WHERE defect_id=?', (defect_id,))
+        db.execute('DELETE FROM defect_stage WHERE defect_id=?', (defect_id,))
+        db.execute('DELETE FROM defect_occurrence WHERE defect_id=?', (defect_id,))
         db.execute('DELETE FROM defects WHERE UniqueID=?', (defect_id,))
 
         if defect and defect['auto_created_spot_id']:
@@ -340,6 +383,8 @@ def delete_defect(defect_id):
                 db.execute('DELETE FROM spot WHERE UniqueID=?', (sid,))
 
         db.commit()
+        for fn in photo_files:
+            _del_photo_file(fn)
         return jsonify({'status': 'success', 'message': 'Дефект удалён'})
     except Exception as e:
         db.rollback()
@@ -446,7 +491,7 @@ def register_defect_manual():
             gun_id = db.execute("INSERT INTO gun (g_num, gun_type) VALUES (?, 'Ручной ввод')",
                                 (int(g_num),)).lastrowid
         res = df.register_occurrence(db, problem_code=problem_code, gun_id=gun_id, registered_by=uid)
-        _save_photos(db, res['defect_id'], photos, uid, dept)
+        _save_photos(db, res['defect_id'], photos, uid)
         snapshot_defect(db, res['defect_id'])
         db.commit()
         return jsonify({'status': 'success', 'stage': res['stage'], 'serial': res['serial'], 'defect_id': res['defect_id'],
@@ -582,14 +627,14 @@ def defect_detail(defect_id):
     if not d:
         return jsonify({'status': 'error', 'message': 'Дефект не найден'}), 404
     stages = db.execute("""
-        SELECT st.dept, st.entered_at, st.left_at, st.outcome, COALESCE(st.cause,'') as cause,
-               COALESCE(st.countermeasure,'') as countermeasure, COALESCE(st.note,'') as note,
-               COALESCE(w.surname,'') as actor
+        SELECT st.UniqueID as stage_id, st.dept, st.entered_at, st.left_at, st.outcome,
+               COALESCE(st.cause,'') as cause, COALESCE(st.countermeasure,'') as countermeasure,
+               COALESCE(st.note,'') as note, COALESCE(w.surname,'') as actor
         FROM defect_stage st LEFT JOIN worker w ON st.actor_id=w.UniqueID
         WHERE st.defect_id=? ORDER BY st.UniqueID""", (defect_id,)).fetchall()
     occ = db.execute('SELECT occ_date FROM defect_occurrence WHERE defect_id=? ORDER BY UniqueID',
                      (defect_id,)).fetchall()
-    photos = db.execute('SELECT UniqueID, stage_dept, ts FROM defect_photo WHERE defect_id=? ORDER BY UniqueID',
+    photos = db.execute('SELECT UniqueID, stage_dept, stage_id, ts FROM defect_photo WHERE defect_id=? ORDER BY UniqueID',
                         (defect_id,)).fetchall()
     return jsonify({'status': 'success', 'defect': dict(d),
                     'stages': [dict(r) for r in stages],
@@ -616,12 +661,63 @@ def defect_photo_upload(defect_id):
     if ext not in _IMG_EXT:
         return jsonify({'status': 'error', 'message': 'Только изображения (jpg/png/webp/gif)'}), 400
     try:
+        sid, sdept = _photo_stage(db, defect_id)
         fname = f'{defect_id}_{uuid.uuid4().hex}{ext}'
         f.save(os.path.join(_photo_dir(), fname))
-        db.execute('INSERT INTO defect_photo (defect_id, path, uploaded_by, stage_dept, ts) VALUES (?,?,?,?,?)',
-                   (defect_id, fname, uid, dept, df._now()))
+        db.execute('INSERT INTO defect_photo (defect_id, path, uploaded_by, stage_dept, stage_id, ts) VALUES (?,?,?,?,?,?)',
+                   (defect_id, fname, uid, sdept, sid, df._now()))
         db.commit()
         return jsonify({'status': 'success', 'message': 'Фото добавлено'})
+    except Exception as e:
+        db.rollback()
+        return api_error(e)
+
+
+@bp.route('/api/defects/<int:defect_id>/photo/<int:photo_id>', methods=['DELETE'])
+def defect_photo_delete(defect_id, photo_id):
+    """Удалить своё фото, пока дефект на этапе моего отдела (админ — любое). Чистит и файл."""
+    _uid, dept, _is_admin, priv = _ctx()
+    db = get_db()
+    p = db.execute("""SELECT dp.path, dp.stage_dept, d.current_stage_dept
+                      FROM defect_photo dp JOIN defects d ON d.UniqueID=dp.defect_id
+                      WHERE dp.UniqueID=? AND dp.defect_id=?""", (photo_id, defect_id)).fetchone()
+    if not p:
+        return jsonify({'status': 'error', 'message': 'Фото не найдено'}), 404
+    if not _can_edit_own(p['stage_dept'], p['current_stage_dept'], dept, priv):
+        return _denied_edit()
+    try:
+        db.execute('DELETE FROM defect_photo WHERE UniqueID=?', (photo_id,))
+        db.commit()
+        _del_photo_file(p['path'])
+        return jsonify({'status': 'success', 'message': 'Фото удалено'})
+    except Exception as e:
+        db.rollback()
+        return api_error(e)
+
+
+@bp.route('/api/defects/<int:defect_id>/stage/<int:stage_id>', methods=['PATCH', 'POST'])
+def defect_stage_edit(defect_id, stage_id):
+    """Правка комментария своего этапа (cause/countermeasure/note), пока дефект на моём
+    этапе (этап не закрыт). Чужой/замороженный этап — только админ. Правка идёт в аудит."""
+    _uid, dept, _is_admin, priv = _ctx()
+    data = request.json or {}
+    db = get_db()
+    st = db.execute("""SELECT s.dept, s.left_at, d.current_stage_dept
+                       FROM defect_stage s JOIN defects d ON d.UniqueID=s.defect_id
+                       WHERE s.UniqueID=? AND s.defect_id=?""", (stage_id, defect_id)).fetchone()
+    if not st:
+        return jsonify({'status': 'error', 'message': 'Этап не найден'}), 404
+    frozen = st['left_at'] is not None            # этап закрыт и передан дальше → заморожен
+    if not (priv or (st['dept'] == dept and not frozen)):
+        return _denied_edit()
+    fields = {k: (data.get(k) or '').strip() for k in ('cause', 'countermeasure', 'note') if k in data}
+    if not fields:
+        return jsonify({'status': 'error', 'message': 'Нечего менять: передайте cause/countermeasure/note'}), 400
+    try:
+        sets = ', '.join(f'{k}=?' for k in fields)
+        db.execute(f'UPDATE defect_stage SET {sets} WHERE UniqueID=?', (*fields.values(), stage_id))
+        db.commit()
+        return jsonify({'status': 'success', 'message': 'Запись этапа обновлена'})
     except Exception as e:
         db.rollback()
         return api_error(e)
