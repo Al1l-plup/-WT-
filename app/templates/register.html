@@ -52,6 +52,11 @@
         {% for d in departments %}<option value="{{ d }}" {{ 'selected' if (form or {}).get('department')==d }}>{{ d }}</option>{% endfor %}
       </select>
     </div>
+    <div class="fld" id="areaBlock" style="display:none">
+      <label>Зона ответственности (участки по брендам)</label>
+      <div id="areaBrands"></div>
+      <p class="sub" style="margin:6px 0 0;opacity:.6">Отметьте участки, за которые отвечаете на каждом бренде — по ним вам будут адресоваться дефекты.</p>
+    </div>
     <div class="fld"><label>Логин — рабочая почта * <span title="На эту почту будут приходить уведомления об изменениях (рассылка)." style="cursor:help;opacity:.7">❓</span></label>
       <input name="login" type="email" required placeholder="name@company.com" autocomplete="username" value="{{ (form or {}).get('login','') }}"></div>
     <div class="row2">
@@ -62,5 +67,27 @@
   </form>
   <div class="alt">Уже есть учётная запись? <a href="/login">Войти</a></div>
 </div>
+<script>
+(function(){
+  const AREAS = {{ areas_json | safe }} || {brands:[], areas:{}};
+  const dept = document.querySelector('select[name=department]');
+  const block = document.getElementById('areaBlock');
+  const host = document.getElementById('areaBrands');
+  function render(){
+    const d = dept.value;
+    if (d !== 'Производство' && d !== 'ИТО'){ block.style.display='none'; host.innerHTML=''; return; }
+    block.style.display='';
+    host.innerHTML = (AREAS.brands||[]).map(b=>{
+      const segs = AREAS.areas[b.id] || [];
+      return `<div style="margin:6px 0"><div style="font-weight:600;font-size:13px">${b.name}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">${segs.map(s=>
+          `<label style="display:inline-flex;align-items:center;gap:4px;font-size:13px;border:1px solid var(--border);border-radius:6px;padding:3px 7px;cursor:pointer">
+            <input type="checkbox" name="area_${b.id}" value="${s}" style="width:auto;min-height:0">${s}</label>`).join('')}</div></div>`;
+    }).join('');
+  }
+  dept.addEventListener('change', render);
+  render();
+})();
+</script>
 </body>
 </html>

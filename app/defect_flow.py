@@ -16,6 +16,7 @@
 Группы: {MN}, {EO}, {все остальные вместе}. Пример (точка 124): BT→LP→BN = серия;
 BT→MN = не серия. Достаточно 2-й фиксации.
 """
+import re
 from datetime import date, datetime
 
 OTO = 'ОТО'
@@ -106,6 +107,58 @@ def config_flag(conn, key, default=True):
     if not r or r[0] is None:
         return bool(default)
     return str(r[0]).strip().lower() not in ('0', 'false', 'no', 'off', '')
+
+
+# ── зоны ответственности (бренд + участок) ───────────────────────────────────
+def base_segment(seg):
+    """Базовый код участка: 'EC2'→'EC', 'RF1'→'RF', 'MB'→'MB', 'INR+WH'→'INR+WH' (хвостовые цифры отбрасываем)."""
+    return re.sub(r'\d+$', '', seg or '').strip()
+
+
+def defect_area(station_name):
+    """Участок дефекта (базовый код) по имени станции."""
+    return base_segment(station_segment(station_name))
+
+
+def segments_by_brand(conn):
+    """{brand_id: [базовые коды участков]} — строится из станций (data-driven)."""
+    out = {}
+    for bid, name in conn.execute('SELECT brand_id, station_name FROM station'):
+        seg = base_segment(station_segment(name))
+        if seg:
+            out.setdefault(bid, set()).add(seg)
+    return {bid: sorted(v) for bid, v in out.items()}
+
+
+def worker_areas(conn, worker_id):
+    """Множество (brand_id, segment) — зоны ответственности сотрудника (пусто = нет ограничений)."""
+    return {(r[0], r[1]) for r in conn.execute(
+        'SELECT brand_id, segment FROM worker_area WHERE worker_id=?', (worker_id,))}
+
+
+def brands_with_areas(conn):
+    """Для формы выбора зон: {'brands': [{id, name}], 'areas': {brand_id: [участки]}}."""
+    brands = [{'id': r[0], 'name': r[1]} for r in conn.execute('SELECT UniqueID, brand FROM brand ORDER BY UniqueID')]
+    return {'brands': brands, 'areas': segments_by_brand(conn)}
+
+
+def worker_areas_map(conn, worker_id):
+    """{brand_id: [участки]} сотрудника — для отображения/редактирования."""
+    out = {}
+    for bid, seg in conn.execute('SELECT brand_id, segment FROM worker_area WHERE worker_id=? ORDER BY segment', (worker_id,)):
+        out.setdefault(bid, []).append(seg)
+    return out
+
+
+def set_worker_areas(conn, worker_id, areas_map):
+    """Переписать зоны сотрудника: areas_map = {brand_id: [участки]}. Удаляет старые, вставляет новые."""
+    conn.execute('DELETE FROM worker_area WHERE worker_id=?', (worker_id,))
+    for bid, segs in (areas_map or {}).items():
+        for seg in segs:
+            seg = base_segment(str(seg).strip().upper())
+            if seg:
+                conn.execute('INSERT OR IGNORE INTO worker_area (worker_id, brand_id, segment) VALUES (?,?,?)',
+                             (worker_id, int(bid), seg))
 
 
 # ── этапы (defect_stage) ─────────────────────────────────────────────────────

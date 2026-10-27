@@ -194,6 +194,7 @@ def defects_all():
                CASE WHEN d.spot_id IS NULL AND d.manual_spot_number IS NOT NULL THEN 1 ELSE 0 END as needs_enrichment,
                d.current_stage_dept,
                d.delegated_from_dept,
+               d.snap_brand_id,
                COALESCE(d.is_serial,0)                     as is_serial,
                COALESCE(d.return_count,0)                  as return_count,
                CASE WHEN EXISTS(SELECT 1 FROM weld_point wp WHERE wp.spot_id=d.spot_id AND wp.important='B')
@@ -231,10 +232,22 @@ def defects_all():
     """).fetchall()
     workers = db.execute('SELECT UniqueID, surname, name FROM worker WHERE is_active=1').fetchall()
     mydept = session.get('dept')
+    uid = session.get('uid')
+    my_areas = df.worker_areas(db, uid) if uid else set()
+    area_dept = mydept in ('Производство', 'ИТО')   # зоны ответственности применяем только к этим отделам
+
+    def _area_ok(r):
+        # зоны не заданы или отдел не адресуемый → без фильтра; дефект без участка (ручной) → виден всем отдела
+        if not area_dept or not my_areas:
+            return True
+        seg = df.defect_area(r['station_name'])
+        if not seg:
+            return True
+        return (r['snap_brand_id'], seg) in my_areas
 
     def row(r):
         d = dict(r)
-        d['mine'] = bool(d.get('current_stage_dept') and d['current_stage_dept'] == mydept)
+        d['mine'] = bool(d.get('current_stage_dept') and d['current_stage_dept'] == mydept and _area_ok(r))
         return d
 
     return jsonify({'open': [row(r) for r in open_rows],

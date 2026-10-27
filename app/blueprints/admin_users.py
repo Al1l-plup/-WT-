@@ -11,6 +11,7 @@ import string
 from flask import Blueprint, current_app, jsonify, render_template, request, session
 from werkzeug.security import generate_password_hash
 
+from app import defect_flow as df
 from app.constants import DEPARTMENTS
 from app.db import get_db
 from app.errors import api_error
@@ -50,8 +51,31 @@ def list_users():
         d = dict(r)
         # корневой админ (по почте) всегда админ — его роль менять/снимать нельзя
         d['is_root'] = (d.get('login') or '').lower() == admin_email
+        d['areas'] = df.worker_areas_map(db, d['UniqueID'])   # {brand_id: [участки]}
         users.append(d)
-    return jsonify({'departments': DEPARTMENTS, 'users': users})
+    return jsonify({'departments': DEPARTMENTS, 'users': users, 'areas_ref': df.brands_with_areas(db)})
+
+
+@bp.route('/api/areas')
+def areas():
+    """Справочник участков по брендам (для формы зон ответственности)."""
+    return jsonify(df.brands_with_areas(get_db()))
+
+
+@bp.route('/api/admin/users/<int:uid>/areas', methods=['PUT'])
+def set_user_areas(uid):
+    """Назначить зоны ответственности сотруднику: {areas: {brand_id: [участки]}}."""
+    db = get_db()
+    if not _get_user(db, uid):
+        return jsonify({'status': 'error', 'message': 'Пользователь не найден'}), 404
+    amap = (request.json or {}).get('areas') or {}
+    try:
+        df.set_worker_areas(db, uid, amap)
+        db.commit()
+        return jsonify({'status': 'success', 'areas': df.worker_areas_map(db, uid)})
+    except Exception as e:
+        db.rollback()
+        return api_error(e)
 
 
 def _get_user(db, uid):

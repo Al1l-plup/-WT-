@@ -52,10 +52,10 @@
   <div class="card" style="overflow-x:auto">
     <table class="tbl tbl-mobile" id="utbl">
       <thead><tr>
-        <th>Сотрудник</th><th>Логин (почта)</th><th>Отдел</th><th>Роль</th>
+        <th>Сотрудник</th><th>Логин (почта)</th><th>Отдел</th><th>Зоны ответственности</th><th>Роль</th>
         <th>Статус</th><th style="text-align:right">Действия</th>
       </tr></thead>
-      <tbody id="ubody"><tr><td colspan="6">Загрузка…</td></tr></tbody>
+      <tbody id="ubody"><tr><td colspan="7">Загрузка…</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -73,9 +73,23 @@
   </div>
 </dialog>
 
+<dialog id="areaDlg">
+  <div class="tempbox">
+    <h3 style="margin:0 0 4px">Зоны ответственности</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 4px" id="areaWho"></p>
+    <div id="areaBody"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-ghost" id="areaCancel" type="button">Отмена</button>
+      <button class="btn btn-primary" id="areaSave" type="button">Сохранить</button>
+    </div>
+  </div>
+</dialog>
+
 <script>
 const $ = s => document.querySelector(s);
 let DEPTS = [];
+let AREAS_REF = {brands:[], areas:{}};
+let USERS_BY_ID = {};
 
 function alertMsg(type, msg){
   $('#alert').innerHTML = `<div class="alert alert-${type}" style="margin-bottom:12px">${msg}</div>`;
@@ -87,6 +101,9 @@ async function load(){
   if (r.status === 403){ location.href = '/'; return; }
   const d = await r.json();
   DEPTS = d.departments;
+  AREAS_REF = d.areas_ref || {brands:[], areas:{}};
+  USERS_BY_ID = {};
+  d.users.forEach(u => { USERS_BY_ID[u.UniqueID] = u; });
   $('#ubody').innerHTML = d.users.map(u => {
     const fio = [u.surname, u.name, u.father_name].filter(Boolean).join(' ');
     const opts = DEPTS.map(x => `<option value="${x}" ${x===u.department?'selected':''}>${x}</option>`).join('');
@@ -104,6 +121,7 @@ async function load(){
       <td data-label="Сотрудник">${fio || '—'}${u.position ? '<br><span style="opacity:.6;font-size:12px">'+u.position+'</span>' : ''}</td>
       <td data-label="Логин">${u.login || '—'}</td>
       <td data-label="Отдел"><select class="u-dept" ${u.role==='admin'?'title="Админ определяется по почте"':''}>${opts}</select></td>
+      <td data-label="Зоны">${zonesCell(u)}</td>
       <td data-label="Роль">${role}</td>
       <td data-label="Статус">${status}</td>
       <td data-label="Действия" style="text-align:right;white-space:nowrap">
@@ -112,7 +130,7 @@ async function load(){
         <button class="rowbtn act-toggle">${u.is_active ? 'Отключить' : 'Включить'}</button>
       </td>
     </tr>`;
-  }).join('') || '<tr><td colspan="6">Нет учётных записей</td></tr>';
+  }).join('') || '<tr><td colspan="7">Нет учётных записей</td></tr>';
 
   $('#ubody').querySelectorAll('tr[data-id]').forEach(tr => {
     const id = tr.dataset.id;
@@ -121,7 +139,36 @@ async function load(){
     tr.querySelector('.act-toggle').onclick = () => toggleActive(id, tr.querySelector('.act-toggle').textContent === 'Включить');
     const roleEl = tr.querySelector('.act-role');
     if (roleEl) roleEl.onclick = () => saveRole(id, tr.dataset.admin === '1' ? 'user' : 'admin');
+    const aEl = tr.querySelector('.act-areas');
+    if (aEl) aEl.onclick = () => openAreas(USERS_BY_ID[id]);
   });
+}
+
+function zonesCell(u){
+  if (u.department !== 'Производство' && u.department !== 'ИТО') return '<span style="opacity:.5">—</span>';
+  const am = u.areas || {};
+  const parts = (AREAS_REF.brands || []).map(b => {
+    const segs = am[b.id] || am[String(b.id)] || [];
+    return segs.length ? `${b.name}: ${segs.join(',')}` : null;
+  }).filter(Boolean);
+  const summary = parts.length ? parts.join(' · ') : '<span style="opacity:.6">не задано</span>';
+  return `${summary} <button class="rowbtn act-areas" style="margin-left:6px">Настроить</button>`;
+}
+
+let areaEditId = null;
+function openAreas(u){
+  areaEditId = u.UniqueID;
+  $('#areaWho').textContent = [u.surname, u.name].filter(Boolean).join(' ') + ' · ' + u.department;
+  const am = u.areas || {};
+  $('#areaBody').innerHTML = (AREAS_REF.brands || []).map(b => {
+    const have = new Set(am[b.id] || am[String(b.id)] || []);
+    const segs = AREAS_REF.areas[b.id] || AREAS_REF.areas[String(b.id)] || [];
+    return `<div style="margin:8px 0"><div style="font-weight:600;font-size:13px">${b.name}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">${segs.map(s =>
+        `<label style="display:inline-flex;align-items:center;gap:4px;font-size:13px;border:1px solid var(--border);border-radius:6px;padding:3px 7px;cursor:pointer">
+          <input type="checkbox" data-brand="${b.id}" value="${s}" ${have.has(s) ? 'checked' : ''}>${s}</label>`).join('') || '<span style="opacity:.5;font-size:13px">нет участков</span>'}</div></div>`;
+  }).join('');
+  $('#areaDlg').showModal();
 }
 
 async function saveRole(id, role){
@@ -159,6 +206,19 @@ async function resetPw(id){
   $('#tempDlg').showModal();
   load();
 }
+
+$('#areaCancel').onclick = () => $('#areaDlg').close();
+$('#areaSave').onclick = async () => {
+  const map = {};
+  $('#areaBody').querySelectorAll('input[type=checkbox]:checked').forEach(c => {
+    (map[c.dataset.brand] = map[c.dataset.brand] || []).push(c.value);
+  });
+  const r = await fetch(`/api/admin/users/${areaEditId}/areas`, {method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({areas: map})});
+  const d = await r.json();
+  if (r.ok){ $('#areaDlg').close(); alertMsg('success', 'Зоны ответственности обновлены'); load(); }
+  else alertMsg('danger', d.message || 'Ошибка');
+};
 
 $('#tempClose').onclick = () => $('#tempDlg').close();
 $('#tempCopy').onclick = async () => {

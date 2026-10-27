@@ -7,6 +7,7 @@ dept / role / is_admin — по ним считаются права (app/permis
 
 Аккаунт с логином = ADMIN_EMAIL автоматически получает роль admin при входе/регистрации.
 """
+import json
 import re
 
 from flask import (
@@ -108,12 +109,14 @@ def login():
 
 @bp.route('/register', methods=['GET', 'POST'])
 def register():
+    areas = df.brands_with_areas(get_db())   # {brands:[...], areas:{brand_id:[участки]}} — для блока «Зона ответственности»
     if request.method == 'GET':
-        return render_template('register.html', departments=DEPARTMENTS)
+        return render_template('register.html', departments=DEPARTMENTS, areas_json=json.dumps(areas, ensure_ascii=False))
     data = request.form
 
     def err(msg):
-        return render_template('register.html', departments=DEPARTMENTS, error=msg, form=data)
+        return render_template('register.html', departments=DEPARTMENTS, error=msg, form=data,
+                               areas_json=json.dumps(areas, ensure_ascii=False))
 
     surname = (data.get('surname') or '').strip()
     name = (data.get('name') or '').strip()
@@ -145,11 +148,20 @@ def register():
             (surname, name, father, data.get('position', ''), dept,
              login_,  # почта дублируется в email — для будущей рассылки
              generate_password_hash(pw1), login_, role))
+        wid = cur.lastrowid
+        # зоны ответственности (бренд+участок) — для Производства/ИТО
+        amap = {}
+        for b in areas['brands']:
+            segs = data.getlist(f"area_{b['id']}")
+            if segs:
+                amap[b['id']] = segs
+        if amap:
+            df.set_worker_areas(db, wid, amap)
         db.commit()
     except Exception as e:
         db.rollback()
         return api_error(e)
-    row = db.execute('SELECT * FROM worker WHERE UniqueID=?', (cur.lastrowid,)).fetchone()
+    row = db.execute('SELECT * FROM worker WHERE UniqueID=?', (wid,)).fetchone()
     _set_session(row)
     return redirect('/')
 
