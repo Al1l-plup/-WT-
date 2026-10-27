@@ -195,6 +195,8 @@ def defects_all():
                d.current_stage_dept,
                d.delegated_from_dept,
                d.snap_brand_id,
+               d.worker_register_id,
+               TRIM(COALESCE(w_reg.surname,'') || ' ' || COALESCE(w_reg.name,'')) as register_name,
                COALESCE(d.is_serial,0)                     as is_serial,
                COALESCE(d.return_count,0)                  as return_count,
                CASE WHEN EXISTS(SELECT 1 FROM weld_point wp WHERE wp.spot_id=d.spot_id AND wp.important='B')
@@ -212,6 +214,7 @@ def defects_all():
         LEFT JOIN station d_st   ON d_tsa.station_id      = d_st.UniqueID
         LEFT JOIN worker w_asgn  ON d.assigned_worker_id  = w_asgn.UniqueID
         LEFT JOIN worker w_solv  ON d.worker_solve_id     = w_solv.UniqueID
+        LEFT JOIN worker w_reg   ON d.worker_register_id  = w_reg.UniqueID
     """
     # GROUP BY d.UniqueID — одна строка на дефект: иначе джойн gun→трансформатор→станция
     # размножает дефект, если у гана несколько активных назначений трансформатора.
@@ -225,11 +228,18 @@ def defects_all():
     unresolved_rows = db.execute(base + """
         WHERE COALESCE(d.status,'') = 'unresolved'
     """ + priority).fetchall()
-    closed_rows = db.execute(base + """
-        WHERE COALESCE(d.status,'registered') = 'closed'
-        GROUP BY d.UniqueID
-        ORDER BY d.df_date DESC, d.UniqueID DESC LIMIT 50
-    """).fetchall()
+    # Закрытые обрезаны до 50 последних; при фильтре по датам (панель фильтров) берём полный
+    # диапазон с сервера, т.к. клиент видит только топ-50.
+    df_from = (request.args.get('date_from') or '').strip()
+    df_to = (request.args.get('date_to') or '').strip()
+    closed_sql = base + " WHERE COALESCE(d.status,'registered') = 'closed'"
+    closed_params = []
+    if df_from and df_to:
+        closed_sql += ' AND d.df_date BETWEEN ? AND ?'
+        closed_params = [df_from, df_to]
+    closed_sql += ' GROUP BY d.UniqueID ORDER BY d.df_date DESC, d.UniqueID DESC'
+    closed_sql += '' if (df_from and df_to) else ' LIMIT 50'
+    closed_rows = db.execute(closed_sql, closed_params).fetchall()
     workers = db.execute('SELECT UniqueID, surname, name FROM worker WHERE is_active=1').fetchall()
     mydept = session.get('dept')
     uid = session.get('uid')

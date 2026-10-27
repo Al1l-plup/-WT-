@@ -138,6 +138,27 @@
       <button class="dtab" data-tab="serial">🔁 Серийные <span class="cnt" id="c-serial">0</span></button>
       <button class="dtab" data-tab="unresolved">⚠ Не выявленные <span class="cnt" id="c-unres">0</span></button>
       <button class="dtab" data-tab="closed">✓ Закрытые <span class="cnt" id="c-closed">0</span></button>
+      <button class="dtab" data-tab="controller">👤 Контролёр <span class="cnt" id="c-ctrl">0</span></button>
+    </div>
+
+    <style>
+      .flbl{font-size:11px;opacity:.65;margin-bottom:2px}
+      .fin{padding:5px 7px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit;font-size:13px}
+    </style>
+    <div id="dfilters" style="display:flex;flex-wrap:wrap;gap:8px 10px;align-items:flex-end;margin:.5rem 0 .25rem">
+      <div><div class="flbl">С даты</div><input type="date" id="fFrom" class="fin"></div>
+      <div><div class="flbl">По дату</div><input type="date" id="fTo" class="fin"></div>
+      <div style="display:flex;gap:4px;align-self:flex-end">
+        <button type="button" class="btn btn-ghost btn-sm fper" data-p="today">Сегодня</button>
+        <button type="button" class="btn btn-ghost btn-sm fper" data-p="week">Неделя</button>
+        <button type="button" class="btn btn-ghost btn-sm fper" data-p="month">Месяц</button>
+      </div>
+      <div><div class="flbl">Контролёр</div><select id="fCtrl" class="fin"><option value="">Все</option></select></div>
+      <div><div class="flbl">Станция</div><select id="fStation" class="fin"><option value="">Все</option></select></div>
+      <div><div class="flbl">Код</div><select id="fCode" class="fin"><option value="">Все</option></select></div>
+      <div><div class="flbl">G-номер</div><input type="text" id="fGnum" class="fin" placeholder="G…" style="width:90px"></div>
+      <div><div class="flbl">Отдел (этап)</div><select id="fDept" class="fin"><option value="">Все</option></select></div>
+      <button type="button" class="btn btn-ghost btn-sm" id="fClear" style="align-self:flex-end">Сброс</button>
     </div>
 
     <div id="defectList"><div class="empty-row" style="padding:1.5rem;text-align:center;color:var(--muted)">Загрузка…</div></div>
@@ -208,21 +229,43 @@ $('dtabs').addEventListener('click', e => {
   const b = e.target.closest('.dtab'); if (!b) return;
   TAB = b.dataset.tab; openId = null;
   document.querySelectorAll('.dtab').forEach(t => t.classList.toggle('active', t === b));
+  // вкладка «Контролёр» по умолчанию показывает МОИ зарегистрированные (фильтр «Контролёр» = я)
+  if (TAB === 'controller' && !$('fCtrl').value && ME.uid) $('fCtrl').value = String(ME.uid);
   renderList();
 });
+
+// ── панель фильтров ──
+['fFrom', 'fTo'].forEach(id => $(id).addEventListener('change', loadBoard));   // даты → перезапрос (для «Закрытых»)
+['fCtrl', 'fStation', 'fCode', 'fDept'].forEach(id => $(id).addEventListener('change', renderList));
+$('fGnum').addEventListener('input', renderList);
+document.querySelectorAll('.fper').forEach(b => b.addEventListener('click', () => { setPeriod(b.dataset.p); loadBoard(); }));
+$('fClear').addEventListener('click', () => {
+  ['fFrom', 'fTo', 'fGnum', 'fCtrl', 'fStation', 'fCode', 'fDept'].forEach(id => { $(id).value = ''; });
+  loadBoard();
+});
+function setPeriod(p){
+  const to = new Date(), from = new Date();
+  if (p === 'week') from.setDate(from.getDate() - 6);
+  else if (p === 'month') from.setMonth(from.getMonth() - 1);
+  const iso = d => d.toISOString().slice(0, 10);
+  $('fFrom').value = iso(from); $('fTo').value = iso(to);
+}
 
 function priv(){ return !!(ME.is_admin || ME.privileged || ME.dept === 'WeldTeam'); }
 
 function loadBoard(){
-  fetch('/api/defects/all').then(r=>r.json()).then(d=>{
+  const qs = new URLSearchParams();
+  const f = $('fFrom') && $('fFrom').value, t = $('fTo') && $('fTo').value;
+  if (f && t){ qs.set('date_from', f); qs.set('date_to', t); }   // для «Закрытых» диапазон берём с сервера (иначе только топ-50)
+  fetch('/api/defects/all' + (qs.toString() ? '?' + qs.toString() : '')).then(r=>r.json()).then(d=>{
     BOARD = d;
-    const mine = d.open.filter(x => x.mine).length;
-    const serial = d.open.filter(x => x.is_serial).length;
-    $('c-mine').textContent = mine;
+    $('c-mine').textContent = d.open.filter(x => x.mine).length;
     $('c-all').textContent = d.open.length;
-    $('c-serial').textContent = serial;
+    $('c-serial').textContent = d.open.filter(x => x.is_serial).length;
     $('c-unres').textContent = d.unresolved.length;
     $('c-closed').textContent = d.closed.length;
+    $('c-ctrl').textContent = d.open.filter(x => x.worker_register_id === ME.uid).length;
+    buildFilterOptions();
     renderList();
   });
 }
@@ -231,15 +274,49 @@ function listFor(tab){
   if (tab === 'mine') return BOARD.open.filter(x => x.mine);
   if (tab === 'all') return BOARD.open;
   if (tab === 'serial') return BOARD.open.filter(x => x.is_serial);
+  if (tab === 'controller') return BOARD.open;       // открытые; контролёр задаётся фильтром «Контролёр» (по умолч. — я)
   if (tab === 'unresolved') return BOARD.unresolved;
   return BOARD.closed;
 }
 
+function applyFilters(rows){
+  const f = $('fFrom').value, t = $('fTo').value, ctrl = $('fCtrl').value;
+  const st = $('fStation').value, code = $('fCode').value;
+  const gnum = $('fGnum').value.trim().toLowerCase(), dept = $('fDept').value;
+  return rows.filter(d => {
+    if (f && (d.df_date || '') < f) return false;
+    if (t && (d.df_date || '') > t) return false;
+    if (ctrl && String(d.worker_register_id) !== ctrl) return false;
+    if (st && (d.station_name || '') !== st) return false;
+    if (code && (d.problem_code || '') !== code) return false;
+    if (gnum && !String(d.g_num || '').toLowerCase().includes(gnum)) return false;
+    if (dept && (d.current_stage_dept || '') !== dept) return false;
+    return true;
+  });
+}
+
 function renderList(){
   const host = $('defectList');
-  const rows = listFor(TAB);
+  const rows = applyFilters(listFor(TAB));
   if (!rows.length){ host.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--muted)">Пусто</div>`; return; }
   host.innerHTML = rows.map(cardHtml).join('');
+}
+
+function uniq(a){ return [...new Set(a)].sort(); }
+function fillSelect(id, items){
+  const sel = $(id), cur = sel.value;
+  sel.innerHTML = '<option value="">Все</option>' + items.map(i => `<option value="${esc(i.v)}">${esc(i.l)}</option>`).join('');
+  if ([...sel.options].some(o => o.value === cur)) sel.value = cur;   // сохранить текущий выбор при перерисовке
+}
+function buildFilterOptions(){
+  const all = [...BOARD.open, ...BOARD.unresolved, ...BOARD.closed];
+  const ctrls = new Map();
+  if (ME.uid) ctrls.set(String(ME.uid), (ME.name || 'я') + ' (я)');
+  all.forEach(d => { if (d.worker_register_id) ctrls.set(String(d.worker_register_id), d.register_name || ('#' + d.worker_register_id)); });
+  fillSelect('fCtrl', [...ctrls.entries()].map(([v, l]) => ({v, l})));
+  fillSelect('fStation', uniq(all.map(d => d.station_name).filter(s => s && s !== '—')).map(v => ({v, l: v})));
+  fillSelect('fCode', uniq(all.map(d => d.problem_code).filter(Boolean)).map(v => ({v, l: v})));
+  fillSelect('fDept', uniq(all.map(d => d.current_stage_dept).filter(Boolean)).map(v => ({v, l: v})));
 }
 
 function cardHtml(d){

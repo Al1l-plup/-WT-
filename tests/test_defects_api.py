@@ -242,6 +242,25 @@ def test_registration_sets_created_at(client):
     assert ca and 'T' in ca   # не только дата, но и время
 
 
+def test_board_exposes_registrar_and_date_filter(register_client):
+    """Доска отдаёт регистратора (worker_register_id + имя); фильтр по датам у закрытых — серверный."""
+    import datetime
+    otk = register_client(department='ОТК')
+    uid = otk.get('/api/me').get_json()['uid']
+    did = _reg(otk, 96700)['defect_id']
+    row = next(x for x in otk.get('/api/defects/all').get_json()['open'] if x['UniqueID'] == did)
+    assert row['worker_register_id'] == uid and row['register_name']            # кто зафиксировал — в выдаче
+    # довести до закрытого
+    prod = register_client(department='Производство', login='rd_prod@x.kz')
+    prod.post(f'/api/defects/{did}/act', json={'action': 'close', 'countermeasure': 'ok', 'vin': 'X'})
+    otk.post(f'/api/defects/{did}/act', json={'action': 'otk_approve'})
+    today = datetime.date.today().isoformat()
+    closed_today = otk.get(f'/api/defects/all?date_from={today}&date_to={today}').get_json()['closed']
+    assert any(x['UniqueID'] == did for x in closed_today)                       # попал в диапазон сегодня
+    closed_old = otk.get('/api/defects/all?date_from=2000-01-01&date_to=2000-12-31').get_json()['closed']
+    assert not any(x['UniqueID'] == did for x in closed_old)                     # вне диапазона — нет
+
+
 def test_board_no_duplicate_on_multi_assignment(client, app):
     """Дефект на гане с НЕСКОЛЬКИМИ активными назначениями трансформатора не должен
     дублироваться в доске (регрессия: джойн gun→трансформатор→станция размножал строки)."""
