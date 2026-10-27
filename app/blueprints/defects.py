@@ -196,6 +196,8 @@ def defects_all():
                d.delegated_from_dept,
                d.snap_brand_id,
                d.worker_register_id,
+               d.assigned_worker_id,
+               TRIM(COALESCE(w_asgn.surname,'') || ' ' || COALESCE(w_asgn.name,'')) as assignee_name,
                TRIM(COALESCE(w_reg.surname,'') || ' ' || COALESCE(w_reg.name,'')) as register_name,
                COALESCE(d.is_serial,0)                     as is_serial,
                COALESCE(d.return_count,0)                  as return_count,
@@ -531,19 +533,48 @@ def register_defect_manual():
 def defect_act(defect_id):
     """Единая точка действий: close | pass | bounce | delegate_oto | oto | reopen.
     Право действия проверяется по текущему этапу (владение) + WeldTeam=аварийный клапан."""
-    uid, dept, _is_admin, priv = _ctx()
+    uid, dept, is_admin, priv = _ctx()
     data = request.json or {}
     action = (data.get('action') or '').strip()
     db = get_db()
-    d = db.execute('SELECT status, current_stage_dept FROM defects WHERE UniqueID=?', (defect_id,)).fetchone()
+    d = db.execute('SELECT status, current_stage_dept, assigned_worker_id FROM defects WHERE UniqueID=?',
+                   (defect_id,)).fetchone()
     if not d:
         return jsonify({'status': 'error', 'message': 'Дефект не найден'}), 404
-    status, cur_dept = d['status'], d['current_stage_dept']
+    status, cur_dept, assignee = d['status'], d['current_stage_dept'], d['assigned_worker_id']
     acting = cur_dept or dept
     try:
-        if action == 'close':
+        # ── взять в работу / отпустить ───────────────────────────────────────
+        if action == 'claim':
             if not df.can_act_stage(cur_dept, dept, priv):
                 return _denied()
+            taken = db.execute('UPDATE defects SET assigned_worker_id=? WHERE UniqueID=? AND assigned_worker_id IS NULL',
+                               (uid, defect_id)).rowcount
+            if not taken:
+                who = db.execute("""SELECT TRIM(w.surname || ' ' || substr(w.name, 1, 1) || '.') FROM defects dd
+                                    JOIN worker w ON w.UniqueID = dd.assigned_worker_id WHERE dd.UniqueID=?""",
+                                 (defect_id,)).fetchone()
+                return jsonify({'status': 'error',
+                                'message': f'Уже в работе у «{who[0]}»' if who and who[0] else 'Дефект уже в работе'}), 400
+            db.commit()
+            return jsonify({'status': 'success', 'message': 'Взято в работу'})
+        if action == 'release':
+            if not (is_admin or assignee == uid):
+                return jsonify({'status': 'error', 'message': 'Отпустить может только тот, кто взял (или админ)'}), 403
+            db.execute('UPDATE defects SET assigned_worker_id=NULL WHERE UniqueID=?', (defect_id,))
+            db.commit()
+            return jsonify({'status': 'success', 'message': 'Отпущено'})
+
+        # ── СТРОГО: действовать может только тот, кто ВЗЯЛ дефект в работу (WeldTeam/админ — клапан) ──
+        if action != 'reopen':
+            if not df.can_act_stage(cur_dept, dept, priv):
+                return _denied()
+            if not priv and assignee != uid:
+                if assignee is None:
+                    return jsonify({'status': 'error', 'message': 'Сначала возьмите дефект в работу («Взять в работу»)'}), 400
+                return jsonify({'status': 'error', 'message': 'Дефект в работе у другого сотрудника'}), 403
+
+        if action == 'close':
             cm = (data.get('countermeasure') or '').strip()
             if not cm:
                 return jsonify({'status': 'error', 'message': 'Укажите контрмеру'}), 400
@@ -556,15 +587,11 @@ def defect_act(defect_id):
         elif action == 'otk_approve':
             if status != 'pending_otk':
                 return jsonify({'status': 'error', 'message': 'Дефект не на согласовании ОТК'}), 400
-            if not df.can_act_stage(cur_dept, dept, priv):
-                return _denied()
             df.act_otk_approve(db, defect_id, uid, (data.get('note') or '').strip() or None)
             msg = 'ОТК согласовал закрытие — дефект закрыт'
         elif action == 'otk_reject':
             if status != 'pending_otk':
                 return jsonify({'status': 'error', 'message': 'Дефект не на согласовании ОТК'}), 400
-            if not df.can_act_stage(cur_dept, dept, priv):
-                return _denied()
             reason = (data.get('reason') or '').strip()
             if not reason:
                 return jsonify({'status': 'error',
@@ -579,8 +606,6 @@ def defect_act(defect_id):
             back = df.act_otk_reject(db, defect_id, uid, reason)
             msg = f'Закрытие не согласовано — возврат отделу «{back}»'
         elif action == 'pass':
-            if not df.can_act_stage(cur_dept, dept, priv):
-                return _denied()
             note = (data.get('note') or '').strip()
             if not note:
                 return jsonify({'status': 'error',
@@ -589,8 +614,6 @@ def defect_act(defect_id):
             msg = (f'Передано отделу «{nxt}»' if nxt
                    else 'Причина не выявлена — дефект в списке «не выявленные» (на недельный разбор)')
         elif action == 'bounce':
-            if not df.can_act_stage(cur_dept, dept, priv):
-                return _denied()
             to = (data.get('to_dept') or '').strip()
             if not to:
                 return jsonify({'status': 'error', 'message': 'Выберите отдел для возврата'}), 400
@@ -600,8 +623,6 @@ def defect_act(defect_id):
             df.act_bounce(db, defect_id, uid, to, reason)
             msg = f'Возвращено отделу «{to}» на доработку'
         elif action == 'delegate_oto':
-            if not df.can_act_stage(cur_dept, dept, priv):
-                return _denied()
             reason = (data.get('reason') or '').strip()
             if not reason:
                 return jsonify({'status': 'error',
@@ -609,8 +630,8 @@ def defect_act(defect_id):
             df.act_delegate_oto(db, defect_id, acting, uid, reason)
             msg = 'Заявка передана в ОТО (оборудование)'
         elif action == 'oto':
-            if not (status == 'at_oto' and (dept == df.OTO or priv)):
-                return _denied()
+            if status != 'at_oto':
+                return jsonify({'status': 'error', 'message': 'Дефект не передан в ОТО'}), 400
             cm = (data.get('countermeasure') or '').strip()
             if not cm:
                 return jsonify({'status': 'error', 'message': 'Укажите контрмеру ОТО'}), 400
@@ -628,6 +649,8 @@ def defect_act(defect_id):
             msg = f'Дефект переоткрыт → отдел «{back}»'
         else:
             return jsonify({'status': 'error', 'message': 'Неизвестное действие'}), 400
+        # передача/закрытие/возврат → этап сменился, снимаем «в работе» (следующий возьмёт заново)
+        db.execute('UPDATE defects SET assigned_worker_id=NULL WHERE UniqueID=?', (defect_id,))
         snapshot_defect(db, defect_id)
         db.commit()
         return jsonify({'status': 'success', 'message': msg})
@@ -646,6 +669,8 @@ def defect_detail(defect_id):
                COALESCE(d.is_serial,0) as is_serial, COALESCE(d.return_count,0) as return_count,
                COALESCE(d.vin,'') as vin, COALESCE(d.created_at, d.df_date, '') as created_at,
                COALESCE(d.manual_model_id, d.snap_model_id) as model_id,
+               d.assigned_worker_id,
+               (SELECT TRIM(w.surname || ' ' || substr(w.name,1,1) || '.') FROM worker w WHERE w.UniqueID=d.assigned_worker_id) as assignee_name,
                COALESCE(d.root_cause,'') as root_cause, COALESCE(d.solution,'') as solution,
                COALESCE(d.snap_spot_number, s.spot_number, d.manual_spot_number, '—') as spot_number,
                COALESCE(d.snap_model_name, m.model_name, '—') as model_name,

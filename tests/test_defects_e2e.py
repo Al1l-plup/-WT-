@@ -34,6 +34,9 @@ def _reg_spot(c, model_id, spot, code='CR'):
 
 
 def _act(c, did, action, **kw):
+    # строго: действовать можно только взяв в работу — берём перед действием (идемпотентно для теста)
+    if action not in ('claim', 'release', 'reopen'):
+        c.post(f'/api/defects/{did}/act', json={'action': 'claim'})
     return c.post(f'/api/defects/{did}/act', json={'action': action, **kw})
 
 

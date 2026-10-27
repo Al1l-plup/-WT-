@@ -49,6 +49,7 @@ def test_photo_frozen_after_handoff_only_admin(register_client):
     did = _reg(otk, 90020)['defect_id']
     _upload(prod, did)
     pid = otk.get(f'/api/defects/{did}').get_json()['photos'][0]['UniqueID']
+    prod.post(f'/api/defects/{did}/act', json={'action': 'claim'})                # взять в работу (строгий режим)
     prod.post(f'/api/defects/{did}/act', json={'action': 'pass', 'note': 'ок'})   # → WeldTeam; фото Производства заморожено
     assert prod.delete(f'/api/defects/{did}/photo/{pid}').status_code == 403       # после передачи — нельзя
     assert wt.delete(f'/api/defects/{did}/photo/{pid}').status_code == 403         # WeldTeam как ОТДЕЛ — тоже нельзя (не своё фото)
@@ -71,6 +72,7 @@ def test_stage_comment_edit_permissions(register_client):
     st = [s for s in otk.get(f'/api/defects/{did}').get_json()['stages'] if s['stage_id'] == sid][0]
     assert st['note'] == 'замечание цеха' and st['cause'] == 'оператор'
     # после передачи этап заморожен: свой отдел уже не правит; WeldTeam-как-отдел (текущий этап) — ТОЖЕ не правит чужой; только реальный админ
+    prod.post(f'/api/defects/{did}/act', json={'action': 'claim'})                      # взять в работу (строгий режим)
     prod.post(f'/api/defects/{did}/act', json={'action': 'pass', 'note': 'передаём'})   # → WeldTeam
     assert prod.patch(f'/api/defects/{did}/stage/{sid}', json={'note': 'поздно'}).status_code == 403
     assert wt.patch(f'/api/defects/{did}/stage/{sid}', json={'note': 'не моё'}).status_code == 403   # Производство-этап для WeldTeam — чужой

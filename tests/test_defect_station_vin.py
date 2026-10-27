@@ -51,6 +51,7 @@ def test_close_mb_station_requires_vin(register_client, app):
     prod = register_client(department='Производство', login='mbv_prod@x.kz')
     did = _reg(otk, 95001)['defect_id']
     _set_station(app, did, 'GW-MB-150')                   # станция MB → VIN обязателен
+    prod.post(f'/api/defects/{did}/act', json={'action': 'claim'})   # взять в работу (строгий режим)
     assert prod.post(f'/api/defects/{did}/act', json={'action': 'close', 'countermeasure': 'ок'}).status_code == 400
     assert prod.post(f'/api/defects/{did}/act',
                      json={'action': 'close', 'countermeasure': 'ок', 'vin': 'XW8MB1'}).get_json()['status'] == 'success'
@@ -61,6 +62,7 @@ def test_close_subassembly_no_vin(register_client, app):
     prod = register_client(department='Производство', login='sub_prod@x.kz')
     did = _reg(otk, 95002)['defect_id']
     _set_station(app, did, 'GW-BS R-40')                  # подсборка → хватит контрмеры, без VIN
+    prod.post(f'/api/defects/{did}/act', json={'action': 'claim'})   # взять в работу (строгий режим)
     r = prod.post(f'/api/defects/{did}/act', json={'action': 'close', 'countermeasure': 'подтянули'}).get_json()
     assert r['status'] == 'success'
     # и карточка говорит фронту, что VIN не нужен

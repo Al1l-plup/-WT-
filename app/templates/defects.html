@@ -323,7 +323,8 @@ function cardHtml(d){
   const cls = ['dcard', d.is_b_point ? 'b-point' : '', d.is_serial ? 'serial' : ''].filter(Boolean).join(' ');
   const model = esc(d.model_name || d.brand || '—') + (d.model_type && d.model_type.toLowerCase() !== 'single' ? ' ' + esc(d.model_type) : '');
   const flags = (d.is_b_point ? '<span class="flag b">точка B</span> ' : '')
-              + (d.is_serial ? `<span class="flag s">серийный${d.return_count ? ' ×' + d.return_count : ''}</span> ` : '');
+              + (d.is_serial ? `<span class="flag s">серийный${d.return_count ? ' ×' + d.return_count : ''}</span> ` : '')
+              + (d.assigned_worker_id ? `<span class="flag" title="в работе" style="background:var(--border);color:var(--text)">🔒 ${esc(d.assignee_name || 'в работе')}</span> ` : '');
   let chip, chipCls = '';
   if (d.status === 'closed'){ chip = '✓ закрыт'; chipCls = 'closed'; }
   else if (d.status === 'unresolved'){ chip = '⚠ не выявлен'; chipCls = 'unresolved'; }
@@ -357,8 +358,11 @@ window.toggleCard = function(id){
 function renderDetail(res){
   if (res.status !== 'success') return;
   const d = res.defect, body = $('body-'+d.UniqueID); if (!body) return;
-  const canAct = priv() || (ME.dept && ME.dept === d.current_stage_dept);
-  const canOto = d.status === 'at_oto' && (ME.dept === 'ОТО' || priv());
+  const canAct = priv() || (ME.dept && ME.dept === d.current_stage_dept);     // на своём этапе (или клапан)
+  const claimed = !!d.assigned_worker_id;
+  const mineClaim = claimed && d.assigned_worker_id === ME.uid;
+  const canWork = canAct && (priv() || mineClaim);   // СТРОГО: действовать может только взявший в работу (WeldTeam/админ — клапан)
+  const canOto = canWork && d.status === 'at_oto' && (ME.dept === 'ОТО' || priv());
   const vinReq = !!res.vin_required;   // VIN нужен только для станций MB/UB
 
   const ribbon = d.is_b_point ? `<div class="b-ribbon">⚠ ТОЧКА ГРУППЫ B — требует немедленного вмешательства</div>` : '';
@@ -405,9 +409,17 @@ function renderDetail(res){
   const photos = orphan.length ? `<div class="muted" style="margin-top:.5rem">Фото без этапа:</div><div class="photos">${orphan.map(photoChip).join('')}</div>` : '';
 
   let actions = '';
-  const otkFix = canAct && d.current_stage_dept === 'ОТК' && d.status !== 'pending_otk';   // возвращён в ОТК на исправление данных
+  // «Взять в работу» / «в работе у X» — строго: действовать может только взявший
+  const activeForClaim = ['in_review', 'registered', 'unresolved', 'at_oto', 'pending_otk'].includes(d.status);
+  if (claimed){
+    actions += `<div class="muted" style="margin:.4rem 0">🔒 В работе у <b>${esc(d.assignee_name || ('#' + d.assigned_worker_id))}</b>${mineClaim ? ' (вы)' : ''}`
+      + `${(mineClaim || admin) ? ` · <button class="btn btn-ghost btn-sm" onclick="act(${d.UniqueID},'release',{})">Отпустить</button>` : ''}</div>`;
+  } else if (canAct && !priv() && activeForClaim){
+    actions += `<div class="act-bar"><button class="btn btn-success btn-sm" onclick="act(${d.UniqueID},'claim',{})">🙋 Взять в работу</button></div>`;
+  }
+  const otkFix = canWork && d.current_stage_dept === 'ОТК' && d.status !== 'pending_otk';   // возвращён в ОТК на исправление данных
   if (otkFix){
-    actions = `
+    actions += `
       <div class="muted" style="margin:.4rem 0">Возвращено в ОТК на исправление. Поправьте код / точку / фото и передайте дальше.</div>
       <div class="act-form">
         <div class="fgroup"><label class="lbl">Модель</label><select id="corModel-${d.UniqueID}"></select></div>
@@ -420,8 +432,8 @@ function renderDetail(res){
         <div class="fgroup"><label class="lbl">Комментарий (обязательно): что исправили</label><textarea id="passn-${d.UniqueID}" placeholder="напр. верный номер точки/код…"></textarea></div>
         <button class="btn btn-ghost btn-sm" onclick="act(${d.UniqueID},'pass',{note:val('passn-${d.UniqueID}')})">Передать дальше</button>
       </div>`;
-  } else if (canAct && (d.status === 'in_review' || d.status === 'registered' || d.status === 'unresolved')){
-    actions = `
+  } else if (canWork && (d.status === 'in_review' || d.status === 'registered' || d.status === 'unresolved')){
+    actions += `
       <div class="act-bar">
         <button class="btn btn-success btn-sm" onclick="toggleForm('close-${d.UniqueID}')">✓ Закрыть</button>
         <button class="btn btn-ghost btn-sm" onclick="toggleForm('pass-${d.UniqueID}')">→ Передать дальше</button>
@@ -450,7 +462,7 @@ function renderDetail(res){
         <button class="btn btn-sm" style="background:var(--cyan);color:#000" onclick="act(${d.UniqueID},'delegate_oto',{reason:val('orsn-${d.UniqueID}')})">Передать в ОТО</button>
       </div>`;
   }
-  if (canAct && d.status === 'pending_otk'){
+  if (canWork && d.status === 'pending_otk'){
     actions += `
       <div class="muted" style="margin:.4rem 0">На согласовании ОТК — перепроверьте точку${d.vin ? ` (закрыто на VIN <b>${esc(d.vin)}</b>)` : ''}.</div>
       <div class="act-bar">
