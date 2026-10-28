@@ -39,8 +39,26 @@
     .dtable th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
     .dtable th.sortable:hover{color:var(--text)}
     .dtable th .sarr{color:var(--accent);font-weight:700}
-    .dtable tr.dftr th{padding:2px 6px 7px}
-    .dtable tr.dftr input.colf{width:100%;box-sizing:border-box;padding:3px 6px;font-size:12px;font-weight:400;text-transform:none;letter-spacing:0;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:inherit}
+    .dtable tr.dftr th{padding:2px 5px 6px;text-align:center}
+    .dbfbtn{border:1px solid var(--border);background:var(--bg);color:var(--muted);border-radius:4px;font-size:11px;line-height:1;padding:3px 9px;cursor:pointer}
+    .dbfbtn:hover{border-color:var(--accent);color:var(--accent)}
+    .dbfbtn.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+    /* попап-фильтр доски (как автофильтр Редактора): поиск + галочки + сортировка */
+    #dbfilter{position:fixed;z-index:200;width:262px;background:var(--card);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,.28);padding:8px;font-size:13px;color:inherit;display:flex;flex-direction:column;gap:7px}
+    #dbfilter .dbf-sort{display:flex;gap:6px}
+    #dbfilter .dbf-sort button{flex:1;padding:6px;border:1px solid var(--border);background:var(--bg);color:inherit;border-radius:6px;cursor:pointer;font-size:12px}
+    #dbfilter .dbf-sort button:hover{border-color:var(--accent);color:var(--accent)}
+    #dbfilter .dbf-search{padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit;font-size:13px;width:100%;box-sizing:border-box}
+    #dbfilter .dbf-all{display:flex;align-items:center;gap:7px;padding:2px 2px 6px;font-weight:600;border-bottom:1px solid var(--border);cursor:pointer}
+    #dbfilter .dbf-list{max-height:210px;overflow-y:auto;overflow-x:hidden}
+    #dbfilter .dbf-item{display:flex;align-items:center;gap:7px;min-height:24px;padding:2px 4px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3}
+    #dbfilter .dbf-item input,#dbfilter .dbf-all input{flex:0 0 auto;width:15px;height:15px;margin:0}
+    #dbfilter .dbf-item:hover{background:color-mix(in srgb,var(--accent) 12%,transparent)}
+    #dbfilter .dbf-actions{display:flex;gap:6px;border-top:1px solid var(--border);padding-top:7px}
+    #dbfilter .dbf-actions button{padding:6px 10px;border:1px solid var(--border);background:var(--bg);color:inherit;border-radius:6px;cursor:pointer;font-size:12px}
+    #dbfilter .dbf-ok{background:var(--accent);color:#fff;border-color:var(--accent)}
+    #dbfilter .dbf-clear{margin-left:auto}
+    #dbfilter .dbf-empty{color:var(--muted);font-size:11.5px;padding:2px}
     .dtable tr.drow{cursor:pointer}
     .dtable tr.drow.b-point td:first-child{box-shadow:inset 3px 0 0 var(--danger)}
     .dtable tr.drow.serial td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
@@ -180,8 +198,8 @@
         <button type="button" class="btn btn-ghost btn-sm fper" data-p="week">Неделя</button>
         <button type="button" class="btn btn-ghost btn-sm fper" data-p="month">Месяц</button>
       </div>
-      <button type="button" class="btn btn-ghost btn-sm" id="fClear" style="align-self:flex-end">Сброс</button>
-      <span class="flbl dhint" style="align-self:flex-end;margin-left:auto;max-width:280px;line-height:1.3">↕ клик по заголовку — сортировка (▲ по возрастанию / ▼ по убыванию / ещё раз — сброс) · поле под заголовком — поиск</span>
+      <button type="button" class="btn btn-ghost btn-sm" id="fClearAll" style="align-self:flex-end">✕ Сбросить все фильтры</button>
+      <span class="flbl dhint" style="align-self:flex-end;margin-left:auto;max-width:300px;line-height:1.3">↕ клик по заголовку — сортировка (▲ возр / ▼ убыв / сброс) · ▾ — фильтр: поиск + галочки + «Применить» (как в Редакторе)</span>
     </div>
 
     <div id="defectList"><div class="empty-row" style="padding:1.5rem;text-align:center;color:var(--muted)">Загрузка…</div></div>
@@ -259,9 +277,10 @@ $('dtabs').addEventListener('click', e => {
 // ── панель фильтров (даты/период); сортировка и поиск — в заголовках таблицы ──
 ['fFrom', 'fTo'].forEach(id => $(id).addEventListener('change', loadBoard));   // даты → перезапрос (для «Закрытых»)
 document.querySelectorAll('.fper').forEach(b => b.addEventListener('click', () => { setPeriod(b.dataset.p); loadBoard(); }));
-$('fClear').addEventListener('click', () => {
+$('fClearAll').addEventListener('click', () => {
   $('fFrom').value = ''; $('fTo').value = '';
-  COLF = {}; SORT = {col: null, dir: 1};   // сбросить и поиск по колонкам, и сортировку
+  FILT = {}; SORT = {col: null, dir: 1}; GQ = '';   // сбросить ВСЁ: даты, чек-фильтры колонок, сортировку, глоб. поиск
+  closeColFilter();
   loadBoard();
 });
 function setPeriod(p){
@@ -333,7 +352,8 @@ const COLS = [
   {k:'date',    label:'Дата',      num:false, get:d=>d.df_date||''},
 ];
 let SORT = {col: null, dir: 1};   // dir: 1 — по возрастанию, -1 — по убыванию
-let COLF = {};                    // поиск по колонке: ключ колонки → подстрока
+let FILT = {};                    // чек-фильтр: ключ колонки → Set выбранных значений (как colFilters в Редакторе)
+let GQ = '';                      // глобальный поиск (мобильная панель)
 
 // натуральное сравнение (как _cmp в Редакторе): числа — числами, текст — по-русски; пустые — в конец
 function cmp(a, b, num){
@@ -347,56 +367,119 @@ function cmp(a, b, num){
 function cycleSort(k){
   if (SORT.col === k){ if (SORT.dir === 1) SORT.dir = -1; else { SORT.col = null; SORT.dir = 1; } }   // ↑ → ↓ → сброс
   else { SORT.col = k; SORT.dir = 1; }
-  renderList();   // полная перерисовка — обновить ▲▼ в заголовке (поле поиска не в фокусе — потеря фокуса не важна)
+  renderList();
 }
-function currentRows(){
+// базовый набор строк вкладки (с учётом дат и дефолта «Контролёр»), БЕЗ чек-фильтров — для списка значений в попапе
+function baseRows(){
   let rows = listFor(TAB).slice();
-  // «Контролёр»: по умолчанию мои зарегистрированные; если в поиске по колонке что-то введено — ищем по имени
-  if (TAB === 'controller' && !(COLF.ctrl || '').trim() && ME.uid) rows = rows.filter(d => d.worker_register_id === ME.uid);
-  // диапазон дат (клиент; для «Закрытых» он уже ушёл на сервер в loadBoard)
+  if (TAB === 'controller' && !FILT.ctrl && ME.uid) rows = rows.filter(d => d.worker_register_id === ME.uid);
   const f = $('fFrom').value, t = $('fTo').value;
   if (f) rows = rows.filter(d => (d.df_date || '') >= f);
   if (t) rows = rows.filter(d => (d.df_date || '') <= t);
+  return rows;
+}
+function currentRows(){
+  let rows = baseRows();
+  // чек-фильтры по колонкам (множество выбранных значений)
+  for (const c of COLS){ const set = FILT[c.k]; if (set) rows = rows.filter(d => set.has(String(c.get(d)))); }
   // глобальный поиск (мобильная панель) — по всем столбцам сразу
-  const gq = (COLF.__all || '').trim().toLowerCase();
+  const gq = GQ.trim().toLowerCase();
   if (gq) rows = rows.filter(d => COLS.some(c => String(c.get(d)).toLowerCase().includes(gq)));
-  // поиск по колонкам (contains, без регистра)
-  for (const c of COLS){
-    const q = (COLF[c.k] || '').trim().toLowerCase();
-    if (q) rows = rows.filter(d => String(c.get(d)).toLowerCase().includes(q));
-  }
   if (SORT.col){ const c = COLS.find(x => x.k === SORT.col); rows.sort((a, b) => SORT.dir * cmp(c.get(a), c.get(b), c.num)); }
   return rows;
+}
+function colValues(ck){
+  const c = COLS.find(x => x.k === ck), seen = new Set(), vals = [];
+  baseRows().forEach(d => { const v = String(c.get(d)); if (!seen.has(v)){ seen.add(v); vals.push(v); } });
+  vals.sort((a, b) => cmp(a, b, c.num));
+  return vals;
+}
+function updateFilterSummary(){
+  const b = $('fClearAll'); if (!b) return;
+  const n = Object.keys(FILT).length;
+  b.textContent = n ? `✕ Сбросить все фильтры (${n})` : '✕ Сбросить все фильтры';
+  b.disabled = !(n || SORT.col || $('fFrom').value || $('fTo').value || GQ);
 }
 function renderList(){
   const host = $('defectList');
   const head = COLS.map(c => {
     const arr = SORT.col === c.k ? `<span class="sarr"> ${SORT.dir === 1 ? '▲' : '▼'}</span>` : '';
-    return `<th class="sortable" data-col="${c.k}" title="Клик — сортировка (▲ по возрастанию / ▼ по убыванию / ещё раз — сброс)">${c.label}${arr}</th>`;
+    return `<th class="sortable" data-col="${c.k}" title="Клик — сортировка (▲ возр / ▼ убыв / ещё раз — сброс)">${c.label}${arr}</th>`;
   }).join('');
-  const filt = COLS.map(c => `<th><input class="colf" data-col="${c.k}" value="${esc(COLF[c.k] || '')}" placeholder="поиск" autocomplete="off"></th>`).join('');
+  const fbtns = COLS.map(c => `<th><button class="dbfbtn${FILT[c.k] ? ' on' : ''}" data-col="${c.k}" title="Фильтр: поиск + галочки">▾</button></th>`).join('');
   // мобильная панель (на мобиле заголовки таблицы скрыты): глобальный поиск по всем столбцам + выбор сортировки
   const sortOpts = ['<option value="">— сортировка —</option>'].concat(COLS.flatMap(c => [
     `<option value="${c.k}:1"${SORT.col === c.k && SORT.dir === 1 ? ' selected' : ''}>${c.label} ▲</option>`,
     `<option value="${c.k}:-1"${SORT.col === c.k && SORT.dir === -1 ? ' selected' : ''}>${c.label} ▼</option>`,
   ])).join('');
   const mbar = `<div class="dfm">
-    <input id="fmSearch" placeholder="🔎 поиск по столбцам" autocomplete="off" value="${esc(COLF.__all || '')}">
+    <input id="fmSearch" placeholder="🔎 поиск по столбцам" autocomplete="off" value="${esc(GQ)}">
     <select id="fmSort">${sortOpts}</select></div>`;
   host.innerHTML = mbar + `<div class="tbl-wrap"><table class="tbl tbl-mobile dtable">
-    <thead><tr>${head}</tr><tr class="dftr">${filt}</tr></thead>
+    <thead><tr>${head}</tr><tr class="dftr">${fbtns}</tr></thead>
     <tbody id="dtbody"></tbody></table></div>`;
   host.querySelectorAll('th.sortable').forEach(th => th.addEventListener('click', () => cycleSort(th.dataset.col)));
-  host.querySelectorAll('input.colf').forEach(inp => inp.addEventListener('input', () => {
-    COLF[inp.dataset.col] = inp.value; openId = null; renderRows();   // перерисовываем только tbody — фокус в поле сохраняется
-  }));
-  const fm = $('fmSearch'); if (fm) fm.addEventListener('input', () => { COLF.__all = fm.value; openId = null; renderRows(); });
+  host.querySelectorAll('.dbfbtn').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); openColFilter(b.dataset.col, b); }));
+  const fm = $('fmSearch'); if (fm) fm.addEventListener('input', () => { GQ = fm.value; openId = null; renderRows(); });
   const fs = $('fmSort'); if (fs) fs.addEventListener('change', () => {
     if (!fs.value) SORT = {col: null, dir: 1};
     else { const [k, d] = fs.value.split(':'); SORT = {col: k, dir: +d}; }
     renderList();
   });
+  updateFilterSummary();
   renderRows();
+}
+
+// ── попап-фильтр колонки (как автофильтр Редактора): сортировка + поиск + галочки значений ──
+function closeColFilter(){
+  if (window._dbf){ window._dbf.remove(); window._dbf = null; }
+  if (window._dbfEsc){ document.removeEventListener('keydown', window._dbfEsc); window._dbfEsc = null; }
+  if (window._dbfDown){ document.removeEventListener('mousedown', window._dbfDown); window._dbfDown = null; }
+}
+function openColFilter(ck, btn){
+  closeColFilter();
+  const c = COLS.find(x => x.k === ck); if (!c) return;
+  const vals = colValues(ck);
+  const cur = FILT[ck];                       // Set | undefined (нет → выбраны все)
+  const isOn = v => cur ? cur.has(v) : true;
+  const lbl = v => v === '' ? '(Пустые)' : v;
+  const p = document.createElement('div'); p.id = 'dbfilter';
+  p.innerHTML =
+    `<div class="dbf-sort"><button data-sort="1">${c.num ? '0 → 9' : 'А → Я'} ↑</button><button data-sort="-1">${c.num ? '9 → 0' : 'Я → А'} ↓</button></div>` +
+    '<input class="dbf-search" placeholder="Поиск значения…" autocomplete="off">' +
+    '<label class="dbf-all"><input type="checkbox" class="dbf-allbox"> (Выделить все)</label>' +
+    '<div class="dbf-list">' +
+      vals.map(v => `<label class="dbf-item"><input type="checkbox"${isOn(v) ? ' checked' : ''}> ${esc(lbl(v))}</label>`).join('') +
+    '</div>' +
+    (vals.length ? '' : '<div class="dbf-empty">Нет значений</div>') +
+    '<div class="dbf-actions"><button class="dbf-ok">Применить</button><button class="dbf-cancel">Отмена</button><button class="dbf-clear">Сброс</button></div>';
+  document.body.appendChild(p);
+  const r = btn.getBoundingClientRect();
+  p.style.left = Math.max(6, Math.min(r.left, window.innerWidth - 272)) + 'px';
+  p.style.top = Math.min(r.bottom + 4, window.innerHeight - p.offsetHeight - 8) + 'px';
+  const listEl = p.querySelector('.dbf-list'), search = p.querySelector('.dbf-search'), allbox = p.querySelector('.dbf-allbox');
+  const items = () => [...listEl.querySelectorAll('.dbf-item')];
+  const visible = () => items().filter(it => it.style.display !== 'none');
+  const syncAll = () => { const v = visible(), on = v.filter(it => it.firstChild.checked).length; allbox.checked = on > 0 && on === v.length; allbox.indeterminate = on > 0 && on < v.length; };
+  syncAll(); search.focus();
+  search.oninput = () => { const q = search.value.trim().toLowerCase(); items().forEach((it, i) => { it.style.display = lbl(vals[i]).toLowerCase().includes(q) ? '' : 'none'; }); syncAll(); };
+  allbox.onchange = () => { visible().forEach(it => it.firstChild.checked = allbox.checked); };
+  listEl.onchange = syncAll;
+  p.querySelector('.dbf-ok').onclick = () => {
+    const picked = new Set();
+    items().forEach((it, i) => { if (it.firstChild.checked) picked.add(vals[i]); });
+    if (picked.size === vals.length) delete FILT[ck];   // выбраны все → фильтра нет
+    else FILT[ck] = picked;
+    closeColFilter(); openId = null; renderList();
+  };
+  p.querySelector('.dbf-cancel').onclick = closeColFilter;
+  p.querySelector('.dbf-clear').onclick = () => { delete FILT[ck]; closeColFilter(); openId = null; renderList(); };
+  p.querySelectorAll('.dbf-sort button').forEach(b => b.onclick = () => { SORT = {col: ck, dir: +b.dataset.sort}; closeColFilter(); renderList(); });
+  window._dbfEsc = e => { if (e.key === 'Escape') closeColFilter(); };
+  window._dbfDown = e => { if (!p.contains(e.target) && !e.target.closest('.dbfbtn')) closeColFilter(); };
+  document.addEventListener('keydown', window._dbfEsc);
+  document.addEventListener('mousedown', window._dbfDown);
+  window._dbf = p;
 }
 function renderRows(){
   const tb = $('dtbody'); if (!tb) return;
