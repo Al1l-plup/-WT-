@@ -525,8 +525,13 @@ window.act = function(id, action, extra){
   fetch(`/api/defects/${id}/act`, {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify(Object.assign({action}, extra))})
     .then(r=>r.json()).then(res=>{
-      if (res.status === 'success'){ openId = null; loadBoard(); }
-      else flash(id, 'danger', res.message);
+      if (res.status !== 'success'){ flash(id, 'danger', res.message); return; }
+      if (action === 'claim' || action === 'release'){
+        // дефект остаётся у этого же отдела — держим карточку открытой и сразу показываем действия
+        fetch('/api/defects/' + id).then(r=>r.json()).then(renderDetail);
+      } else {
+        openId = null; loadBoard();   // передача/закрытие/возврат — дефект ушёл, сворачиваем
+      }
     });
 };
 
