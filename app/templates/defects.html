@@ -35,6 +35,33 @@
     .flag.b{background:var(--danger);color:#fff}
     .flag.s{background:var(--warn);color:#000}
     .dcard-body{padding:.1rem .85rem .85rem;border-top:1px solid var(--border)}
+    /* Excel-подобная доска: клик по заголовку — сортировка, поле под ним — поиск по колонке */
+    .dtable th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
+    .dtable th.sortable:hover{color:var(--text)}
+    .dtable th .sarr{color:var(--accent);font-weight:700}
+    .dtable tr.dftr th{padding:2px 6px 7px}
+    .dtable tr.dftr input.colf{width:100%;box-sizing:border-box;padding:3px 6px;font-size:12px;font-weight:400;text-transform:none;letter-spacing:0;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:inherit}
+    .dtable tr.drow{cursor:pointer}
+    .dtable tr.drow.b-point td:first-child{box-shadow:inset 3px 0 0 var(--danger)}
+    .dtable tr.drow.serial td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
+    .dtable tr.drow.b-point.serial td:first-child{box-shadow:inset 3px 0 0 var(--danger),inset 6px 0 0 var(--warn)}
+    .dtable tr.ddetail>td{padding:0}
+    .dtable tr.ddetail .dcard-body{border-top:none}
+    .dtable .code{font-weight:800;font-variant-numeric:tabular-nums}
+    /* мобильная панель поиск+сортировка (на мобиле заголовки таблицы скрыты) */
+    .dfm{display:none;gap:6px;margin:.25rem 0 .55rem;align-items:center}
+    .dfm input{flex:1;min-width:0;padding:7px 9px;font-size:14px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit}
+    .dfm select{padding:7px 6px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit;max-width:45%}
+    @media (max-width:768px){
+      .dfm{display:flex}
+      .dhint{display:none}
+      .tbl-mobile tr.ddetail{border:none;background:transparent;padding:0;margin:-.35rem 0 .5rem}
+      .tbl-mobile tr.ddetail td{display:block;padding:0}
+      .tbl-mobile tr.ddetail td::before{display:none}
+      .tbl-mobile tr.drow td:first-child{box-shadow:none}
+      .tbl-mobile tr.drow.b-point{border-color:var(--danger)}
+      .tbl-mobile tr.drow.serial{border-color:var(--warn)}
+    }
     .b-ribbon{background:color-mix(in srgb,var(--danger) 14%,transparent);border:1px solid var(--danger);color:var(--danger);font-weight:700;font-size:12px;border-radius:var(--r-sm);padding:.4rem .6rem;margin:.6rem 0}
     .tl{list-style:none;margin:.6rem 0;padding:0}
     .tl li{position:relative;padding:.3rem 0 .3rem 1.1rem;border-left:2px solid var(--border);margin-left:.3rem}
@@ -153,13 +180,8 @@
         <button type="button" class="btn btn-ghost btn-sm fper" data-p="week">Неделя</button>
         <button type="button" class="btn btn-ghost btn-sm fper" data-p="month">Месяц</button>
       </div>
-      <div><div class="flbl">Контролёр</div><select id="fCtrl" class="fin"><option value="">Все</option></select></div>
-      <div><div class="flbl">Бренд</div><select id="fBrand" class="fin"><option value="">Все</option></select></div>
-      <div><div class="flbl">Участок</div><select id="fSeg" class="fin"><option value="">Все</option></select></div>
-      <div><div class="flbl">Код</div><select id="fCode" class="fin"><option value="">Все</option></select></div>
-      <div><div class="flbl">G-номер</div><input type="text" id="fGnum" class="fin" placeholder="G…" style="width:90px"></div>
-      <div><div class="flbl">Отдел (этап)</div><select id="fDept" class="fin"><option value="">Все</option></select></div>
       <button type="button" class="btn btn-ghost btn-sm" id="fClear" style="align-self:flex-end">Сброс</button>
+      <span class="flbl dhint" style="align-self:flex-end;margin-left:auto;max-width:280px;line-height:1.3">↕ клик по заголовку — сортировка (▲ по возрастанию / ▼ по убыванию / ещё раз — сброс) · поле под заголовком — поиск</span>
     </div>
 
     <div id="defectList"><div class="empty-row" style="padding:1.5rem;text-align:center;color:var(--muted)">Загрузка…</div></div>
@@ -230,18 +252,16 @@ $('dtabs').addEventListener('click', e => {
   const b = e.target.closest('.dtab'); if (!b) return;
   TAB = b.dataset.tab; openId = null;
   document.querySelectorAll('.dtab').forEach(t => t.classList.toggle('active', t === b));
-  // вкладка «Контролёр» по умолчанию показывает МОИ зарегистрированные (фильтр «Контролёр» = я)
-  if (TAB === 'controller' && !$('fCtrl').value && ME.uid) $('fCtrl').value = String(ME.uid);
+  // вкладка «Контролёр» по умолчанию показывает МОИ зарегистрированные (см. currentRows); чтобы увидеть другого — поиск по колонке «Контролёр»
   renderList();
 });
 
-// ── панель фильтров ──
+// ── панель фильтров (даты/период); сортировка и поиск — в заголовках таблицы ──
 ['fFrom', 'fTo'].forEach(id => $(id).addEventListener('change', loadBoard));   // даты → перезапрос (для «Закрытых»)
-['fCtrl', 'fBrand', 'fSeg', 'fCode', 'fDept'].forEach(id => $(id).addEventListener('change', renderList));
-$('fGnum').addEventListener('input', renderList);
 document.querySelectorAll('.fper').forEach(b => b.addEventListener('click', () => { setPeriod(b.dataset.p); loadBoard(); }));
 $('fClear').addEventListener('click', () => {
-  ['fFrom', 'fTo', 'fGnum', 'fCtrl', 'fBrand', 'fSeg', 'fCode', 'fDept'].forEach(id => { $(id).value = ''; });
+  $('fFrom').value = ''; $('fTo').value = '';
+  COLF = {}; SORT = {col: null, dir: 1};   // сбросить и поиск по колонкам, и сортировку
   loadBoard();
 });
 function setPeriod(p){
@@ -266,7 +286,6 @@ function loadBoard(){
     $('c-unres').textContent = d.unresolved.length;
     $('c-closed').textContent = d.closed.length;
     $('c-ctrl').textContent = d.open.filter(x => x.worker_register_id === ME.uid).length;
-    buildFilterOptions();
     renderList();
   });
 }
@@ -275,90 +294,127 @@ function listFor(tab){
   if (tab === 'mine') return BOARD.open.filter(x => x.mine);
   if (tab === 'all') return BOARD.open;
   if (tab === 'serial') return BOARD.open.filter(x => x.is_serial);
-  if (tab === 'controller') return BOARD.open;       // открытые; контролёр задаётся фильтром «Контролёр» (по умолч. — я)
+  if (tab === 'controller') return BOARD.open;       // открытые; по умолчанию мои зарегистрированные (см. currentRows)
   if (tab === 'unresolved') return BOARD.unresolved;
   return BOARD.closed;
 }
 
-function applyFilters(rows){
-  const f = $('fFrom').value, t = $('fTo').value, ctrl = $('fCtrl').value;
-  const seg = $('fSeg').value, code = $('fCode').value, brand = $('fBrand').value;
-  const gnum = $('fGnum').value.trim().toLowerCase(), dept = $('fDept').value;
-  return rows.filter(d => {
-    if (f && (d.df_date || '') < f) return false;
-    if (t && (d.df_date || '') > t) return false;
-    if (ctrl && String(d.worker_register_id) !== ctrl) return false;
-    if (brand && (d.brand || '') !== brand) return false;
-    if (seg && (d.segment || '') !== seg) return false;
-    if (code && (d.problem_code || '') !== code) return false;
-    if (gnum && !String(d.g_num || '').toLowerCase().includes(gnum)) return false;
-    if (dept && (d.current_stage_dept || '') !== dept) return false;
-    return true;
-  });
+// ── Excel-подобная доска: сортировка по заголовку (▲ возр / ▼ убыв / сброс) + поиск по колонке (как в Редакторе) ──
+function flagsHtml(d){
+  return (d.is_b_point ? '<span class="flag b">B</span> ' : '')
+       + (d.is_serial ? `<span class="flag s">сер${d.return_count ? '×' + d.return_count : ''}</span> ` : '')
+       + (d.photo_count ? `<span class="muted" title="фото" style="font-size:11px">📷${d.photo_count}</span> ` : '');
 }
+function stageText(d){
+  if (d.status === 'closed') return 'закрыт';
+  if (d.status === 'unresolved') return 'не выявлен';
+  if (d.status === 'at_oto') return 'ОТО';
+  return d.current_stage_dept || '';
+}
+function stageCell(d){
+  let chip, cls = '';
+  if (d.status === 'closed'){ chip = '✓ закрыт'; cls = 'closed'; }
+  else if (d.status === 'unresolved'){ chip = '⚠ не выявлен'; cls = 'unresolved'; }
+  else if (d.status === 'at_oto'){ chip = '🔧 ОТО'; cls = 'oto'; }
+  else chip = '→ ' + esc(d.current_stage_dept || '—');
+  return `<span class="stage-chip ${cls}">${chip}</span>`;
+}
+const _norm = v => (v == null || v === '—') ? '' : String(v);   // «—» из бэка трактуем как пусто (для поиска/сорта)
+const COLS = [
+  {k:'code',    label:'Код',       num:false, get:d=>d.problem_code||'',   cell:d=>`${flagsHtml(d)}<b class="code">${esc(d.problem_code||'')}</b>`},
+  {k:'spot',    label:'Точка',     num:true,  get:d=>d.spot_number||''},
+  {k:'g',       label:'G-№',       num:true,  get:d=>d.g_num||''},
+  {k:'seg',     label:'Участок',   num:false, get:d=>d.segment||''},
+  {k:'brand',   label:'Бренд',     num:false, get:d=>_norm(d.brand)},
+  {k:'station', label:'Станция',   num:false, get:d=>_norm(d.station_name)},
+  {k:'stage',   label:'Этап',      num:false, get:d=>stageText(d),         cell:stageCell},
+  {k:'ctrl',    label:'Контролёр', num:false, get:d=>d.register_name||''},
+  {k:'assignee',label:'В работе',  num:false, get:d=>d.assignee_name||'',   cell:d=>d.assigned_worker_id?`🔒 ${esc(d.assignee_name||'')}`:''},
+  {k:'date',    label:'Дата',      num:false, get:d=>d.df_date||''},
+];
+let SORT = {col: null, dir: 1};   // dir: 1 — по возрастанию, -1 — по убыванию
+let COLF = {};                    // поиск по колонке: ключ колонки → подстрока
 
+// натуральное сравнение (как _cmp в Редакторе): числа — числами, текст — по-русски; пустые — в конец
+function cmp(a, b, num){
+  a = (a == null ? '' : String(a)); b = (b == null ? '' : String(b));
+  if (a === '' && b === '') return 0;
+  if (a === '') return 1;
+  if (b === '') return -1;
+  if (num){ const x = parseFloat(a), y = parseFloat(b); if (!isNaN(x) && !isNaN(y)) return x - y; }
+  return a.localeCompare(b, 'ru', {numeric: true, sensitivity: 'base'});
+}
+function cycleSort(k){
+  if (SORT.col === k){ if (SORT.dir === 1) SORT.dir = -1; else { SORT.col = null; SORT.dir = 1; } }   // ↑ → ↓ → сброс
+  else { SORT.col = k; SORT.dir = 1; }
+  renderList();   // полная перерисовка — обновить ▲▼ в заголовке (поле поиска не в фокусе — потеря фокуса не важна)
+}
+function currentRows(){
+  let rows = listFor(TAB).slice();
+  // «Контролёр»: по умолчанию мои зарегистрированные; если в поиске по колонке что-то введено — ищем по имени
+  if (TAB === 'controller' && !(COLF.ctrl || '').trim() && ME.uid) rows = rows.filter(d => d.worker_register_id === ME.uid);
+  // диапазон дат (клиент; для «Закрытых» он уже ушёл на сервер в loadBoard)
+  const f = $('fFrom').value, t = $('fTo').value;
+  if (f) rows = rows.filter(d => (d.df_date || '') >= f);
+  if (t) rows = rows.filter(d => (d.df_date || '') <= t);
+  // глобальный поиск (мобильная панель) — по всем столбцам сразу
+  const gq = (COLF.__all || '').trim().toLowerCase();
+  if (gq) rows = rows.filter(d => COLS.some(c => String(c.get(d)).toLowerCase().includes(gq)));
+  // поиск по колонкам (contains, без регистра)
+  for (const c of COLS){
+    const q = (COLF[c.k] || '').trim().toLowerCase();
+    if (q) rows = rows.filter(d => String(c.get(d)).toLowerCase().includes(q));
+  }
+  if (SORT.col){ const c = COLS.find(x => x.k === SORT.col); rows.sort((a, b) => SORT.dir * cmp(c.get(a), c.get(b), c.num)); }
+  return rows;
+}
 function renderList(){
   const host = $('defectList');
-  const rows = applyFilters(listFor(TAB));
-  if (!rows.length){ host.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--muted)">Пусто</div>`; return; }
-  host.innerHTML = rows.map(cardHtml).join('');
+  const head = COLS.map(c => {
+    const arr = SORT.col === c.k ? `<span class="sarr"> ${SORT.dir === 1 ? '▲' : '▼'}</span>` : '';
+    return `<th class="sortable" data-col="${c.k}" title="Клик — сортировка (▲ по возрастанию / ▼ по убыванию / ещё раз — сброс)">${c.label}${arr}</th>`;
+  }).join('');
+  const filt = COLS.map(c => `<th><input class="colf" data-col="${c.k}" value="${esc(COLF[c.k] || '')}" placeholder="поиск" autocomplete="off"></th>`).join('');
+  // мобильная панель (на мобиле заголовки таблицы скрыты): глобальный поиск по всем столбцам + выбор сортировки
+  const sortOpts = ['<option value="">— сортировка —</option>'].concat(COLS.flatMap(c => [
+    `<option value="${c.k}:1"${SORT.col === c.k && SORT.dir === 1 ? ' selected' : ''}>${c.label} ▲</option>`,
+    `<option value="${c.k}:-1"${SORT.col === c.k && SORT.dir === -1 ? ' selected' : ''}>${c.label} ▼</option>`,
+  ])).join('');
+  const mbar = `<div class="dfm">
+    <input id="fmSearch" placeholder="🔎 поиск по столбцам" autocomplete="off" value="${esc(COLF.__all || '')}">
+    <select id="fmSort">${sortOpts}</select></div>`;
+  host.innerHTML = mbar + `<div class="tbl-wrap"><table class="tbl tbl-mobile dtable">
+    <thead><tr>${head}</tr><tr class="dftr">${filt}</tr></thead>
+    <tbody id="dtbody"></tbody></table></div>`;
+  host.querySelectorAll('th.sortable').forEach(th => th.addEventListener('click', () => cycleSort(th.dataset.col)));
+  host.querySelectorAll('input.colf').forEach(inp => inp.addEventListener('input', () => {
+    COLF[inp.dataset.col] = inp.value; openId = null; renderRows();   // перерисовываем только tbody — фокус в поле сохраняется
+  }));
+  const fm = $('fmSearch'); if (fm) fm.addEventListener('input', () => { COLF.__all = fm.value; openId = null; renderRows(); });
+  const fs = $('fmSort'); if (fs) fs.addEventListener('change', () => {
+    if (!fs.value) SORT = {col: null, dir: 1};
+    else { const [k, d] = fs.value.split(':'); SORT = {col: k, dir: +d}; }
+    renderList();
+  });
+  renderRows();
 }
-
-function uniq(a){ return [...new Set(a)].sort(); }
-function fillSelect(id, items){
-  const sel = $(id), cur = sel.value;
-  sel.innerHTML = '<option value="">Все</option>' + items.map(i => `<option value="${esc(i.v)}">${esc(i.l)}</option>`).join('');
-  if ([...sel.options].some(o => o.value === cur)) sel.value = cur;   // сохранить текущий выбор при перерисовке
-}
-function buildFilterOptions(){
-  const all = [...BOARD.open, ...BOARD.unresolved, ...BOARD.closed];
-  const ctrls = new Map();
-  if (ME.uid) ctrls.set(String(ME.uid), (ME.name || 'я') + ' (я)');
-  all.forEach(d => { if (d.worker_register_id) ctrls.set(String(d.worker_register_id), d.register_name || ('#' + d.worker_register_id)); });
-  fillSelect('fCtrl', [...ctrls.entries()].map(([v, l]) => ({v, l})));
-  // участок и бренд — из полного справочника (а не только из встреченных), иначе дропдаун пуст при дефектах без станции
-  const brandOpts = (BOARD.all_brands && BOARD.all_brands.length) ? BOARD.all_brands : uniq(all.map(d => d.brand).filter(b => b && b !== '—'));
-  const segOpts = (BOARD.all_segments && BOARD.all_segments.length) ? BOARD.all_segments : uniq(all.map(d => d.segment).filter(Boolean));
-  fillSelect('fBrand', brandOpts.map(v => ({v, l: v})));
-  fillSelect('fSeg', segOpts.map(v => ({v, l: v})));
-  fillSelect('fCode', uniq(all.map(d => d.problem_code).filter(Boolean)).map(v => ({v, l: v})));
-  fillSelect('fDept', uniq(all.map(d => d.current_stage_dept).filter(Boolean)).map(v => ({v, l: v})));
-}
-
-function cardHtml(d){
-  const cls = ['dcard', d.is_b_point ? 'b-point' : '', d.is_serial ? 'serial' : ''].filter(Boolean).join(' ');
-  const model = esc(d.model_name || d.brand || '—') + (d.model_type && d.model_type.toLowerCase() !== 'single' ? ' ' + esc(d.model_type) : '');
-  const flags = (d.is_b_point ? '<span class="flag b">точка B</span> ' : '')
-              + (d.is_serial ? `<span class="flag s">серийный${d.return_count ? ' ×' + d.return_count : ''}</span> ` : '')
-              + (d.assigned_worker_id ? `<span class="flag" title="в работе" style="background:var(--border);color:var(--text)">🔒 ${esc(d.assignee_name || 'в работе')}</span> ` : '');
-  let chip, chipCls = '';
-  if (d.status === 'closed'){ chip = '✓ закрыт'; chipCls = 'closed'; }
-  else if (d.status === 'unresolved'){ chip = '⚠ не выявлен'; chipCls = 'unresolved'; }
-  else if (d.status === 'at_oto'){ chip = '🔧 ОТО'; chipCls = 'oto'; }
-  else chip = '→ ' + esc(d.current_stage_dept || '—');
-  const open = openId === d.UniqueID;
-  return `<div class="${cls}" data-id="${d.UniqueID}">
-    <div class="dcard-head" onclick="toggleCard(${d.UniqueID})">
-      <span class="code">${esc(d.problem_code)}</span>
-      <span class="where">№${esc(d.spot_number)}</span>
-      <span class="muted">${model}${d.g_num ? ' · G.' + d.g_num : ''}${d.station_name && d.station_name!=='—' ? ' · ' + esc(d.station_name) : ''}</span>
-      ${flags}
-      ${d.photo_count ? `<span class="muted" title="фото">📷${d.photo_count}</span>` : ''}
-      <span class="spacer"></span>
-      <span class="muted">${esc(d.df_date)}</span>
-      <span class="stage-chip ${chipCls}">${chip}</span>
-    </div>
-    <div class="dcard-body" id="body-${d.UniqueID}" ${open ? '' : 'hidden'}></div>
-  </div>`;
+function renderRows(){
+  const tb = $('dtbody'); if (!tb) return;
+  const rows = currentRows();
+  if (!rows.length){ tb.innerHTML = `<tr class="empty-row"><td data-label="" colspan="${COLS.length}" style="text-align:center;color:var(--muted);padding:1.25rem">Пусто</td></tr>`; return; }
+  tb.innerHTML = rows.map(d => {
+    const active = openId === d.UniqueID;
+    const cls = ['drow', d.is_b_point ? 'b-point' : '', d.is_serial ? 'serial' : '', active ? 'board-row-active' : ''].filter(Boolean).join(' ');
+    const cells = COLS.map(c => `<td data-label="${c.label}">${c.cell ? c.cell(d) : esc(c.get(d))}</td>`).join('');
+    return `<tr class="${cls}" onclick="toggleCard(${d.UniqueID})">${cells}</tr>`
+         + `<tr class="ddetail"${active ? '' : ' hidden'}><td data-label="" colspan="${COLS.length}"><div class="dcard-body" id="body-${d.UniqueID}"></div></td></tr>`;
+  }).join('');
+  if (openId != null){ const b = $('body-' + openId); if (b && !b.innerHTML){ b.innerHTML = '<div class="muted" style="padding:.6rem 0">Загрузка…</div>'; fetch('/api/defects/' + openId).then(r=>r.json()).then(renderDetail); } }
 }
 
 window.toggleCard = function(id){
-  if (openId === id){ openId = null; const b = $('body-'+id); if (b){ b.hidden = true; b.innerHTML=''; } return; }
-  openId = id;
-  document.querySelectorAll('.dcard-body').forEach(b => { b.hidden = true; b.innerHTML = ''; });
-  const body = $('body-'+id); if (!body) return;
-  body.hidden = false; body.innerHTML = '<div class="muted" style="padding:.6rem 0">Загрузка…</div>';
-  fetch('/api/defects/'+id).then(r=>r.json()).then(renderDetail);
+  openId = (openId === id) ? null : id;   // клик по строке — раскрыть/свернуть деталь (загружается в renderRows)
+  renderRows();
 };
 
 function renderDetail(res){
@@ -530,8 +586,7 @@ window.act = function(id, action, extra){
     .then(r=>r.json()).then(res=>{
       if (res.status !== 'success'){ flash(id, 'danger', res.message); return; }
       if (action === 'claim' || action === 'release'){
-        // дефект остаётся у этого же отдела — держим карточку открытой и сразу показываем действия
-        fetch('/api/defects/' + id).then(r=>r.json()).then(renderDetail);
+        loadBoard();   // дефект у того же отдела — обновляем доску (колонка «В работе»), карточка остаётся раскрытой (openId сохранён)
       } else {
         openId = null; loadBoard();   // передача/закрытие/возврат — дефект ушёл, сворачиваем
       }
