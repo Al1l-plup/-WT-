@@ -50,21 +50,38 @@ def test_admin_assigns_areas(register_client, app):
     assert db.execute('SELECT COUNT(*) FROM worker_area WHERE worker_id=?', (wid,)).fetchone()[0] == 0
 
 
-def test_board_exposes_segment_and_mine_is_stage_based(register_client, app):
-    """«Мои входящие» = дефекты этапа моего отдела (без авто-фильтра по зонам — его отменили).
-    В выдаче есть участок (segment) для ручного фильтра по участку."""
+def test_mine_filtered_by_zones(register_client, app):
+    """«Мои входящие» = мой этап И мои участки (бренд+участок). Дефект без участка — виден всем.
+    У кого зоны не заданы (или WeldTeam/админ) — ограничения нет, только этап."""
     otk = register_client(department='ОТК')
-    prod = register_client(department='Производство', login='flt_prod@x.kz')
-    did = otk.post('/api/defects/register_manual', json={'g_num': 96600, 'problem_code': 'CR'}).get_json()['defect_id']
+    prod = register_client(department='Производство', login='zn_prod@x.kz')
     db = _db(app)
-    db.execute("UPDATE defects SET snap_brand_id=1, snap_station_name='CA-MB-60' WHERE UniqueID=?", (did,))
-    wid = db.execute("SELECT UniqueID FROM worker WHERE login='flt_prod@x.kz'").fetchone()[0]
-    # даже с зоной Chery:UB (не MB) — дефект остаётся «мой» (авто-фильтр по зонам убран)
-    db.execute("INSERT INTO worker_area (worker_id,brand_id,segment) VALUES (?,1,'UB')", (wid,))
+    wid = db.execute("SELECT UniqueID FROM worker WHERE login='zn_prod@x.kz'").fetchone()[0]
+    bname = db.execute("SELECT brand FROM brand WHERE UniqueID=1").fetchone()[0]   # бренд с id=1
+    db.execute("INSERT INTO worker_area (worker_id,brand_id,segment) VALUES (?,1,'UB')", (wid,))  # зона: бренд#1 / UB
     db.commit()
     db.close()
-    row = next(x for x in prod.get('/api/defects/all').get_json()['open'] if x['UniqueID'] == did)
-    assert row['mine'] is True                 # на этапе Производства → мой, независимо от зон
-    assert row['segment'] == 'MB'              # участок доступен для фильтра (CA-MB-60 → MB)
-    # ОТК не на этапе → не его (это про этап, не про зоны)
-    assert next(x for x in otk.get('/api/defects/all').get_json()['open'] if x['UniqueID'] == did)['mine'] is False
+
+    def mk(g, brand, station):
+        did = otk.post('/api/defects/register_manual', json={'g_num': g, 'problem_code': 'CR'}).get_json()['defect_id']
+        c = _db(app)
+        c.execute("UPDATE defects SET snap_brand=?, snap_station_name=? WHERE UniqueID=?", (brand, station, did))
+        c.commit(); c.close()
+        return did
+
+    in_zone = mk(96610, bname, 'CA-UB-60')    # бренд#1 / UB → в моей зоне
+    off_seg = mk(96611, bname, 'CA-MB-60')    # бренд#1 / MB → участок не мой
+    no_area = mk(96612, None, None)           # без станции/участка → виден всем
+
+    board = prod.get('/api/defects/all').get_json()
+    assert board['zoned'] is True
+    m = lambda did: next(x for x in board['open'] if x['UniqueID'] == did)['mine']
+    assert m(in_zone) is True
+    assert m(off_seg) is False                # мой этап, но участок MB не в зонах
+    assert m(no_area) is True                 # без участка — всегда виден
+    assert next(x for x in board['open'] if x['UniqueID'] == in_zone)['segment'] == 'UB'
+
+    # у ОТК зон нет → ограничения по зонам нет (zoned=False); но эти дефекты на этапе Производства, не ОТК
+    ob = otk.get('/api/defects/all').get_json()
+    assert ob['zoned'] is False
+    assert next(x for x in ob['open'] if x['UniqueID'] == in_zone)['mine'] is False

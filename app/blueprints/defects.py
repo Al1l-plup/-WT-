@@ -244,22 +244,48 @@ def defects_all():
     closed_rows = db.execute(closed_sql, closed_params).fetchall()
     workers = db.execute('SELECT UniqueID, surname, name FROM worker WHERE is_active=1').fetchall()
     mydept = session.get('dept')
+    myuid = session.get('uid')
+    privileged = bool(session.get('is_admin') or mydept == 'WeldTeam')
+
+    # Зоны ответственности (бренд+участок) текущего сотрудника — для «Моих входящих».
+    # worker_areas → {(brand_id, участок)}; сопоставляем с дефектом по ИМЕНИ бренда
+    # (snap_brand_id у незакрытых часто NULL, а текстовый бренд в выборке разрешён всегда).
+    my_zones = df.worker_areas(db, myuid) if myuid else set()
+    brand_name = {r[0]: r[1] for r in db.execute('SELECT UniqueID, brand FROM brand')}
+    my_zone_pairs = {(brand_name.get(bid), seg) for (bid, seg) in my_zones}   # {(имя бренда, участок)}
+    my_segments = {seg for (_bid, seg) in my_zones}
+    has_zones = bool(my_zones)
+
+    def in_my_zone(brand_txt, seg):
+        if not seg:                                      # дефект без участка — виден всем (не прячем)
+            return True
+        if (brand_txt, seg) in my_zone_pairs:            # совпали бренд и участок
+            return True
+        if (not brand_txt or brand_txt == '—') and seg in my_segments:   # бренд неизвестен, но участок мой
+            return True
+        return False
 
     def row(r):
         d = dict(r)
-        d['mine'] = bool(d.get('current_stage_dept') and d['current_stage_dept'] == mydept)
-        d['segment'] = df.defect_area(r['station_name'])   # участок (MB/UB/EC…) — для фильтра по участку
+        seg = df.defect_area(r['station_name'])
+        d['segment'] = seg                               # участок (MB/UB/EC…) — для фильтра и зон
+        at_my_stage = bool(d.get('current_stage_dept') and d['current_stage_dept'] == mydept)
+        # «Мои входящие» = мой этап И (мои участки ИЛИ без участка). WeldTeam/админ и без зон — только этап.
+        d['mine'] = at_my_stage and (privileged or not has_zones or in_my_zone(d.get('brand'), seg))
         return d
 
     # полные справочники для фильтров (чтобы участок/бренд были доступны всегда,
     # даже если в текущих дефектах их ещё нет — напр. дефекты по пистолету без станции)
     all_segments = sorted({s for segs in df.segments_by_brand(db).values() for s in segs})
     all_brands = [r[0] for r in db.execute('SELECT brand FROM brand ORDER BY UniqueID')]
+    my_zones_list = sorted({f"{brand_name.get(bid, '?')}·{seg}" for (bid, seg) in my_zones})
     return jsonify({'open': [row(r) for r in open_rows],
                     'unresolved': [row(r) for r in unresolved_rows],
                     'closed': [row(r) for r in closed_rows],
                     'my_dept': mydept,
-                    'privileged': bool(session.get('is_admin') or mydept == 'WeldTeam'),
+                    'privileged': privileged,
+                    'zoned': has_zones and not privileged,   # «Мои входящие» ограничены зонами
+                    'my_zones': my_zones_list,
                     'workers': [dict(w) for w in workers],
                     'all_segments': all_segments, 'all_brands': all_brands})
 

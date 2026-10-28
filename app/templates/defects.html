@@ -66,6 +66,9 @@
     .dtable tr.ddetail>td{padding:0}
     .dtable tr.ddetail .dcard-body{border-top:none}
     .dtable .code{font-weight:800;font-variant-numeric:tabular-nums}
+    /* подсказка про ограничение по зонам ответственности на вкладке «Мои входящие» */
+    .zone-note{font-size:12px;color:var(--muted);background:color-mix(in srgb,var(--accent) 8%,transparent);border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin:.25rem 0 .5rem;line-height:1.35}
+    .zone-note b{color:var(--text)}
     /* мобильная панель поиск+сортировка (на мобиле заголовки таблицы скрыты) */
     .dfm{display:none;gap:6px;margin:.25rem 0 .55rem;align-items:center}
     .dfm input{flex:1;min-width:0;padding:7px 9px;font-size:14px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit}
@@ -415,7 +418,11 @@ function renderList(){
   const mbar = `<div class="dfm">
     <input id="fmSearch" placeholder="🔎 поиск по столбцам" autocomplete="off" value="${esc(GQ)}">
     <select id="fmSort">${sortOpts}</select></div>`;
-  host.innerHTML = mbar + `<div class="tbl-wrap"><table class="tbl tbl-mobile dtable">
+  // подсказка: вкладка «Мои входящие» ограничена зонами ответственности (бренд·участок)
+  const zoneNote = (TAB === 'mine' && BOARD.zoned && BOARD.my_zones && BOARD.my_zones.length)
+    ? `<div class="zone-note">👤 Только ваши участки: <b>${BOARD.my_zones.map(esc).join(', ')}</b> (и дефекты без участка). Остальное — во вкладке «Все открытые».</div>`
+    : '';
+  host.innerHTML = zoneNote + mbar + `<div class="tbl-wrap"><table class="tbl tbl-mobile dtable">
     <thead><tr>${head}</tr><tr class="dftr">${fbtns}</tr></thead>
     <tbody id="dtbody"></tbody></table></div>`;
   host.querySelectorAll('th.sortable').forEach(th => th.addEventListener('click', () => cycleSort(th.dataset.col)));
