@@ -316,8 +316,11 @@ function buildFilterOptions(){
   if (ME.uid) ctrls.set(String(ME.uid), (ME.name || 'я') + ' (я)');
   all.forEach(d => { if (d.worker_register_id) ctrls.set(String(d.worker_register_id), d.register_name || ('#' + d.worker_register_id)); });
   fillSelect('fCtrl', [...ctrls.entries()].map(([v, l]) => ({v, l})));
-  fillSelect('fBrand', uniq(all.map(d => d.brand).filter(b => b && b !== '—')).map(v => ({v, l: v})));
-  fillSelect('fSeg', uniq(all.map(d => d.segment).filter(Boolean)).map(v => ({v, l: v})));
+  // участок и бренд — из полного справочника (а не только из встреченных), иначе дропдаун пуст при дефектах без станции
+  const brandOpts = (BOARD.all_brands && BOARD.all_brands.length) ? BOARD.all_brands : uniq(all.map(d => d.brand).filter(b => b && b !== '—'));
+  const segOpts = (BOARD.all_segments && BOARD.all_segments.length) ? BOARD.all_segments : uniq(all.map(d => d.segment).filter(Boolean));
+  fillSelect('fBrand', brandOpts.map(v => ({v, l: v})));
+  fillSelect('fSeg', segOpts.map(v => ({v, l: v})));
   fillSelect('fCode', uniq(all.map(d => d.problem_code).filter(Boolean)).map(v => ({v, l: v})));
   fillSelect('fDept', uniq(all.map(d => d.current_stage_dept).filter(Boolean)).map(v => ({v, l: v})));
 }

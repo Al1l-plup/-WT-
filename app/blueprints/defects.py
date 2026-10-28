@@ -251,12 +251,17 @@ def defects_all():
         d['segment'] = df.defect_area(r['station_name'])   # участок (MB/UB/EC…) — для фильтра по участку
         return d
 
+    # полные справочники для фильтров (чтобы участок/бренд были доступны всегда,
+    # даже если в текущих дефектах их ещё нет — напр. дефекты по пистолету без станции)
+    all_segments = sorted({s for segs in df.segments_by_brand(db).values() for s in segs})
+    all_brands = [r[0] for r in db.execute('SELECT brand FROM brand ORDER BY UniqueID')]
     return jsonify({'open': [row(r) for r in open_rows],
                     'unresolved': [row(r) for r in unresolved_rows],
                     'closed': [row(r) for r in closed_rows],
                     'my_dept': mydept,
                     'privileged': bool(session.get('is_admin') or mydept == 'WeldTeam'),
-                    'workers': [dict(w) for w in workers]})
+                    'workers': [dict(w) for w in workers],
+                    'all_segments': all_segments, 'all_brands': all_brands})
 
 
 @bp.route('/api/defects/take', methods=['POST'])
