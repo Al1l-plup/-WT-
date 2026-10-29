@@ -170,6 +170,15 @@ def set_worker_areas(conn, worker_id, areas_map):
 def _open_stage(conn, defect_id, dept, actor_id=None, note=None):
     conn.execute('INSERT INTO defect_stage (defect_id, dept, entered_at, actor_id, note) VALUES (?,?,?,?,?)',
                  (defect_id, dept, _now(), actor_id, note))
+    # Уведомления (outbox) — кому дефект прилетел в «Мои входящие». Пишется в ту же
+    # транзакцию. Доставка — фоном. Уведомления НИКОГДА не ломают рабочий процесс:
+    # любые ошибки (нет таблицы/колонок и т.п.) гасим и логируем.
+    try:
+        from app.notifications import enqueue_stage_arrival
+        enqueue_stage_arrival(conn, defect_id, dept)
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).warning('enqueue уведомления не удался', exc_info=True)
 
 
 def _close_open_stage(conn, defect_id, outcome, actor_id=None, cause=None, countermeasure=None, note=None):

@@ -112,6 +112,13 @@ def create_app(config: type[Config] | None = None) -> Flask:
     from app.blueprints import register_blueprints
     register_blueprints(app)
 
+    # Фоновые потоки Telegram: отправитель уведомлений + поллер привязки +
+    # планировщик напоминаний (все no-op без токена бота и в тестах).
+    from app.notifications import start_poller, start_reminder_scheduler, start_sender
+    start_sender(app)
+    start_poller(app)
+    start_reminder_scheduler(app)
+
     return app
 
 

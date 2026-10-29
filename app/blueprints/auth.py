@@ -9,6 +9,7 @@ dept / role / is_admin — по ним считаются права (app/permis
 """
 import json
 import re
+import secrets
 
 from flask import (
     Blueprint,
@@ -83,6 +84,8 @@ def me():
     if not session.get('uid'):
         return jsonify({'auth': False}), 401
     dept, is_admin = session.get('dept'), bool(session.get('is_admin'))
+    db = get_db()
+    tg = db.execute('SELECT tg_chat_id FROM worker WHERE UniqueID=?', (session['uid'],)).fetchone()
     return jsonify({
         'auth': True,
         'uid': session['uid'],
@@ -94,6 +97,9 @@ def me():
         'can_edit_docs': can_edit_docs(dept, is_admin),
         'pages': visible_pages(dept, is_admin),
         'must_change': bool(session.get('must_change')),
+        # Telegram-уведомления: доступен ли бот (настроен) и подключён ли этот пользователь
+        'tg_available': bool(current_app.config.get('TG_BOT_TOKEN') and current_app.config.get('TG_BOT_USERNAME')),
+        'tg_connected': bool(tg and tg[0]),
         # обязательно ли фото при фиксации дефекта (из defect_config, правится в Редакторе)
         'require_defect_photo': df.config_flag(get_db(), 'require_defect_photo',
                                                current_app.config.get('REQUIRE_DEFECT_PHOTO', False)),
@@ -211,6 +217,29 @@ def change_password():
         return api_error(e)
     session['must_change'] = False
     return redirect('/')
+
+
+@bp.route('/api/tg/link', methods=['POST'])
+def tg_link():
+    """Сгенерировать одноразовый код привязки и вернуть ссылку на бота t.me/<бот>?start=<код>."""
+    username = current_app.config.get('TG_BOT_USERNAME')
+    if not username:
+        return jsonify({'status': 'error',
+                        'message': 'Бот Telegram не настроен. Обратитесь к администратору.'}), 503
+    code = secrets.token_urlsafe(8)
+    db = get_db()
+    db.execute('UPDATE worker SET tg_link_code=? WHERE UniqueID=?', (code, session['uid']))
+    db.commit()
+    return jsonify({'status': 'success', 'link': f'https://t.me/{username}?start={code}'})
+
+
+@bp.route('/api/tg/unlink', methods=['POST'])
+def tg_unlink():
+    """Отключить Telegram у текущего пользователя (стереть chat_id и код)."""
+    db = get_db()
+    db.execute('UPDATE worker SET tg_chat_id=NULL, tg_link_code=NULL WHERE UniqueID=?', (session['uid'],))
+    db.commit()
+    return jsonify({'status': 'success'})
 
 
 @bp.route('/logout')

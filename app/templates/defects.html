@@ -97,6 +97,10 @@
     .act-bar{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.7rem}
     .act-form{margin-top:.6rem;padding:.6rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--r-sm)}
     .act-form textarea{min-height:52px}
+    /* баннер подключения Telegram-уведомлений */
+    .tg-banner{display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap;background:color-mix(in srgb,var(--accent) 8%,transparent);border:1px solid var(--border);border-radius:var(--r-sm);padding:.55rem .85rem;margin-bottom:1rem;font-size:14px}
+    .tg-banner.on{background:color-mix(in srgb,var(--success,#3fb950) 12%,transparent)}
+    .tg-banner span{min-width:0}
   </style>
 </head>
 <body>
@@ -117,6 +121,9 @@
 </nav>
 
 <div class="page">
+
+  <!-- ── Telegram-уведомления (баннер подключения; скрыт, если бот не настроен) ── -->
+  <div id="tgBanner" class="tg-banner" hidden></div>
 
   <!-- ── РЕГИСТРАЦИЯ (только ОТК/WeldTeam) ── -->
   <div class="card" id="regCard" style="margin-bottom:1rem" hidden>
@@ -267,8 +274,48 @@ fetch('/api/me').then(r=>r.json()).then(me=>{
   if (canReg) { $('regCard').hidden = false; initRegistration(); }
   if (me.can_edit_docs) $('editorCard').hidden = false;
   $('whoami').textContent = me.dept ? `· вы: ${me.dept}` : '';
+  renderTgBanner(me);
   loadBoard();
 });
+
+// ── Telegram: баннер подключения ──
+function renderTgBanner(me){
+  const b = $('tgBanner');
+  if (!me.tg_available){ b.hidden = true; return; }   // бот не настроен — баннер не показываем
+  b.hidden = false;
+  if (me.tg_connected){
+    b.className = 'tg-banner on';
+    b.innerHTML = '<span>✅ Telegram-уведомления подключены</span>' +
+                  '<button class="btn btn-ghost btn-sm" id="tgUnlinkBtn">Отключить</button>';
+    $('tgUnlinkBtn').onclick = tgUnlink;
+  } else {
+    b.className = 'tg-banner';
+    b.innerHTML = '<span>🔔 Получайте уведомления о своих дефектах в Telegram</span>' +
+                  '<button class="btn btn-primary btn-sm" id="tgLinkBtn">Подключить Telegram</button>';
+    $('tgLinkBtn').onclick = tgLink;
+  }
+}
+function tgLink(){
+  fetch('/api/tg/link', {method:'POST'}).then(r=>r.json()).then(res=>{
+    if (res.status === 'success' && res.link){
+      window.open(res.link, '_blank');            // откроется бот → Start → привязка
+      pollTgConnected();                          // подхватим подключение без перезагрузки
+    } else alert(res.message || 'Не удалось создать ссылку');
+  });
+}
+function tgUnlink(){
+  if (!confirm('Отключить Telegram-уведомления?')) return;
+  fetch('/api/tg/unlink', {method:'POST'}).then(r=>r.json()).then(()=>{ ME.tg_connected = false; renderTgBanner(ME); });
+}
+function pollTgConnected(tries = 10){
+  if (tries <= 0) return;
+  setTimeout(() => {
+    fetch('/api/me').then(r=>r.json()).then(me=>{
+      if (me.tg_connected){ ME.tg_connected = true; renderTgBanner(ME); }
+      else pollTgConnected(tries - 1);
+    }).catch(() => pollTgConnected(tries - 1));
+  }, 3000);
+}
 
 $('refreshBtn').addEventListener('click', loadBoard);
 $('dtabs').addEventListener('click', e => {

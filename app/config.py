@@ -45,6 +45,20 @@ class Config:
     # получает роль admin при входе/регистрации и доступ к панели «Пользователи».
     ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'al.galimov@astana-motors.kz').lower()
 
+    # Telegram-уведомления (события вкладки «Дефекты»). Токен бота от @BotFather кладётся
+    # в env WELDTEAM_TG_BOT_TOKEN (в репозиторий НЕ коммитить). Username — для ссылки
+    # привязки t.me/<username>?start=<код>. Без токена фича полностью спит (фоновые
+    # потоки не запускаются, уведомления не копятся).
+    TG_BOT_TOKEN = os.environ.get('WELDTEAM_TG_BOT_TOKEN', '')
+    TG_BOT_USERNAME = os.environ.get('WELDTEAM_TG_BOT_USERNAME', '')
+    # Адрес сайта для кликабельной ссылки в уведомлении (например http://192.168.0.10:5000).
+    # Пусто → сообщение без ссылки, только текст.
+    SITE_URL = os.environ.get('WELDTEAM_SITE_URL', '')
+    # Напоминания о непринятых дефектах: окно (локальное время) и интервал, минут.
+    TG_REMIND_FROM = os.environ.get('WELDTEAM_REMIND_FROM', '07:30')
+    TG_REMIND_TO = os.environ.get('WELDTEAM_REMIND_TO', '16:30')
+    TG_REMIND_INTERVAL_MIN = int(os.environ.get('WELDTEAM_REMIND_INTERVAL_MIN', '60'))
+
     # Запускать миграции БД при старте приложения.
     RUN_MIGRATIONS = True
 
