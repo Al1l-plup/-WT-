@@ -60,10 +60,19 @@ def _del_photo_file(fname):
         pass
 
 
-def _can_edit_own(owner_dept, current_stage_dept, my_dept, is_admin):
-    """Править/удалять СВОЁ (записи/фото своего отдела), пока дефект на МОЁМ этапе; после
-    передачи — заморожено. Эти ограничения обходит ТОЛЬКО реальный админ (не WeldTeam-как-отдел)."""
-    return bool(is_admin) or (owner_dept is not None and owner_dept == my_dept and current_stage_dept == my_dept)
+def _can_delete_photo(p, uid, is_admin):
+    """Удалить фото: реальный админ — любое; остальные — ТОЛЬКО то, что загрузили САМИ
+    (dp.uploaded_by == uid), и только пока его этап ещё открыт (после передачи дальше —
+    заморожено). Владение фото — по загрузившему, а не по отделу текущего этапа: иначе
+    фото, снятое ОТК при регистрации, попадает на этап получателя и получатель мог его
+    удалить, а сам автор — нет."""
+    if is_admin:
+        return True
+    if p['uploaded_by'] is None or p['uploaded_by'] != uid:
+        return False
+    if p['stage_id'] is not None:
+        return p['stage_left_at'] is None                  # этап фото ещё не закрыт (не передан дальше)
+    return p['stage_dept'] == p['current_stage_dept']      # фото без привязки к этапу — грубый прокси «активно»
 
 
 def _denied_edit():
@@ -224,11 +233,15 @@ def defects_all():
     priority = """GROUP BY d.UniqueID
                   ORDER BY CASE WHEN is_b_point THEN 0 WHEN is_serial THEN 1 ELSE 2 END,
                            d.df_date DESC, d.UniqueID DESC"""
-    open_rows = db.execute(base + """
-        WHERE COALESCE(d.status,'registered') IN ('registered','in_work','in_review','at_oto','pending_otk')
-    """ + priority).fetchall()
+    open_in = ','.join('?' * len(df.OPEN_STATUSES))   # единый список «открытых» статусов (df.OPEN_STATUSES)
+    open_rows = db.execute(base + f"""
+        WHERE COALESCE(d.status,'registered') IN ({open_in})
+    """ + priority, df.OPEN_STATUSES).fetchall()
+    # COALESCE(...,'registered') (а не ''): статус 'unresolved' от этого не зависит
+    # (NULL→'registered'≠'unresolved', как и NULL→''≠'unresolved'), зато выражение
+    # совпадает с выражение-индексом ix_defects_status → фильтр идёт поиском, не сканом.
     unresolved_rows = db.execute(base + """
-        WHERE COALESCE(d.status,'') = 'unresolved'
+        WHERE COALESCE(d.status,'registered') = 'unresolved'
     """ + priority).fetchall()
     # Закрытые обрезаны до 50 последних; при фильтре по датам (панель фильтров) берём полный
     # диапазон с сервера, т.к. клиент видит только топ-50.
@@ -755,16 +768,19 @@ def defect_photo_upload(defect_id):
 
 @bp.route('/api/defects/<int:defect_id>/photo/<int:photo_id>', methods=['DELETE'])
 def defect_photo_delete(defect_id, photo_id):
-    """Удалить своё фото (фото своего отдела), пока дефект на этапе моего отдела. Только
-    реальный админ удаляет любое. Чистит и файл."""
-    _uid, dept, is_admin, _priv = _ctx()
+    """Удалить СВОЁ загруженное фото, пока его этап ещё открыт; после передачи дальше —
+    заморожено. Реальный админ удаляет любое. Чистит и файл."""
+    uid, _dept, is_admin, _priv = _ctx()
     db = get_db()
-    p = db.execute("""SELECT dp.path, dp.stage_dept, d.current_stage_dept
-                      FROM defect_photo dp JOIN defects d ON d.UniqueID=dp.defect_id
+    p = db.execute("""SELECT dp.path, dp.uploaded_by, dp.stage_id, dp.stage_dept,
+                             s.left_at AS stage_left_at, d.current_stage_dept
+                      FROM defect_photo dp
+                      JOIN defects d ON d.UniqueID=dp.defect_id
+                      LEFT JOIN defect_stage s ON s.UniqueID=dp.stage_id
                       WHERE dp.UniqueID=? AND dp.defect_id=?""", (photo_id, defect_id)).fetchone()
     if not p:
         return jsonify({'status': 'error', 'message': 'Фото не найдено'}), 404
-    if not _can_edit_own(p['stage_dept'], p['current_stage_dept'], dept, is_admin):
+    if not _can_delete_photo(p, uid, is_admin):
         return _denied_edit()
     try:
         db.execute('DELETE FROM defect_photo WHERE UniqueID=?', (photo_id,))

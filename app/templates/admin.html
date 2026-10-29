@@ -290,7 +290,7 @@ function wireSheet(s){
 async function init(openId){
   try {
     const docs = await jget('/api/admin/docs');
-    $('#tabs').innerHTML = docs.map(d=>`<div class="tab" data-doc="${d.id}">${d.title}`+
+    $('#tabs').innerHTML = docs.map(d=>`<div class="tab" data-doc="${escapeHtml(d.id)}">${escapeHtml(d.title)}`+
         (d.wb_tab_id?`<span class="tabdel" data-del="${d.wb_tab_id}" title="Удалить пустую вкладку">✕</span>`:'')+`</div>`).join('')
       + `<div class="tab" data-add="1" title="Новая вкладка Weld Balance для модели">+ вкладка</div>`
       + `<div class="tab" data-raw="1">Все таблицы (админ)</div>`;
@@ -387,7 +387,7 @@ async function openRaw(){
   markTab([...$('#tabs').querySelectorAll('.tab')].find(t=>t.dataset.raw));
   $('#tables').style.display=''; $('#sheet').innerHTML='';
   const t = await jget('/api/admin/tables');
-  $('#tables').innerHTML = t.map(x=>`<a data-t="${x.name}"><span>${x.name}</span><span class="c">${x.rows}</span></a>`).join('');
+  $('#tables').innerHTML = t.map(x=>`<a data-t="${escapeHtml(x.name)}"><span>${escapeHtml(x.name)}</span><span class="c">${x.rows}</span></a>`).join('');
   $('#tables').querySelectorAll('a').forEach(a=>a.onclick=()=>{ if(guard()) selectRawTable(a.dataset.t); });
 }
 async function selectRawTable(name){

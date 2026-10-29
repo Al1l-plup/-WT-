@@ -81,7 +81,8 @@
 const $ = s => document.querySelector(s);
 // автор действий определяется на сервере по сессии входа
 const hdr = () => ({'Content-Type':'application/json'});
-const esc = v => v===null||v===undefined ? '' : String(v).replace(/[&<>]/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));
+// Экранируем набор OWASP (& < > " ') — безопасно и в тексте, и в значении атрибута.
+const esc = v => v===null||v===undefined ? '' : String(v).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 let LBL = {fields:{}, tables:{}};
 
 const tableTitle = t => LBL.tables[t] || t;

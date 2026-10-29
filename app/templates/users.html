@@ -106,7 +106,7 @@ async function load(){
   d.users.forEach(u => { USERS_BY_ID[u.UniqueID] = u; });
   $('#ubody').innerHTML = d.users.map(u => {
     const fio = [u.surname, u.name, u.father_name].filter(Boolean).join(' ');
-    const opts = DEPTS.map(x => `<option value="${x}" ${x===u.department?'selected':''}>${x}</option>`).join('');
+    const opts = DEPTS.map(x => `<option value="${escapeHtml(x)}" ${x===u.department?'selected':''}>${escapeHtml(x)}</option>`).join('');
     const role = u.is_root
       ? '<span class="role-badge role-admin" title="Админ по почте — всегда">админ · по почте</span>'
       : (u.role === 'admin'
@@ -118,8 +118,8 @@ async function load(){
       ? (u.must_change_password ? '<span class="badge bw">ждёт смены пароля</span>' : '<span class="badge bs">активен</span>')
       : '<span class="badge bm">отключён</span>';
     return `<tr class="${u.is_active ? '' : 'u-inactive'}" data-id="${u.UniqueID}" data-admin="${u.role==='admin'?1:0}">
-      <td data-label="Сотрудник">${fio || '—'}${u.position ? '<br><span style="opacity:.6;font-size:12px">'+u.position+'</span>' : ''}</td>
-      <td data-label="Логин">${u.login || '—'}</td>
+      <td data-label="Сотрудник">${escapeHtml(fio || '—')}${u.position ? '<br><span style="opacity:.6;font-size:12px">'+escapeHtml(u.position)+'</span>' : ''}</td>
+      <td data-label="Логин">${escapeHtml(u.login || '—')}</td>
       <td data-label="Отдел"><select class="u-dept" ${u.role==='admin'?'title="Админ определяется по почте"':''}>${opts}</select></td>
       <td data-label="Зоны">${zonesCell(u)}</td>
       <td data-label="Роль">${role}</td>
@@ -149,7 +149,7 @@ function zonesCell(u){
   const am = u.areas || {};
   const parts = (AREAS_REF.brands || []).map(b => {
     const segs = am[b.id] || am[String(b.id)] || [];
-    return segs.length ? `${b.name}: ${segs.join(',')}` : null;
+    return segs.length ? `${escapeHtml(b.name)}: ${escapeHtml(segs.join(','))}` : null;
   }).filter(Boolean);
   const summary = parts.length ? parts.join(' · ') : '<span style="opacity:.6">не задано</span>';
   return `${summary} <button class="rowbtn act-areas" style="margin-left:6px">Настроить</button>`;
@@ -163,10 +163,10 @@ function openAreas(u){
   $('#areaBody').innerHTML = (AREAS_REF.brands || []).map(b => {
     const have = new Set(am[b.id] || am[String(b.id)] || []);
     const segs = AREAS_REF.areas[b.id] || AREAS_REF.areas[String(b.id)] || [];
-    return `<div style="margin:8px 0"><div style="font-weight:600;font-size:13px">${b.name}</div>
+    return `<div style="margin:8px 0"><div style="font-weight:600;font-size:13px">${escapeHtml(b.name)}</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">${segs.map(s =>
         `<label style="display:inline-flex;align-items:center;gap:4px;font-size:13px;border:1px solid var(--border);border-radius:6px;padding:3px 7px;cursor:pointer">
-          <input type="checkbox" data-brand="${b.id}" value="${s}" ${have.has(s) ? 'checked' : ''}>${s}</label>`).join('') || '<span style="opacity:.5;font-size:13px">нет участков</span>'}</div></div>`;
+          <input type="checkbox" data-brand="${escapeHtml(b.id)}" value="${escapeHtml(s)}" ${have.has(s) ? 'checked' : ''}>${escapeHtml(s)}</label>`).join('') || '<span style="opacity:.5;font-size:13px">нет участков</span>'}</div></div>`;
   }).join('');
   $('#areaDlg').showModal();
 }

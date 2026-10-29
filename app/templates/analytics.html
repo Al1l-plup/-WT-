@@ -201,7 +201,7 @@ function loadProcess(from, to) {
     document.getElementById('pReturns').textContent = d.returns_total;
     const dt = document.getElementById('deptTable');
     dt.innerHTML = d.by_dept.length ? d.by_dept.map(r => `<tr>
-      <td data-label="Отдел" class="fw-bold">${r.dept}</td>
+      <td data-label="Отдел" class="fw-bold">${escapeHtml(r.dept)}</td>
       <td data-label="Ср. время">${fmtHours(r.avg_hours)}</td>
       <td data-label="Этапов">${r.stages_done}</td>
       <td data-label="Закрыто" class="text-success">${r.closed}</td>
@@ -212,10 +212,10 @@ function loadProcess(from, to) {
     if (d.serial_list && d.serial_list.length) {
       sc.hidden = false;
       st.innerHTML = d.serial_list.map(r => `<tr>
-        <td data-label="Код"><span class="badge bd">${r.code}</span></td>
-        <td data-label="Точка" class="fw-bold">№${r.spot}</td>
+        <td data-label="Код"><span class="badge bd">${escapeHtml(r.code)}</span></td>
+        <td data-label="Точка" class="fw-bold">№${escapeHtml(r.spot)}</td>
         <td data-label="Возвратов" class="text-warn fw-bold">${r.returns}</td>
-        <td data-label="Этап" class="text-sm text-muted">${r.stage}</td>
+        <td data-label="Этап" class="text-sm text-muted">${escapeHtml(r.stage)}</td>
         <td data-label="Дата" class="text-sm">${r.date}</td>
       </tr>`).join('');
     } else { sc.hidden = true; st.innerHTML = ''; }
@@ -241,8 +241,8 @@ function render(data) {
     legend.innerHTML = data.by_code.map((item, i) => {
       labels.push(item.code); counts.push(item.count); colors.push(COLORS[i % COLORS.length]);
       return `<div class="legend-item" style="border-left:3px solid ${COLORS[i % COLORS.length]}">
-        <span class="legend-code" style="color:${COLORS[i%COLORS.length]}">${item.code}</span>
-        <span class="legend-name">${item.name}</span>
+        <span class="legend-code" style="color:${COLORS[i%COLORS.length]}">${escapeHtml(item.code)}</span>
+        <span class="legend-name">${escapeHtml(item.name)}</span>
         <span class="legend-cnt" style="color:${COLORS[i%COLORS.length]}">${item.count}</span>
       </div>`;
     }).join('');
@@ -266,11 +266,11 @@ function render(data) {
     return;
   }
   tbody.innerHTML = data.by_station.map(r => `<tr>
-    <td data-label="Бренд"><span class="badge bm">${r.brand}</span></td>
-    <td data-label="Станция" class="text-sm">${r.station}</td>
-    <td data-label="Код"><span class="badge bd">${r.code}</span></td>
+    <td data-label="Бренд"><span class="badge bm">${escapeHtml(r.brand)}</span></td>
+    <td data-label="Станция" class="text-sm">${escapeHtml(r.station)}</td>
+    <td data-label="Код"><span class="badge bd">${escapeHtml(r.code)}</span></td>
     <td data-label="Кол-во" class="fw-bold">${r.cnt}</td>
-    <td data-label="Дефект" class="text-sm text-muted">${codeNames[r.code] || r.code}</td>
+    <td data-label="Дефект" class="text-sm text-muted">${escapeHtml(codeNames[r.code] || r.code)}</td>
   </tr>`).join('');
 }
 

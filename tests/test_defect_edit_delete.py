@@ -1,7 +1,8 @@
 """Правка/удаление записей и фото с правами по этапу (п.2 бэклога) + привязка фото к этапу.
 
-Правило: править/удалять СВОЁ (фото/запись своего отдела), пока дефект на МОЁМ этапе;
-после передачи дальше — заморожено; чужой отдел — нельзя; админ (WeldTeam) — всё и везде.
+Правки записей этапа: СВОЙ отдел, пока дефект на МОЁМ этапе; после передачи — заморожено.
+Удаление фото: владение по ЗАГРУЗИВШЕМУ (dp.uploaded_by), пока его этап открыт; после
+передачи — заморожено; чужое фото удалять нельзя. Админ (реальный) — всё и везде.
 """
 import io
 
@@ -54,6 +55,22 @@ def test_photo_frozen_after_handoff_only_admin(register_client):
     assert prod.delete(f'/api/defects/{did}/photo/{pid}').status_code == 403       # после передачи — нельзя
     assert wt.delete(f'/api/defects/{did}/photo/{pid}').status_code == 403         # WeldTeam как ОТДЕЛ — тоже нельзя (не своё фото)
     assert admin.delete(f'/api/defects/{did}/photo/{pid}').get_json()['status'] == 'success'  # только реальный админ
+
+
+def test_photo_delete_owned_by_uploader_not_receiver(register_client):
+    """#7: фото, снятое ОТК при регистрации, попадает на этап получателя (Производство),
+    но удалять его может АВТОР (ОТК), а не получатель (раньше было наоборот)."""
+    otk = register_client(department='ОТК')
+    prod = register_client(department='Производство', login='u7_prod@x.kz')
+    data = {'g_num': '90050', 'problem_code': 'CR', 'photo': _png()}
+    did = otk.post('/api/defects/register_manual', data=data,
+                   content_type='multipart/form-data').get_json()['defect_id']
+    ph = otk.get(f'/api/defects/{did}').get_json()['photos'][0]
+    assert ph['stage_dept'] == 'Производство'                                        # фото на этапе получателя
+    pid = ph['UniqueID']
+    assert prod.delete(f'/api/defects/{did}/photo/{pid}').status_code == 403          # получатель не автор — нельзя
+    assert otk.delete(f'/api/defects/{did}/photo/{pid}').get_json()['status'] == 'success'  # автор удаляет своё
+    assert len(otk.get(f'/api/defects/{did}').get_json()['photos']) == 0
 
 
 def test_stage_comment_edit_permissions(register_client):

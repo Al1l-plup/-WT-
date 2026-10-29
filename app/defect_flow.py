@@ -22,6 +22,11 @@ from datetime import date, datetime
 OTO = 'ОТО'
 OTK = 'ОТК'
 
+# Статусы «открытого» дефекта: вкладка «Все открытые» на доске и плитка «Открытых»
+# на Главной считают именно их. Единый источник правды — не дублировать список строк
+# по эндпоинтам (иначе он разъезжается: см. баг «плитка Открытых = 0»).
+OPEN_STATUSES = ('registered', 'in_work', 'in_review', 'at_oto', 'pending_otk')
+
 
 def _now():
     return datetime.now().isoformat(timespec='seconds')

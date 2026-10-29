@@ -228,7 +228,9 @@ const STAGE_LABEL = {closed:'закрыл (на согласование ОТК)
                      to_oto:'передал в ОТО', oto_done:'контрмера ОТО', reopened:'переоткрыл',
                      otk_approved:'ОТК согласовал закрытие', otk_rejected:'ОТК не согласовал — возврат'};
 
-function esc(s){ return (s==null?'':String(s)).replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); }
+// Экранируем набор OWASP (& < > " ') — чтобы значение было безопасно и в тексте,
+// и внутри атрибута (value="…"): иначе кавычка в данных ломает атрибут (XSS).
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 function showAlert(el, type, msg){ el.className = `alert alert-${type}`; el.textContent = msg; }
 
 // Сжатие фото на КЛИЕНТЕ (canvas → JPEG): телефонное 3–8 МБ → ~200–400 КБ.
@@ -388,7 +390,16 @@ function currentRows(){
   // глобальный поиск (мобильная панель) — по всем столбцам сразу
   const gq = GQ.trim().toLowerCase();
   if (gq) rows = rows.filter(d => COLS.some(c => String(c.get(d)).toLowerCase().includes(gq)));
-  if (SORT.col){ const c = COLS.find(x => x.k === SORT.col); rows.sort((a, b) => SORT.dir * cmp(c.get(a), c.get(b), c.num)); }
+  if (SORT.col){
+    const c = COLS.find(x => x.k === SORT.col);
+    rows.sort((a, b) => {
+      const va = _norm(c.get(a)), vb = _norm(c.get(b));   // «—»/null → пусто
+      if (va === '' && vb === '') return 0;
+      if (va === '') return 1;        // пустые ВСЕГДА в конец — не зависит от направления
+      if (vb === '') return -1;
+      return SORT.dir * cmp(va, vb, c.num);
+    });
+  }
   return rows;
 }
 function colValues(ck){
@@ -490,6 +501,7 @@ function openColFilter(ck, btn){
 }
 function renderRows(){
   const tb = $('dtbody'); if (!tb) return;
+  updateFilterSummary();   // при любом ре-рендере (вкл. ввод в мобильный поиск) кнопка «Сбросить все» отражает состояние
   const rows = currentRows();
   if (!rows.length){ tb.innerHTML = `<tr class="empty-row"><td data-label="" colspan="${COLS.length}" style="text-align:center;color:var(--muted);padding:1.25rem">Пусто</td></tr>`; return; }
   tb.innerHTML = rows.map(d => {
@@ -605,7 +617,7 @@ function renderDetail(res){
         <button class="btn btn-ghost btn-sm" onclick="act(${d.UniqueID},'pass',{note:val('passn-${d.UniqueID}')})">Передать дальше</button>
       </div>
       <div class="act-form" id="bounce-${d.UniqueID}" hidden>
-        <div class="fgroup"><label class="lbl">Вернуть отделу</label><select id="to-${d.UniqueID}">${DEPTS.map(x=>`<option value="${x}">${x}</option>`).join('')}</select></div>
+        <div class="fgroup"><label class="lbl">Вернуть отделу</label><select id="to-${d.UniqueID}">${DEPTS.map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('')}</select></div>
         <div class="fgroup"><label class="lbl">Причина возврата (обязательно)</label><textarea id="brsn-${d.UniqueID}" placeholder="почему возвращаете…"></textarea></div>
         <button class="btn btn-warn btn-sm" onclick="act(${d.UniqueID},'bounce',{to_dept:val('to-${d.UniqueID}'),reason:val('brsn-${d.UniqueID}')})">Вернуть</button>
       </div>

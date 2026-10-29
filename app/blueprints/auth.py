@@ -56,6 +56,23 @@ def _set_session(row) -> None:
     session['must_change'] = bool(row['must_change_password']) if 'must_change_password' in row.keys() else False
 
 
+def refresh_identity() -> bool:
+    """Сверить сессию с БД и освежить её (вызывается щитом на каждый запрос).
+
+    Перечитывает текущего пользователя по session['uid'] и обновляет отдел/роль/флаги
+    в сессии из свежей строки worker — поэтому смена отдела/роли/сброс пароля админом
+    применяются сразу, без перелогина. Возвращает False, если учётка удалена или
+    деактивирована (щит тогда закрывает доступ и чистит сессию)."""
+    uid = session.get('uid')
+    if not uid:
+        return False
+    row = get_db().execute('SELECT * FROM worker WHERE UniqueID=?', (uid,)).fetchone()
+    if not row or not row['is_active']:
+        return False
+    _set_session(row)
+    return True
+
+
 @bp.route('/api/departments')
 def departments():
     return jsonify(DEPARTMENTS)

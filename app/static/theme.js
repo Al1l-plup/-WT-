@@ -3,6 +3,17 @@
   document.documentElement.setAttribute('data-theme', localStorage.getItem('wt-theme') || 'dark');
 })();
 
+// Единое экранирование для HTML-контекста (и текста, и значений атрибутов).
+// theme.js подключён на всех страницах в <head>, поэтому escapeHtml доступна
+// любому скрипту страницы. ПРАВИЛО: любой текст от пользователя/БД, который
+// попадает в innerHTML или в значение атрибута, пропускаем через escapeHtml() —
+// это закрывает stored XSS. Экранируем набор OWASP: & < > " '.
+function escapeHtml(s) {
+  return (s == null ? '' : String(s)).replace(/[&<>"']/g, m => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[m]));
+}
+
 function initThemeToggle() {
   const btn = document.getElementById('themeToggle');
   if (!btn) return;
@@ -75,7 +86,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       : '';
     const span = document.createElement('span');
     span.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:12px;opacity:.85;margin-left:6px;white-space:nowrap';
-    span.innerHTML = `${ro}👤 ${me.name} · ${me.dept || '—'} <a href="/logout" style="color:inherit;opacity:.7" title="Выйти">⎋</a>`;
+    span.innerHTML = `${ro}👤 ${escapeHtml(me.name)} · ${escapeHtml(me.dept || '—')} <a href="/logout" style="color:inherit;opacity:.7" title="Выйти">⎋</a>`;
     nav.insertBefore(span, btn);
   } catch (e) { /* оффлайн/аноним — молча */ }
 });

@@ -338,8 +338,9 @@ document.querySelectorAll('[data-mode]').forEach(btn => {
 function showAlert(el, type, msg) { el.className = `alert alert-${type}`; el.textContent = msg; }
 function badgeStatus(s) {
   if (s==='closed')     return '<span class="badge bs">Закрыт</span>';
-  if (s==='in_work')    return '<span class="badge bw">В работе</span>';
-  return '<span class="badge bm">Зарегистр.</span>';
+  if (s==='unresolved') return '<span class="badge bd">Не выявлен</span>';
+  if (s==='registered') return '<span class="badge bm">Зарегистр.</span>';
+  return '<span class="badge bw">В работе</span>';   // in_work/in_review/at_oto/pending_otk — в процессе 4M
 }
 
 // ─── ПИСТОЛЕТ: поиск ──────────────────────────────────────────────
@@ -403,9 +404,9 @@ function renderGun(d) {
   const g = d.gun;
   document.getElementById('gun-passport').innerHTML = `
     <div class="stat"><div class="stat-val accent">G.${String(g.g_num).padStart(3,'0')}</div><div class="stat-lbl">Номер</div></div>
-    <div class="stat"><div class="stat-val">${g.gun_type||'—'}</div><div class="stat-lbl">Тип клещей</div></div>
-    <div class="stat"><div class="stat-val">${g.brand}</div><div class="stat-lbl">Бренд / Линия</div></div>
-    <div class="stat"><div class="stat-val">${g.station_name}</div><div class="stat-lbl">Станция</div></div>
+    <div class="stat"><div class="stat-val">${escapeHtml(g.gun_type||'—')}</div><div class="stat-lbl">Тип клещей</div></div>
+    <div class="stat"><div class="stat-val">${escapeHtml(g.brand)}</div><div class="stat-lbl">Бренд / Линия</div></div>
+    <div class="stat"><div class="stat-val">${escapeHtml(g.station_name)}</div><div class="stat-lbl">Станция</div></div>
     ${(() => {
       const byModel = {};
       d.spots.forEach(s => { const k = fmtModel(s.model_name, s.model_type); byModel[k] = (byModel[k]||0) + 1; });
@@ -414,7 +415,7 @@ function renderGun(d) {
         return `<div class="stat"><div class="stat-val">${d.spots.length}</div><div class="stat-lbl">Сварочных точек</div></div>`;
       }
       return `<div class="stat"><div class="stat-val">${d.spots.length}</div><div class="stat-lbl">Точек всего</div></div>`
-        + entries.map(([m,c]) => `<div class="stat"><div class="stat-val">${c}</div><div class="stat-lbl">${m}</div></div>`).join('');
+        + entries.map(([m,c]) => `<div class="stat"><div class="stat-val">${c}</div><div class="stat-lbl">${escapeHtml(m)}</div></div>`).join('');
     })()}
     <div class="stat"><div class="stat-val">${d.maintenance_count}</div><div class="stat-lbl">Записей ТО</div></div>
     <div class="stat"><div class="stat-val">${d.defect_count}</div><div class="stat-lbl">Дефектов</div></div>
@@ -425,8 +426,8 @@ function renderGun(d) {
   document.getElementById('gun-setups').innerHTML = d.active_setups.length
     ? d.active_setups.map(r => `<tr>
         <td data-label="Точка" class="fw-bold">${r.spot_number||'—'}</td>
-        <td data-label="Модель" class="text-sm">${fmtModel(r.model_name,r.model_type)}</td>
-        <td data-label="Реж.">${r.mode||'—'}</td>
+        <td data-label="Модель" class="text-sm">${escapeHtml(fmtModel(r.model_name,r.model_type))}</td>
+        <td data-label="Реж.">${escapeHtml(r.mode||'—')}</td>
         <td data-label="Давл.">${Math.round(r.pressure/10)}</td>
         <td data-label="К.Тр." class="text-accent">${r.turn_R||'—'}</td>
         <td data-label="Ток 1" class="text-danger">${r.heat_1||'—'}</td>
@@ -441,17 +442,17 @@ function renderGun(d) {
         <td data-label="Оконч." class="text-sm text-muted">${r.end_date||'—'}</td>
         <td data-label="Статус">${r.is_active ? '<span class="badge bs">Акт.</span>' : '<span class="badge bm">Архив</span>'}</td>
         <td data-label="Точка" class="text-sm">${r.spot_number||'—'}</td>
-        <td data-label="Реж.">${r.mode||'—'}</td>
+        <td data-label="Реж.">${escapeHtml(r.mode||'—')}</td>
         <td data-label="Ток 1" class="text-danger">${r.heat_1||'—'}</td>
         <td data-label="Ток 2" class="text-danger">${r.heat_2||'—'}</td>
-        <td data-label="Комментарий" class="text-muted text-sm">${r.comments||'—'}</td>
+        <td data-label="Комментарий" class="text-muted text-sm">${escapeHtml(r.comments||'—')}</td>
       </tr>`).join('')
     : '<tr class="empty-row"><td colspan="8">Нет истории</td></tr>';
 
   document.getElementById('gun-spots').innerHTML = d.spots.length
     ? d.spots.map(r => `<tr>
         <td data-label="Точка" class="fw-bold">${r.spot_number}</td>
-        <td data-label="Модель" class="text-sm text-muted">${fmtModel(r.model_name,r.model_type)}</td>
+        <td data-label="Модель" class="text-sm text-muted">${escapeHtml(fmtModel(r.model_name,r.model_type))}</td>
       </tr>`).join('')
     : '<tr class="empty-row"><td colspan="2">Нет точек</td></tr>';
 
@@ -460,7 +461,7 @@ function renderGun(d) {
         <td data-label="Дата">${r.to_date}</td>
         <td data-label="Ср. ток" class="fw-bold text-accent">${r.avg_weld} А</td>
         <td data-label="Ср. давл.">${Math.round(r.avg_pres_N/10)} daN</td>
-        <td data-label="Сотрудник">${r.worker}</td>
+        <td data-label="Сотрудник">${escapeHtml(r.worker)}</td>
       </tr>`).join('')
     : '<tr class="empty-row"><td colspan="4">Нет ТО</td></tr>';
 
@@ -468,11 +469,11 @@ function renderGun(d) {
     ? d.defects.map(r => `<tr>
         <td data-label="Дата" class="text-sm">${r.df_date}</td>
         <td data-label="Точка" class="fw-bold">${r.spot_number}</td>
-        <td data-label="Модель" class="text-sm text-muted">${r.model_name}</td>
-        <td data-label="Код"><span class="badge bd">${r.problem_code}</span></td>
+        <td data-label="Модель" class="text-sm text-muted">${escapeHtml(r.model_name)}</td>
+        <td data-label="Код"><span class="badge bd">${escapeHtml(r.problem_code)}</span></td>
         <td data-label="Статус">${badgeStatus(r.status)}</td>
-        <td data-label="Первопричина" class="text-sm text-muted">${r.root_cause||'—'}</td>
-        <td data-label="Контрмера" class="text-sm text-muted">${r.solution||'—'}</td>
+        <td data-label="Первопричина" class="text-sm text-muted">${escapeHtml(r.root_cause||'—')}</td>
+        <td data-label="Контрмера" class="text-sm text-muted">${escapeHtml(r.solution||'—')}</td>
       </tr>`).join('')
     : '<tr class="empty-row"><td colspan="7">Нет дефектов</td></tr>';
 
@@ -535,8 +536,8 @@ function renderStation(d) {
   document.getElementById('station-data').classList.remove('hidden');
   const s = d.station;
   document.getElementById('st-passport').innerHTML = `
-    <div class="stat"><div class="stat-val accent">${s.station_name}</div><div class="stat-lbl">Станция</div></div>
-    <div class="stat"><div class="stat-val">${s.brand}</div><div class="stat-lbl">Бренд</div></div>
+    <div class="stat"><div class="stat-val accent">${escapeHtml(s.station_name)}</div><div class="stat-lbl">Станция</div></div>
+    <div class="stat"><div class="stat-val">${escapeHtml(s.brand)}</div><div class="stat-lbl">Бренд</div></div>
     <div class="stat"><div class="stat-val">${d.guns.length}</div><div class="stat-lbl">Пистолетов</div></div>
     <div class="stat"><div class="stat-val">${d.defects_summary.reduce((a,r)=>a+r.cnt,0)}</div><div class="stat-lbl">Дефектов всего</div></div>
   `;
@@ -546,8 +547,8 @@ function renderStation(d) {
     ? d.guns.map((r, i) => `<tr>
         <td data-label="#" class="text-muted text-sm">${i+1}</td>
         <td data-label="G.NUM" class="fw-bold">№${String(r.g_num).padStart(3,'0')}</td>
-        <td data-label="Тип" class="text-sm text-muted">${r.gun_type||'—'}</td>
-        <td data-label="Реж.">${r.mode||'—'}</td>
+        <td data-label="Тип" class="text-sm text-muted">${escapeHtml(r.gun_type||'—')}</td>
+        <td data-label="Реж.">${escapeHtml(r.mode||'—')}</td>
         <td data-label="Ток 1" class="text-danger">${r.heat_1||'—'}</td>
         <td data-label="Ток 2" class="text-danger">${r.heat_2||'—'}</td>
       </tr>`).join('')
@@ -555,15 +556,15 @@ function renderStation(d) {
 
   document.getElementById('st-models').innerHTML = d.models.length
     ? d.models.map(r => `<tr>
-        <td data-label="Модель" class="text-sm">${fmtModel(r.model_name,r.model_type)}</td>
+        <td data-label="Модель" class="text-sm">${escapeHtml(fmtModel(r.model_name,r.model_type))}</td>
         <td data-label="Точек" class="fw-bold">${r.spot_count}</td>
       </tr>`).join('')
     : '<tr class="empty-row"><td colspan="2">Нет данных</td></tr>';
 
   document.getElementById('st-defects').innerHTML = d.defects_summary.length
     ? d.defects_summary.map(r => `<tr>
-        <td data-label="Код"><span class="badge bd">${r.problem_code}</span></td>
-        <td data-label="Название" class="text-sm text-muted">${r.name}</td>
+        <td data-label="Код"><span class="badge bd">${escapeHtml(r.problem_code)}</span></td>
+        <td data-label="Название" class="text-sm text-muted">${escapeHtml(r.name)}</td>
         <td data-label="Кол-во" class="fw-bold">${r.cnt}</td>
       </tr>`).join('')
     : '<tr class="empty-row"><td colspan="3">Нет дефектов</td></tr>';
@@ -573,7 +574,7 @@ function renderStation(d) {
         <td data-label="Дата">${r.to_date}</td>
         <td data-label="Пистолет" class="fw-bold">№${String(r.g_num).padStart(3,'0')}</td>
         <td data-label="Ср. ток" class="text-accent">${r.avg_weld} А</td>
-        <td data-label="Сотрудник">${r.worker}</td>
+        <td data-label="Сотрудник">${escapeHtml(r.worker)}</td>
       </tr>`).join('')
     : '<tr class="empty-row"><td colspan="4">Нет ТО</td></tr>';
 
@@ -660,8 +661,8 @@ function renderSpot(d) {
   const s = d.spot;
   document.getElementById('sp-passport').innerHTML = `
     <div class="stat"><div class="stat-val accent">${s.spot_number}</div><div class="stat-lbl">№ точки</div></div>
-    <div class="stat"><div class="stat-val">${fmtModel(s.model_name,s.model_type)}</div><div class="stat-lbl">Модель</div></div>
-    <div class="stat"><div class="stat-val">${s.brand||'—'}</div><div class="stat-lbl">Бренд</div></div>
+    <div class="stat"><div class="stat-val">${escapeHtml(fmtModel(s.model_name,s.model_type))}</div><div class="stat-lbl">Модель</div></div>
+    <div class="stat"><div class="stat-val">${escapeHtml(s.brand||'—')}</div><div class="stat-lbl">Бренд</div></div>
     <div class="stat"><div class="stat-val">${d.link_history.length}</div><div class="stat-lbl">Связей (история)</div></div>
   `;
   document.getElementById('sp-edit-num').value = s.spot_number;
@@ -672,15 +673,15 @@ function renderSpot(d) {
     document.getElementById('sp-active-link').innerHTML = `
       <div class="g2">
         <div class="stat"><div class="stat-val accent">G.${String(al.g_num).padStart(3,'0')}</div><div class="stat-lbl">Пистолет</div></div>
-        <div class="stat"><div class="stat-val">${al.gun_type||'—'}</div><div class="stat-lbl">Тип</div></div>
-        <div class="stat"><div class="stat-val">${al.station_name}</div><div class="stat-lbl">Станция</div></div>
-        <div class="stat"><div class="stat-val">${al.mode||'—'}</div><div class="stat-lbl">Режим</div></div>
+        <div class="stat"><div class="stat-val">${escapeHtml(al.gun_type||'—')}</div><div class="stat-lbl">Тип</div></div>
+        <div class="stat"><div class="stat-val">${escapeHtml(al.station_name)}</div><div class="stat-lbl">Станция</div></div>
+        <div class="stat"><div class="stat-val">${escapeHtml(al.mode||'—')}</div><div class="stat-lbl">Режим</div></div>
         <div class="stat"><div class="stat-val text-danger">${al.heat_1||'—'} А</div><div class="stat-lbl">Ток 1</div></div>
         <div class="stat"><div class="stat-val text-danger">${al.heat_2||'—'} А</div><div class="stat-lbl">Ток 2</div></div>
         <div class="stat"><div class="stat-val">${Math.round((al.pressure||0)/10)} daN</div><div class="stat-lbl">Давление</div></div>
         <div class="stat"><div class="stat-val text-accent">${al.turn_R||'—'}</div><div class="stat-lbl">К.Тр.</div></div>
       </div>
-      <div class="text-muted text-sm" style="margin-top:.5rem">С ${al.start_date||'?'} · Комментарий: ${al.comments||'—'}</div>
+      <div class="text-muted text-sm" style="margin-top:.5rem">С ${escapeHtml(al.start_date||'?')} · Комментарий: ${escapeHtml(al.comments||'—')}</div>
     `;
   } else {
     document.getElementById('sp-active-link').innerHTML = '<div class="text-muted text-sm">Нет активной связи (точка не назначена пистолету)</div>';
@@ -692,19 +693,19 @@ function renderSpot(d) {
         <td data-label="По дату" class="text-sm text-muted">${r.end_date||'—'}</td>
         <td data-label="Статус">${r.is_active ? '<span class="badge bs">Акт.</span>' : '<span class="badge bm">Архив</span>'}</td>
         <td data-label="Пистолет" class="fw-bold">G.${String(r.g_num).padStart(3,'0')}</td>
-        <td data-label="Реж.">${r.mode||'—'}</td>
+        <td data-label="Реж.">${escapeHtml(r.mode||'—')}</td>
         <td data-label="Ток 1" class="text-danger">${r.heat_1||'—'}</td>
         <td data-label="Ток 2" class="text-danger">${r.heat_2||'—'}</td>
-        <td data-label="Комментарий" class="text-muted text-sm">${r.comments||'—'}</td>
+        <td data-label="Комментарий" class="text-muted text-sm">${escapeHtml(r.comments||'—')}</td>
       </tr>`).join('')
     : '<tr class="empty-row"><td colspan="8">Нет истории</td></tr>';
 
   document.getElementById('sp-defects').innerHTML = d.defects.length
     ? d.defects.map(r => `<tr>
         <td data-label="Дата" class="text-sm">${r.df_date}</td>
-        <td data-label="Код"><span class="badge bd">${r.problem_code}</span></td>
+        <td data-label="Код"><span class="badge bd">${escapeHtml(r.problem_code)}</span></td>
         <td data-label="Статус">${badgeStatus(r.status)}</td>
-        <td data-label="Контрмера" class="text-sm text-muted">${r.solution||'—'}</td>
+        <td data-label="Контрмера" class="text-sm text-muted">${escapeHtml(r.solution||'—')}</td>
       </tr>`).join('')
     : '<tr class="empty-row"><td colspan="4">Нет дефектов</td></tr>';
 
@@ -713,7 +714,7 @@ function renderSpot(d) {
         <td data-label="Дата">${r.to_date}</td>
         <td data-label="Ср. ток" class="fw-bold text-accent">${r.avg_weld} А</td>
         <td data-label="Ср. давл.">${Math.round(r.avg_pres_N/10)} daN</td>
-        <td data-label="Сотрудник">${r.worker}</td>
+        <td data-label="Сотрудник">${escapeHtml(r.worker)}</td>
       </tr>`).join('')
     : '<tr class="empty-row"><td colspan="4">Нет данных</td></tr>';
 

@@ -55,6 +55,8 @@
           <input type="radio" name="f_dept" value="WeldTeam" checked> WeldTeam</label>
         <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:13px">
           <input type="radio" name="f_dept" value="Производство"> Производство</label>
+        <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:13px">
+          <input type="radio" name="f_dept" value="ОТО"> ОТО</label>
       </div>
     </div>
     <div id="formAlert" class="hidden mt-alert"></div>
@@ -71,6 +73,7 @@
     <button class="view-btn" data-dept="ОТК">ОТК</button>
     <button class="view-btn" data-dept="WeldTeam">WeldTeam</button>
     <button class="view-btn" data-dept="Производство">Производство</button>
+    <button class="view-btn" data-dept="ОТО">ОТО</button>
   </div>
 
   <!-- ── ТАБЛИЦА ── -->
@@ -125,11 +128,11 @@ function renderTable() {
     const active = w.is_active;
     const deptColor = w.department === 'ОТК' ? 'ba' : w.department === 'Производство' ? 'bw' : 'bs';
     return `<tr style="${active ? '' : 'opacity:.45'}">
-      <td data-label="Фамилия" class="fw-bold">${w.surname}</td>
-      <td data-label="Имя">${w.name}</td>
-      <td data-label="Отчество" class="text-muted text-sm">${w.father_name || '—'}</td>
-      <td data-label="Должность" class="text-sm">${w.position || '—'}</td>
-      <td data-label="Отдел"><span class="badge ${deptColor}">${w.department || '—'}</span></td>
+      <td data-label="Фамилия" class="fw-bold">${escapeHtml(w.surname)}</td>
+      <td data-label="Имя">${escapeHtml(w.name)}</td>
+      <td data-label="Отчество" class="text-muted text-sm">${escapeHtml(w.father_name || '—')}</td>
+      <td data-label="Должность" class="text-sm">${escapeHtml(w.position || '—')}</td>
+      <td data-label="Отдел"><span class="badge ${deptColor}">${escapeHtml(w.department || '—')}</span></td>
       <td data-label="Статус">${active ? '<span class="badge bs">Активен</span>' : '<span class="badge bm">Неактивен</span>'}</td>
       <td data-label="">
         <button class="btn btn-ghost btn-sm" onclick="startEdit(${w.UniqueID})">✏</button>
@@ -160,6 +163,10 @@ window.startEdit = function(id) {
   document.getElementById('f_name').value    = w.name;
   document.getElementById('f_father').value  = w.father_name || '';
   document.getElementById('f_position').value = w.position || '';
+  // сперва снимаем все отметки: если отдел сотрудника не найден среди радио,
+  // ни один не останется отмеченным «по умолчанию» — сохранение потребует выбрать отдел
+  // (иначе был баг: у ОТО-сотрудника отдел молча менялся на отмеченный по умолчанию).
+  document.querySelectorAll('input[name=f_dept]').forEach(r => r.checked = false);
   const radio = document.querySelector(`input[name=f_dept][value="${w.department}"]`);
   if (radio) radio.checked = true;
   document.getElementById('formCardTitle').textContent = `Редактировать: ${w.surname} ${w.name}`;

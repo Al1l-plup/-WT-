@@ -421,7 +421,7 @@ function renderDailyTasks(tasks) {
     const badge = t.status === 'done'    ? '<span class="badge bs">Выполнено</span>'
                 : t.status === 'in_work' ? '<span class="badge bw">В работе</span>'
                 :                          '<span class="badge bm">Ожидает</span>';
-    const worker = t.worker_surname ? `${t.worker_surname} ${t.worker_name}` : '—';
+    const worker = t.worker_surname ? `${escapeHtml(t.worker_surname)} ${escapeHtml(t.worker_name)}` : '—';
     let acts = '';
     if (t.status === 'pending') {
       acts = `<button class="btn btn-primary btn-sm" onclick="takeAndStart(${t.id})">Взять в работу</button>
@@ -430,10 +430,10 @@ function renderDailyTasks(tasks) {
       acts = `<button class="btn btn-primary btn-sm" onclick="takeAndStart(${t.id})">Продолжить →</button>`;
     }
     return `<tr>
-      <td data-label="Пистолет" class="fw-bold">№${String(t.g_num).padStart(3,'0')} <span class="text-muted text-sm">[${t.gun_model}]</span></td>
-      <td data-label="Бренд"><span class="badge ba">${t.brand}</span></td>
-      <td data-label="Станция" class="text-sm text-muted">${t.station_name||'—'}</td>
-      <td data-label="Тип" class="text-sm text-muted">${t.plan_type}</td>
+      <td data-label="Пистолет" class="fw-bold">№${String(t.g_num).padStart(3,'0')} <span class="text-muted text-sm">[${escapeHtml(t.gun_model)}]</span></td>
+      <td data-label="Бренд"><span class="badge ba">${escapeHtml(t.brand)}</span></td>
+      <td data-label="Станция" class="text-sm text-muted">${escapeHtml(t.station_name||'—')}</td>
+      <td data-label="Тип" class="text-sm text-muted">${escapeHtml(t.plan_type)}</td>
       <td data-label="Статус">${badge}</td>
       <td data-label="Кто" class="text-sm">${worker}</td>
       <td data-label="">${acts}</td>
@@ -524,14 +524,14 @@ function renderScheduleList(items) {
   items.forEach(it => {
     if (it.station_name !== lastStation) {
       lastStation = it.station_name;
-      html += `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding:.45rem 0 .2rem;margin-top:.3rem;border-bottom:1px solid var(--border)">${it.station_name}</div>`;
+      html += `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding:.45rem 0 .2rem;margin-top:.3rem;border-bottom:1px solid var(--border)">${escapeHtml(it.station_name)}</div>`;
     }
     const assigned = it.task_id && it.task_status && it.task_status !== 'cancelled';
-    const lbl = assigned ? `<span class="badge bs" style="font-size:11px">${it.task_status}</span>` : '';
+    const lbl = assigned ? `<span class="badge bs" style="font-size:11px">${escapeHtml(it.task_status)}</span>` : '';
     html += `<label style="display:flex;align-items:center;gap:.6rem;padding:.3rem 0 .3rem .75rem;cursor:pointer">
       <input type="checkbox" class="plan-check" value="${it.gun_id}" ${assigned ? 'disabled checked' : ''}>
-      <span style="flex:1;font-size:13px">№${String(it.g_num).padStart(3,'0')} <span class="text-muted">[${it.model}]</span></span>
-      <span class="text-sm text-muted">${it.plan_type || ''}</span>
+      <span style="flex:1;font-size:13px">№${String(it.g_num).padStart(3,'0')} <span class="text-muted">[${escapeHtml(it.model)}]</span></span>
+      <span class="text-sm text-muted">${escapeHtml(it.plan_type || '')}</span>
       ${lbl}
     </label>`;
   });
@@ -576,7 +576,7 @@ function loadAnalytics() {
     document.getElementById('brandBars').innerHTML = data.by_brand.length
       ? data.by_brand.map(b => `
           <div class="brand-bar">
-            <span class="brand-bar-name">${b.brand}</span>
+            <span class="brand-bar-name">${escapeHtml(b.brand)}</span>
             <div class="brand-bar-track"><div class="brand-bar-fill" style="width:${Math.round(b.cnt/maxBrand*100)}%"></div></div>
             <span class="brand-bar-count">${b.cnt}</span>
           </div>`).join('')
@@ -594,11 +594,11 @@ function loadAnalytics() {
     tbody.innerHTML = data.recent.length
       ? data.recent.map(r => `<tr>
           <td data-label="Дата">${r.to_date}</td>
-          <td data-label="Линия"><span class="badge bm">${r.brand}</span></td>
-          <td data-label="Пистолет">№${String(r.g_num).padStart(3,'0')} <span class="text-muted text-sm">[${r.gun_model}]</span></td>
+          <td data-label="Линия"><span class="badge bm">${escapeHtml(r.brand)}</span></td>
+          <td data-label="Пистолет">№${String(r.g_num).padStart(3,'0')} <span class="text-muted text-sm">[${escapeHtml(r.gun_model)}]</span></td>
           <td data-label="Ток" class="fw-bold text-accent">${r.avg_weld} А</td>
           <td data-label="Давление">${Math.round(r.avg_pres_N / 10)} daN</td>
-          <td data-label="Сотрудник">${r.worker_surname}</td>
+          <td data-label="Сотрудник">${escapeHtml(r.worker_surname)}</td>
         </tr>`).join('')
       : '<tr class="empty-row"><td colspan="6">Нет записей ТО</td></tr>';
   });
@@ -626,25 +626,25 @@ function renderHistResult(gunId) {
       ? data.maintenance.map(m => `<tr>
           <td>${m.to_date}</td>
           <td class="fw-bold">${Math.round((m.first_weld+m.second_weld+m.third_weld)/3)} А</td>
-          <td>${m.surname||'—'}</td>
+          <td>${escapeHtml(m.surname||'—')}</td>
         </tr>`).join('')
       : '<tr class="empty-row"><td colspan="3">Нет</td></tr>';
 
     document.getElementById('h_defects').innerHTML = data.defects.length
       ? data.defects.map(d => `<tr>
           <td>${d.df_date}</td>
-          <td>№${d.spot_number||'—'}</td>
-          <td><span class="badge bd">${d.problem_code}</span></td>
+          <td>№${escapeHtml(d.spot_number||'—')}</td>
+          <td><span class="badge bd">${escapeHtml(d.problem_code)}</span></td>
         </tr>`).join('')
       : '<tr class="empty-row"><td colspan="3">Нет</td></tr>';
 
     document.getElementById('h_params').innerHTML = data.params.length
       ? data.params.map(p => `<tr>
           <td>${p.start_date} ${p.is_active?'<span class="badge bs">акт</span>':''}</td>
-          <td>${p.mode||'—'}</td>
+          <td>${escapeHtml(p.mode||'—')}</td>
           <td class="text-danger">${p.heat_1}</td>
           <td class="text-danger">${p.heat_2}</td>
-          <td class="text-muted text-sm">${p.comments||'—'}</td>
+          <td class="text-muted text-sm">${escapeHtml(p.comments||'—')}</td>
         </tr>`).join('')
       : '<tr class="empty-row"><td colspan="5">Нет</td></tr>';
 
@@ -836,25 +836,25 @@ function refreshHistory(gunId) {
       ? data.maintenance.map(m => `<tr>
           <td>${m.to_date}</td>
           <td class="fw-bold">${Math.round((m.first_weld+m.second_weld+m.third_weld)/3)} А</td>
-          <td>${m.surname||'—'}</td>
+          <td>${escapeHtml(m.surname||'—')}</td>
         </tr>`).join('')
       : '<tr class="empty-row"><td colspan="3">Нет записей</td></tr>';
     document.getElementById('t_defects').innerHTML = data.defects.length
       ? data.defects.map(d => `<tr>
-          <td>${d.df_date}</td><td>№${d.spot_number||'—'}</td>
-          <td><span class="badge bd">${d.problem_code}</span></td>
-          <td class="text-sm text-muted">${d.solution||'—'}</td>
+          <td>${d.df_date}</td><td>№${escapeHtml(d.spot_number||'—')}</td>
+          <td><span class="badge bd">${escapeHtml(d.problem_code)}</span></td>
+          <td class="text-sm text-muted">${escapeHtml(d.solution||'—')}</td>
         </tr>`).join('')
       : '<tr class="empty-row"><td colspan="4">Нет дефектов</td></tr>';
     document.getElementById('t_params').innerHTML = data.params.length
       ? data.params.map(p => `<tr>
           <td data-label="Дата">${p.start_date} ${p.is_active?'<span class="badge bs">акт</span>':''}</td>
-          <td data-label="Реж.">${p.mode||'—'}</td>
+          <td data-label="Реж.">${escapeHtml(p.mode||'—')}</td>
           <td data-label="Давл.">${Math.round(p.pressure/10)} daN</td>
           <td data-label="К.Тр." class="text-accent">${p.turn_R}</td>
           <td data-label="Ток 1" class="text-danger">${p.heat_1}</td>
           <td data-label="Ток 2" class="text-danger">${p.heat_2}</td>
-          <td data-label="Комментарий" class="text-muted text-sm">${p.comments||'—'}</td>
+          <td data-label="Комментарий" class="text-muted text-sm">${escapeHtml(p.comments||'—')}</td>
         </tr>`).join('')
       : '<tr class="empty-row"><td colspan="7">Нет истории</td></tr>';
     document.getElementById('historySection').classList.remove('hidden');
@@ -918,7 +918,7 @@ function renderProgress(data) {
     const pct = b.total ? Math.round(b.done / b.total * 100) : 0;
     const color = pct === 100 ? 'var(--success,#3fb950)' : pct > 50 ? 'var(--warn,#e3b341)' : 'var(--accent,#58a6ff)';
     html += `<div class="brand-bar" style="margin-bottom:.5rem">
-      <span class="brand-bar-name" style="min-width:80px">${b.brand}</span>
+      <span class="brand-bar-name" style="min-width:80px">${escapeHtml(b.brand)}</span>
       <div class="brand-bar-track" style="flex:1">
         <div class="brand-bar-fill" style="width:${pct}%;background:${color}"></div>
       </div>

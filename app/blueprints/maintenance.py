@@ -15,7 +15,10 @@ def save_maintenance():
     data = request.json or {}
     try:
         gun_id   = int(data.get('gun_id')       or 0)
-        param_id = int(data.get('parameter_id') or 0)
+        # Ручной пистолет без активной уставки присылает пустой parameter_id.
+        # Пишем NULL (нет режима), а не 0 — иначе внешний ключ parameters(UniqueID)
+        # падает (нет записи с id=0) и сохранение ТО отдаёт 500.
+        param_id = int(data.get('parameter_id') or 0) or None
         w1 = int(data.get('first_weld')  or 0)
         w2 = int(data.get('second_weld') or 0)
         w3 = int(data.get('third_weld')  or 0)

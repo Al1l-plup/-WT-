@@ -62,6 +62,15 @@ def create_app(config: type[Config] | None = None) -> Flask:
             if request.path.startswith('/api/'):
                 return jsonify({'status': 'error', 'message': 'Требуется вход'}), 401
             return redirect('/login')
+        # 1b) сверка сессии с БД: деактивированный/удалённый пользователь теряет доступ
+        # сразу, а смена отдела/роли/сброс пароля применяются без перелогина.
+        # Ленивый импорт — auth регистрируется позже, избегаем циклического импорта.
+        from app.blueprints.auth import refresh_identity
+        if not refresh_identity():
+            session.clear()
+            if request.path.startswith('/api/'):
+                return jsonify({'status': 'error', 'message': 'Учётная запись недоступна — войдите заново'}), 401
+            return redirect('/login')
         # 2) обязательная смена пароля (после сброса админом — временный пароль)
         if session.get('must_change') and ep not in _ALWAYS_ALLOWED:
             if request.path.startswith('/api/'):

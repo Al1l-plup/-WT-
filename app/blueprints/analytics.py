@@ -4,6 +4,7 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request
 
 from app.db import get_db
+from app.defect_flow import OPEN_STATUSES
 
 bp = Blueprint('analytics', __name__)
 
@@ -118,7 +119,10 @@ def get_stats():
     db = get_db()
     def one(q): return db.execute(q).fetchone()[0]
     maint  = one('SELECT COUNT(*) FROM maintenance')
-    open_d = one("SELECT COUNT(*) FROM defects WHERE COALESCE(status,'registered') IN ('registered','in_work')")
+    # «открытые» = тот же набор статусов, что и вкладка «Все открытые» на доске (4M-статусы включены)
+    _in = ','.join('?' * len(OPEN_STATUSES))
+    open_d = db.execute(f"SELECT COUNT(*) FROM defects WHERE COALESCE(status,'registered') IN ({_in})",
+                        OPEN_STATUSES).fetchone()[0]
     total  = one('SELECT COUNT(*) FROM defects')
     # «масштаб» системы для плиток Главной
     points = one('SELECT COUNT(*) FROM weld_point')

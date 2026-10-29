@@ -431,7 +431,8 @@ class Sheet {
     });
     return h + `<td class="rownum"><button class="delrow" data-r="${vr}">${st === 'deleted' ? '↺' : '✕'}</button></td></tr>`;
   }
-  _esc(v) { return v === null || v === undefined ? '' : String(v).replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m])); }
+  // Набор OWASP (& < > " ') — безопасно и в тексте ячейки, и в значении атрибута (title=…, data-hint=…).
+  _esc(v) { return v === null || v === undefined ? '' : String(v).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])); }
   _dispRaw(row, c) {
     let v = row[c.name];
     if (c.fk && this.fkMaps[c.name] && this.fkMaps[c.name].has(String(v))) v = this.fkMaps[c.name].get(String(v));

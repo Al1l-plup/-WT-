@@ -2,6 +2,7 @@
 from flask import Blueprint, jsonify, request
 
 from app.db import get_db
+from app.defect_flow import OPEN_STATUSES
 from app.errors import api_error
 
 bp = Blueprint('catalog', __name__)
@@ -229,7 +230,7 @@ def search_spot():
     all_d = [dict(d) for d in defects]
     return jsonify({'status': 'success', 'data': [dict(r) for r in rows],
                     'workers': [dict(w) for w in workers],
-                    'open_defects':   [d for d in all_d if d['status'] in ('registered','in_work')],
+                    'open_defects':   [d for d in all_d if d['status'] in OPEN_STATUSES],
                     'closed_defects': [d for d in all_d if d['status'] == 'closed']})
 
 
