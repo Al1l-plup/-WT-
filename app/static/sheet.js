@@ -944,14 +944,28 @@ class Sheet {
       '<div class="sf-actions"><button class="sf-ok">Применить</button><button class="sf-cancel">Отмена</button><button class="sf-clear">Сброс</button></div>';
     document.body.appendChild(p);
     const r = btn.getBoundingClientRect();
-    p.style.left = Math.min(r.left, window.innerWidth - 272) + 'px';
-    p.style.top = Math.min(r.bottom + 4, window.innerHeight - p.offsetHeight - 8) + 'px';
+    // Телефон: попап крепим к МЕСТУ НА СТРАНИЦЕ (absolute), а не к экрану — он скроллится
+    // вместе с колонкой, и до «Применить» можно доскроллить даже при открытой клавиатуре.
+    // Клавиатуру сами не поднимаем: обычно хватает галочек, поиск — по тапу.
+    const mob = window.matchMedia('(max-width: 768px)').matches;
+    if (mob) {
+      p.classList.add('mob');
+      p.style.position = 'absolute';
+      const w = p.offsetWidth, sx = window.scrollX;
+      p.style.left = Math.max(sx + 8, Math.min(r.left + sx, sx + document.documentElement.clientWidth - w - 8)) + 'px';
+      p.style.top = (r.bottom + window.scrollY + 4) + 'px';
+      p.scrollIntoView({ block: 'nearest' });   // показать попап целиком (кнопки — сверху, см. CSS .mob)
+    } else {
+      p.style.left = Math.min(r.left, window.innerWidth - 272) + 'px';
+      p.style.top = Math.min(r.bottom + 4, window.innerHeight - p.offsetHeight - 8) + 'px';
+    }
 
     const listEl = p.querySelector('.sf-list'), search = p.querySelector('.sf-search'), allbox = p.querySelector('.sf-allbox');
     const items = () => [...listEl.querySelectorAll('.sf-item')];
     const visible = () => items().filter(it => it.style.display !== 'none');
     const syncAll = () => { const v = visible(), on = v.filter(it => it.firstChild.checked).length; allbox.checked = on > 0 && on === v.length; allbox.indeterminate = on > 0 && on < v.length; };
-    syncAll(); search.focus();
+    syncAll();
+    if (!mob) search.focus();
     search.oninput = () => { const q = search.value.trim().toLowerCase(); items().forEach((it, i) => { it.style.display = lbl(shown[i]).toLowerCase().includes(q) ? '' : 'none'; }); syncAll(); };
     allbox.onchange = () => { visible().forEach(it => it.firstChild.checked = allbox.checked); };
     listEl.onchange = syncAll;
@@ -999,7 +1013,17 @@ class Sheet {
       '#sheetfilter .sf-actions button{padding:6px 10px;border:1px solid var(--border);background:var(--bg);color:inherit;border-radius:6px;cursor:pointer;font-size:12px}' +
       '#sheetfilter .sf-ok{background:var(--accent);color:#fff;border-color:var(--accent)}' +
       '#sheetfilter .sf-clear{margin-left:auto}' +
-      '#sheetfilter .sf-empty{color:var(--muted,#888);font-size:11.5px;padding:2px}';
+      '#sheetfilter .sf-empty{color:var(--muted,#888);font-size:11.5px;padding:2px}' +
+      // Телефон: тач-цели >= 44px (Apple HIG / WCAG 2.5.5), 16px в поиске — iOS не зумит.
+      '#sheetfilter.mob{width:min(92vw,340px);box-sizing:border-box}' +
+      '#sheetfilter.mob .sf-sort button,#sheetfilter.mob .sf-actions button{min-height:44px;font-size:14px;padding:8px 12px}' +
+      '#sheetfilter.mob .sf-search{min-height:44px;font-size:16px}' +
+      '#sheetfilter.mob .sf-all,#sheetfilter.mob .sf-item{min-height:44px}' +
+      '#sheetfilter.mob .sf-item input,#sheetfilter.mob .sf-all input{width:20px;height:20px}' +
+      '#sheetfilter.mob .sf-list{max-height:40vh}' +
+      // Кнопки «Применить/Отмена/Сброс» — шапкой СВЕРХУ (как в iOS): выше поля поиска,
+      // поэтому экранная клавиатура их никогда не перекрывает.
+      '#sheetfilter.mob .sf-actions{order:-1;border-top:none;border-bottom:1px solid var(--border);padding:0 0 7px}';
     document.head.appendChild(s);
   }
 }

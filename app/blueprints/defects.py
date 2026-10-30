@@ -725,12 +725,20 @@ def defect_detail(defect_id):
         WHERE st.defect_id=? ORDER BY st.UniqueID""", (defect_id,)).fetchall()
     occ = db.execute('SELECT occ_date FROM defect_occurrence WHERE defect_id=? ORDER BY UniqueID',
                      (defect_id,)).fetchall()
-    photos = db.execute('SELECT UniqueID, stage_dept, stage_id, ts FROM defect_photo WHERE defect_id=? ORDER BY UniqueID',
-                        (defect_id,)).fetchall()
+    photo_rows = db.execute("""
+        SELECT dp.UniqueID, dp.stage_dept, dp.stage_id, dp.ts, dp.uploaded_by,
+               s.left_at AS stage_left_at, ? AS current_stage_dept
+        FROM defect_photo dp LEFT JOIN defect_stage s ON s.UniqueID = dp.stage_id
+        WHERE dp.defect_id=? ORDER BY dp.UniqueID""", (d['current_stage_dept'], defect_id)).fetchall()
+    # can_delete считает СЕРВЕР тем же правилом, что и DELETE (_can_delete_photo) —
+    # интерфейс не дублирует логику прав и не расходится с ней.
+    uid, is_admin = session.get('uid'), bool(session.get('is_admin'))
+    photos = [{'UniqueID': p['UniqueID'], 'stage_dept': p['stage_dept'], 'stage_id': p['stage_id'], 'ts': p['ts'],
+               'can_delete': _can_delete_photo(p, uid, is_admin)} for p in photo_rows]
     return jsonify({'status': 'success', 'defect': dict(d),
                     'stages': [dict(r) for r in stages],
                     'occurrences': [r['occ_date'] for r in occ],
-                    'photos': [dict(p) for p in photos],
+                    'photos': photos,
                     'vin_required': df.vin_required(db, defect_id),
                     'station_name': df.station_name_for(db, defect_id),
                     'my_dept': session.get('dept'),

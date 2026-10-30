@@ -15,8 +15,9 @@
     .rowbtn{cursor:pointer;padding:6px 11px;border:1px solid var(--border);border-radius:6px;background:var(--card);font-size:13px;color:inherit}
     .rowbtn:hover{border-color:var(--accent)}
     .u-dept{padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit;font-size:13px}
-    #tempDlg{border:1px solid var(--border);border-radius:12px;background:var(--card);color:inherit;max-width:440px;width:92%;padding:0}
-    #tempDlg::backdrop{background:rgba(0,0,0,.5)}
+    #tempDlg,#areaDlg{border:1px solid var(--border);border-radius:12px;background:var(--card);color:inherit;max-width:440px;width:92%;padding:0}
+    #tempDlg::backdrop,#areaDlg::backdrop{background:rgba(0,0,0,.5)}
+    #areaDlg{max-height:85vh;overflow:auto}   /* длинный список участков — скролл внутри, кнопки не уезжают за экран */
     .tempbox{padding:22px}
     .temppw{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:24px;font-weight:700;letter-spacing:1px;
             background:var(--bg);border:1px dashed var(--accent);border-radius:8px;padding:12px;text-align:center;margin:12px 0;user-select:all}

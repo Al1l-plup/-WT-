@@ -908,11 +908,13 @@ function renderProgress(data) {
     return;
   }
   const summaryPct = data.total_planned ? Math.round(data.total_done / data.total_planned * 100) : 0;
-  let html = `<div style="display:flex;gap:1.5rem;margin-bottom:.75rem;flex-wrap:wrap">
-    <div class="stat" style="min-width:0"><div class="stat-val accent">${data.total_planned}</div><div class="stat-lbl">По плану</div></div>
-    <div class="stat" style="min-width:0"><div class="stat-val bs" style="color:var(--success,#3fb950)">${data.total_done}</div><div class="stat-lbl">Выполнено</div></div>
-    <div class="stat" style="min-width:0"><div class="stat-val warn">${data.total_remaining}</div><div class="stat-lbl">Осталось</div></div>
-    <div class="stat" style="min-width:0"><div class="stat-val">${summaryPct}%</div><div class="stat-lbl">Готовность</div></div>
+  // адаптивная сетка: 4 в ряд на десктопе, 2×2 на телефоне (flex + min-width:0 сжимал
+  // плашки уже подписи — «ГОТОВНОСТЬ» вылезала за экран, давая горизонтальный скролл)
+  let html = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.75rem;margin-bottom:.75rem">
+    <div class="stat"><div class="stat-val accent">${data.total_planned}</div><div class="stat-lbl">По плану</div></div>
+    <div class="stat"><div class="stat-val bs" style="color:var(--success,#3fb950)">${data.total_done}</div><div class="stat-lbl">Выполнено</div></div>
+    <div class="stat"><div class="stat-val warn">${data.total_remaining}</div><div class="stat-lbl">Осталось</div></div>
+    <div class="stat"><div class="stat-val">${summaryPct}%</div><div class="stat-lbl">Готовность</div></div>
   </div>`;
   data.brands.forEach(b => {
     const pct = b.total ? Math.round(b.done / b.total * 100) : 0;
@@ -933,7 +935,7 @@ function renderProgress(data) {
   div.innerHTML = html;
 }
 </script>
-<script src="/static/sheet.js?v=11"></script>
+<script src="/static/sheet.js?v=12"></script>
 <script src="/static/editor-embed.js?v=4"></script>
 <script>
 (function(){

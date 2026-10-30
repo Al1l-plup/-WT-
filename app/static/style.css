@@ -17,6 +17,9 @@
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* Сброс выше обнуляет margin:auto из стилей браузера, которым модальный <dialog>
+   центрируется на экране — без этой строки диалоги прилипают к левому верхнему углу. */
+dialog { margin: auto; }
 html {
   scroll-behavior: smooth;
   /* iOS: не «раздувать» шрифт при повороте в альбомную ориентацию */
@@ -405,8 +408,8 @@ strong { font-weight: 600; }
   .nav-links a[href="/logout"] { display: inline-flex; align-items: center; min-height: 44px; padding: 0 8px; }
 
   /* Touch-friendly кнопки (минимум 44px = Apple HIG / WCAG 2.5.5) */
-  .btn { min-height: 44px; font-size: 14px; padding: 8px 14px; }
-  .btn-sm { min-height: 44px; font-size: 13px; padding: 6px 12px; }
+  .btn { min-height: 44px; min-width: 44px; font-size: 14px; padding: 8px 14px; }
+  .btn-sm { min-height: 44px; min-width: 44px; font-size: 13px; padding: 6px 12px; }   /* min-width — иконки ✏/↻/✕ */
   .btn-full { width: 100% !important; }
   /* переключатели вида (Аналитика) и прочие кнопки-«таблетки» */
   .view-btn { min-height: 44px; font-size: 14px; padding: 6px 16px; }

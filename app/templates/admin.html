@@ -23,6 +23,8 @@
     .bar{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
     .bar input,.bar select,.bar button{padding:6px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit}
     .bar button{cursor:pointer}
+    /* телефон: панель инструментов — тач-цели >= 44px (было ~29px) */
+    @media (max-width:640px){ .bar input,.bar select,.bar button{min-height:44px} .bar button{min-width:44px} }
     .primary{background:var(--accent);color:#fff;border:none!important}
     .badge{font-size:12px;opacity:.75}
     .grid{max-height:56vh;overflow:auto;border:1px solid var(--border);border-radius:8px;outline:none}
@@ -253,7 +255,7 @@
   </ul>
 </dialog>
 
-<script src="/static/sheet.js?v=11"></script>
+<script src="/static/sheet.js?v=12"></script>
 <script>
 const $ = s => document.querySelector(s);
 // автор правок определяется на сервере по сессии входа

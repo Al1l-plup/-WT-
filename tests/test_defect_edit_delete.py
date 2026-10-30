@@ -73,6 +73,18 @@ def test_photo_delete_owned_by_uploader_not_receiver(register_client):
     assert len(otk.get(f'/api/defects/{did}').get_json()['photos']) == 0
 
 
+def test_detail_can_delete_flag_matches_server_rule(register_client):
+    """Флаг can_delete в карточке считает сервер тем же правилом, что и DELETE —
+    интерфейс показывает ✕ ровно тем, кому сервер разрешит удалить."""
+    otk = register_client(department='ОТК')
+    prod = register_client(department='Производство', login='cd_prod@x.kz')
+    data = {'g_num': '90060', 'problem_code': 'CR', 'photo': _png()}
+    did = otk.post('/api/defects/register_manual', data=data,
+                   content_type='multipart/form-data').get_json()['defect_id']
+    assert otk.get(f'/api/defects/{did}').get_json()['photos'][0]['can_delete'] is True    # автор
+    assert prod.get(f'/api/defects/{did}').get_json()['photos'][0]['can_delete'] is False  # получатель
+
+
 def test_stage_comment_edit_permissions(register_client):
     otk = register_client(department='ОТК')
     prod = register_client(department='Производство', login='se_prod@x.kz')

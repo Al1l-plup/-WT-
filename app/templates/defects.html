@@ -59,6 +59,22 @@
     #dbfilter .dbf-ok{background:var(--accent);color:#fff;border-color:var(--accent)}
     #dbfilter .dbf-clear{margin-left:auto}
     #dbfilter .dbf-empty{color:var(--muted);font-size:11.5px;padding:2px}
+    /* планшет/телефон: тач-цели >= 44px, 16px в поиске (iOS не зумит) */
+    #dbfilter.mob{width:min(92vw,340px);box-sizing:border-box}
+    #dbfilter.mob .dbf-sort button,#dbfilter.mob .dbf-actions button{min-height:44px;font-size:14px;padding:8px 12px}
+    #dbfilter.mob .dbf-search{min-height:44px;font-size:16px}
+    #dbfilter.mob .dbf-all,#dbfilter.mob .dbf-item{min-height:44px}
+    #dbfilter.mob .dbf-item input,#dbfilter.mob .dbf-all input{width:20px;height:20px}
+    #dbfilter.mob .dbf-list{max-height:40vh}
+    /* кнопки шапкой сверху (как в iOS) — выше поиска, клавиатура их не перекрывает */
+    #dbfilter.mob .dbf-actions{order:-1;border-top:none;border-bottom:1px solid var(--border);padding:0 0 7px}
+    .ph-del{position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);color:#fff;border:none;border-radius:50%;width:22px;height:22px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center}
+    @media (max-width:768px){
+      .dbfbtn{min-height:32px;min-width:36px}
+      .dfm input,.dfm select{min-height:44px;font-size:16px}
+      .dtab{min-height:44px}                                   /* вкладки доски — основные кнопки на телефоне */
+      .ph-del{width:34px;height:34px;font-size:15px;top:3px;right:3px}
+    }
     .dtable tr.drow{cursor:pointer}
     .dtable tr.drow.b-point td:first-child{box-shadow:inset 3px 0 0 var(--danger)}
     .dtable tr.drow.serial td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
@@ -94,6 +110,7 @@
     .tl-txt{font-size:12px;margin-top:2px;white-space:pre-wrap}
     .photos{display:flex;gap:.4rem;flex-wrap:wrap;margin:.5rem 0}
     .photos img{width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:pointer}
+    @media (max-width:768px){ .photos img{width:88px;height:88px} }   /* крупнее превью на телефоне → ✕ 34px не перекрывает фото */
     .act-bar{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.7rem}
     .act-form{margin-top:.6rem;padding:.6rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--r-sm)}
     .act-form textarea{min-height:52px}
@@ -520,13 +537,25 @@ function openColFilter(ck, btn){
     '<div class="dbf-actions"><button class="dbf-ok">Применить</button><button class="dbf-cancel">Отмена</button><button class="dbf-clear">Сброс</button></div>';
   document.body.appendChild(p);
   const r = btn.getBoundingClientRect();
-  p.style.left = Math.max(6, Math.min(r.left, window.innerWidth - 272)) + 'px';
-  p.style.top = Math.min(r.bottom + 4, window.innerHeight - p.offsetHeight - 8) + 'px';
+  // Планшет/телефон: крепим к месту на странице (absolute), без авто-клавиатуры — как в Редакторе
+  const mob = window.matchMedia('(max-width: 768px)').matches;
+  if (mob){
+    p.classList.add('mob');
+    p.style.position = 'absolute';
+    const w = p.offsetWidth, sx = window.scrollX;
+    p.style.left = Math.max(sx + 8, Math.min(r.left + sx, sx + document.documentElement.clientWidth - w - 8)) + 'px';
+    p.style.top = (r.bottom + window.scrollY + 4) + 'px';
+    p.scrollIntoView({block: 'nearest'});   // показать попап целиком (кнопки — сверху)
+  } else {
+    p.style.left = Math.max(6, Math.min(r.left, window.innerWidth - 272)) + 'px';
+    p.style.top = Math.min(r.bottom + 4, window.innerHeight - p.offsetHeight - 8) + 'px';
+  }
   const listEl = p.querySelector('.dbf-list'), search = p.querySelector('.dbf-search'), allbox = p.querySelector('.dbf-allbox');
   const items = () => [...listEl.querySelectorAll('.dbf-item')];
   const visible = () => items().filter(it => it.style.display !== 'none');
   const syncAll = () => { const v = visible(), on = v.filter(it => it.firstChild.checked).length; allbox.checked = on > 0 && on === v.length; allbox.indeterminate = on > 0 && on < v.length; };
-  syncAll(); search.focus();
+  syncAll();
+  if (!mob) search.focus();
   search.oninput = () => { const q = search.value.trim().toLowerCase(); items().forEach((it, i) => { it.style.display = lbl(vals[i]).toLowerCase().includes(q) ? '' : 'none'; }); syncAll(); };
   allbox.onchange = () => { visible().forEach(it => it.firstChild.checked = allbox.checked); };
   listEl.onchange = syncAll;
@@ -582,12 +611,12 @@ function renderDetail(res){
 
   const admin = !!ME.is_admin;   // правка/удаление записей: обходит ограничения только реальный админ (не WeldTeam-отдел)
   const canEditStage = s => admin || (ME.dept && s.dept === ME.dept && !s.left_at);
-  const canDelPhoto = p => admin || (ME.dept && p.stage_dept === ME.dept && d.current_stage_dept === ME.dept);
+  const canDelPhoto = p => !!p.can_delete;   // права считает сервер тем же правилом, что и DELETE (по загрузившему)
 
   // фото показываем ВНУТРИ этапа, где оно было добавлено (по stage_id)
   const photoChip = p => `<span style="position:relative;display:inline-block">
       <img src="/api/defects/photo/${p.UniqueID}" title="${esc(p.stage_dept||'')} ${esc((p.ts||'').replace('T',' '))}" onclick="window.open('/api/defects/photo/${p.UniqueID}','_blank')">
-      ${canDelPhoto(p) ? `<button title="Удалить фото" onclick="delPhoto(${d.UniqueID},${p.UniqueID})" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;line-height:1;cursor:pointer">✕</button>` : ''}
+      ${canDelPhoto(p) ? `<button class="ph-del" title="Удалить фото" aria-label="Удалить фото" onclick="delPhoto(${d.UniqueID},${p.UniqueID})">✕</button>` : ''}
     </span>`;
   const stageIds = new Set(res.stages.map(s => s.stage_id));
   const byStage = {};
@@ -703,7 +732,8 @@ function renderDetail(res){
   }
   if (!actions && d.status !== 'closed') actions = `<div class="muted" style="margin-top:.5rem">Сейчас дефект на этапе «${esc(d.current_stage_dept||'—')}» — действия доступны этому отделу.</div>`;
 
-  const delBtn = priv() ? `<button class="btn btn-ghost btn-sm" style="float:right" onclick="delDefect(${d.UniqueID})">✕ Удалить</button>` : '';
+  // без float: плавающая кнопка «вываливалась» из карточки и на мобиле ложилась на следующую
+  const delBtn = priv() ? `<div style="display:flex;justify-content:flex-end;margin-top:.6rem"><button class="btn btn-ghost btn-sm" onclick="delDefect(${d.UniqueID})">✕ Удалить</button></div>` : '';
 
   body.innerHTML = ribbon + reg + occ + timeline + photos + actions + delBtn + `<div id="alert-${d.UniqueID}" class="hidden mt-alert"></div>`;
 
@@ -846,7 +876,7 @@ function initRegistration(){
   manGunNum.addEventListener('keydown', e => { if (e.key==='Enter') $('manRegBtn').click(); });
 }
 </script>
-<script src="/static/sheet.js?v=11"></script>
+<script src="/static/sheet.js?v=12"></script>
 <script src="/static/editor-embed.js?v=4"></script>
 <script>
 (function(){
