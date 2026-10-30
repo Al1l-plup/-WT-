@@ -25,9 +25,18 @@ branch_labels = None
 depends_on = None
 
 
+def _has_column(conn, table, col):
+    return any(r[1] == col for r in conn.exec_driver_sql(f'PRAGMA table_info({table})').fetchall())
+
+
 def upgrade() -> None:
-    op.execute('ALTER TABLE worker ADD COLUMN tg_chat_id TEXT')
-    op.execute('ALTER TABLE worker ADD COLUMN tg_link_code TEXT')
+    # Идемпотентно: DDL в SQLite без транзакции — при обрыве деплоя повторный прогон
+    # не должен падать на «duplicate column» (и после downgrade, который колонки оставляет).
+    conn = op.get_bind()
+    if not _has_column(conn, 'worker', 'tg_chat_id'):
+        op.execute('ALTER TABLE worker ADD COLUMN tg_chat_id TEXT')
+    if not _has_column(conn, 'worker', 'tg_link_code'):
+        op.execute('ALTER TABLE worker ADD COLUMN tg_link_code TEXT')
     op.execute("""
         CREATE TABLE IF NOT EXISTS notification_outbox (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -28,7 +28,8 @@ def _setup(app, register_client):
     did = _mk_defect(otk)
 
     db = _db(app)
-    wid = lambda lg: db.execute('SELECT UniqueID FROM worker WHERE login=?', (lg,)).fetchone()[0]
+    def wid(lg):
+        return db.execute('SELECT UniqueID FROM worker WHERE login=?', (lg,)).fetchone()[0]
     ids = {lg: wid(lg) for lg in ('n_otk@weldteam.kz', 'n_a@weldteam.kz', 'n_b@weldteam.kz',
                                   'n_c@weldteam.kz', 'n_d@weldteam.kz', 'n_wt@weldteam.kz')}
     bname = db.execute('SELECT brand FROM brand WHERE UniqueID=1').fetchone()[0]
@@ -93,13 +94,17 @@ def test_process_outbox_marks_sent_and_failed(register_client, app):
     did, ids, db = _setup(app, register_client)
     enqueue_stage_arrival(db, did, 'Производство'); db.commit()
     calls = []
-    ok_sender = lambda token, chat, text: (calls.append(chat) or (True, None))
+
+    def ok_sender(token, chat, text):
+        calls.append(chat)
+        return (True, None)
     assert process_outbox(db, token='x', sender=ok_sender) == 2
     assert db.execute("SELECT COUNT(*) FROM notification_outbox WHERE status='sent'").fetchone()[0] == 2
     assert db.execute("SELECT COUNT(*) FROM notification_outbox WHERE status='pending'").fetchone()[0] == 0
 
     enqueue_stage_arrival(db, did, 'ОТК'); db.commit()          # +1 pending (опенер 111)
-    fail_sender = lambda token, chat, text: (False, 'boom')
+    def fail_sender(token, chat, text):
+        return (False, 'boom')
     for _ in range(6):
         process_outbox(db, token='x', sender=fail_sender)
     assert db.execute("SELECT COUNT(*) FROM notification_outbox WHERE status='failed'").fetchone()[0] >= 1

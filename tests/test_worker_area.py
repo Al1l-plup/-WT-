@@ -75,7 +75,8 @@ def test_mine_filtered_by_zones(register_client, app):
 
     board = prod.get('/api/defects/all').get_json()
     assert board['zoned'] is True
-    m = lambda did: next(x for x in board['open'] if x['UniqueID'] == did)['mine']
+    def m(did):
+        return next(x for x in board['open'] if x['UniqueID'] == did)['mine']
     assert m(in_zone) is True
     assert m(off_seg) is False                # мой этап, но участок MB не в зонах
     assert m(no_area) is True                 # без участка — всегда виден

@@ -18,8 +18,14 @@ branch_labels = None
 depends_on = None
 
 
+def _has_column(conn, table, col):
+    return any(r[1] == col for r in conn.exec_driver_sql(f'PRAGMA table_info({table})').fetchall())
+
+
 def upgrade() -> None:
-    op.execute('ALTER TABLE defect_stage ADD COLUMN last_notified_at TEXT')
+    # Идемпотентно (см. 0020): повторный прогон / прогон после downgrade не падает.
+    if not _has_column(op.get_bind(), 'defect_stage', 'last_notified_at'):
+        op.execute('ALTER TABLE defect_stage ADD COLUMN last_notified_at TEXT')
 
 
 def downgrade() -> None:
