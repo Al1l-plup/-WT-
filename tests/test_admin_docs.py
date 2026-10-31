@@ -22,11 +22,13 @@ def test_docs_list(client):
 
 def test_equipment_linked_edit(client, app):
     eq = client.get('/api/admin/doc/equipment?limit=50').get_json()
-    # перенос гана — через редактируемый «Трансформатор»; «Станция» вычисляется и read-only
+    # «Трансформатор» — ручная характеристика (редактируемая); «Станция (по WB)» — только
+    # из Weld Balance, read-only. В тестовой БД WB пуст → явно «⚠ нет в WB».
     assert any(c['label'] == 'Трансформатор' and c['editable'] and c['fk'] == 'trans' for c in eq['columns'])
-    assert any(c['label'] == 'Станция' and not c['editable'] for c in eq['columns'])
+    assert any(c['label'] == 'Станция (по WB)' and not c['editable'] for c in eq['columns'])
     row = next(r for r in eq['rows'] if r['transformer_id'])
     gun, old_trans = row['__pk_gun'], row['transformer_id']
+    assert row['station_name'] == '⚠ нет в WB'
     db = sqlite3.connect(app.config['DB_PATH'])
     new_trans = db.execute('SELECT UniqueID FROM trans WHERE UniqueID!=? LIMIT 1', (old_trans,)).fetchone()[0]
     res = client.post('/api/admin/doc/equipment/batch', json={'changes': [
@@ -44,6 +46,9 @@ def test_equipment_linked_edit(client, app):
     assert db.execute("SELECT transformer_id FROM gun_transformer_assignment WHERE gun_id=? AND is_active=1",
                       (gun,)).fetchone()[0] == new_trans
     assert db.execute("SELECT gun_type FROM gun WHERE UniqueID=?", (gun,)).fetchone()[0] == 'DOCT'
+    # смена трансформатора НЕ меняет станцию — она только из WB
+    after = next(r for r in client.get('/api/admin/doc/equipment?limit=50').get_json()['rows'] if r['__pk_gun'] == gun)
+    assert after['station_name'] == '⚠ нет в WB'
 
 
 def test_parameters_doc_edit(client, app):

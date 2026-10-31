@@ -4,9 +4,10 @@
 Каждое изменение фиксируется в change_log (через триггеры), автор проставляется здесь.
 ВНИМАНИЕ: аутентификации пока нет — доступ открыт (журнал+откат страхуют). Auth — отдельный этап.
 """
+import re
 import uuid
 
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, current_app, jsonify, render_template, request
 
 from app.audit import (
     create_restore_point,
@@ -21,6 +22,7 @@ from app.audit import (
 from app.db import get_db
 from app.documents import TOKEN_RE, close_removed_wb_rows, doc_list, get_documents, resolve_weld_point_links
 from app.errors import api_error
+from app.wb_source import rebuild_issues
 
 bp = Blueprint('admin', __name__)
 
@@ -273,6 +275,7 @@ def batch_apply(name):
             close_removed_wb_rows(db, wp_removed)
         stamp_audit(db, _author(), batch, since)
         db.commit()
+        _refresh_reconciliation(db)
         return jsonify({'status': 'success', 'batch_id': batch, **counts})
     except ValueError as e:
         db.rollback()
@@ -393,20 +396,51 @@ def _validate_business(db, table, values, exclude_pk=None, allow_unknown_model=F
             raise ValueError(f'Неизвестный код модели «{values["model_code"]}». Допустимые: {", ".join(sorted(codes))}')
 
 
+def _refresh_reconciliation(db):
+    """После сохранения правок пересобрать «Сверку» (WB ↔ Перечень/ТО/дефекты).
+    Отдельно от сохранения: правка уже записана, сбой пересборки её не откатывает."""
+    try:
+        rebuild_issues(db)
+        db.commit()
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        current_app.logger.warning('Не удалось пересобрать Сверку', exc_info=True)
+
+
+def _resolve_transformer(db, value):
+    """Значение ячейки «Трансформатор» → trans.UniqueID. Принимает id, вид «id · название»
+    (как в списке) и само название (transID, без учёта регистра) — в т.ч. вставку из Excel."""
+    s = str(value).strip()
+    m = re.match(r'^(\d+)(?:\s*·.*)?$', s)
+    if m and db.execute('SELECT 1 FROM trans WHERE UniqueID=?', (int(m.group(1)),)).fetchone():
+        return int(m.group(1))
+    hits = db.execute('SELECT UniqueID FROM trans WHERE UPPER(TRIM(transID)) = UPPER(?)', (s,)).fetchall()
+    if len(hits) == 1:
+        return hits[0][0]
+    raise ValueError(f'Трансформатор «{s}» не найден' if not hits else f'Трансформатор «{s}» неоднозначен')
+
+
 def sync_gun_transformer(db, gun_id, transformer_id):
-    """Перенос гана: закрыть текущую привязку к трансформатору, создать новую.
-    Точки гана (welding_setup) автоматически «переезжают» — станция вычисляется через трансформатор."""
+    """Трансформатор пистолета — ручная характеристика (какой трансформатор стоит у гана).
+    На станцию НЕ влияет: станция пистолета берётся только из Weld Balance (app/wb_source.py).
+    Пустое значение — снять привязку. Тот же трансформатор — ничего не меняем.
+    История сохраняется: старая привязка закрывается датой."""
     from datetime import date as _date
-    if transformer_id in (None, ''):
-        raise ValueError('Выберите трансформатор')
-    if not db.execute('SELECT 1 FROM trans WHERE UniqueID=?', (transformer_id,)).fetchone():
-        raise ValueError('Трансформатор не найден')
     today = _date.today().isoformat()
+    if transformer_id in (None, ''):
+        db.execute("UPDATE gun_transformer_assignment SET is_active=0, end_date=? "
+                   "WHERE gun_id=? AND is_active=1", (today, gun_id))
+        return
+    tid = _resolve_transformer(db, transformer_id)
+    active = {r[0] for r in db.execute('SELECT transformer_id FROM gun_transformer_assignment '
+                                       'WHERE gun_id=? AND is_active=1', (gun_id,))}
+    if active == {tid}:
+        return
     db.execute("UPDATE gun_transformer_assignment SET is_active=0, end_date=? "
                "WHERE gun_id=? AND is_active=1", (today, gun_id))
     db.execute("INSERT INTO gun_transformer_assignment (start_date, end_date, is_active, comments, "
-               "gun_id, transformer_id) VALUES (?, NULL, 1, 'перенос из редактора', ?, ?)",
-               (today, gun_id, transformer_id))
+               "gun_id, transformer_id) VALUES (?, NULL, 1, 'изменено в редакторе', ?, ?)",
+               (today, gun_id, tid))
 
 
 def sync_parameter_guns(db, parameter_id, value):
@@ -620,6 +654,7 @@ def batch_doc(doc_id):
             close_removed_wb_rows(db, wp_removed)
         stamp_audit(db, _author(), batch, since)
         db.commit()
+        _refresh_reconciliation(db)
         resp = {'status': 'success', 'batch_id': batch, 'rows_updated': len(updates)}
         if warnings:
             # не больше 10 строк в подсказке, остальное свёрнём счётчиком

@@ -15,6 +15,8 @@
 """
 import re
 
+from app.wb_source import GUN_WB_BRAND_ID, GUN_WB_JOIN, GUN_WB_STATION_NAME
+
 # ── колонки Weld Balance = ТОЧНОЕ зеркало листа «Welds» Excel (колонка-в-колонку,
 #    col0..col52), чтобы Ctrl+V из Excel вставлялся 1:1 без сдвига столбцов. Детали
 #    слоёв (Excel col11-25) пишутся в под-таблицу weld_point_part через setter
@@ -166,12 +168,9 @@ def _wb_doc(title, where, manual_src, model_code=None):
 # ── статические документы ──
 _EQUIPMENT_DOC = {
     'title': 'Перечень оборудования',
-    'base': """FROM gun g
-        LEFT JOIN gun_transformer_assignment gta ON g.UniqueID=gta.gun_id AND gta.is_active=1
-        LEFT JOIN trans t ON gta.transformer_id=t.UniqueID
-        LEFT JOIN transformer_station_assignment tsa ON t.UniqueID=tsa.transformer_id AND tsa.is_active=1
-        LEFT JOIN station st ON tsa.station_id=st.UniqueID
-        LEFT JOIN brand b ON st.brand_id=b.UniqueID""",
+    # Станция пистолета — ТОЛЬКО из Weld Balance (v_wb_gun, app/wb_source.py).
+    # Трансформатор — ручная характеристика пистолета, на станцию НЕ влияет.
+    'base': 'FROM gun g' + GUN_WB_JOIN + f'\n        LEFT JOIN brand b ON b.UniqueID = {GUN_WB_BRAND_ID}',
     'pks': {'gun': 'g.UniqueID'},
     'primary': 'gun',
     'order': 'g.g_num',
@@ -179,13 +178,17 @@ _EQUIPMENT_DOC = {
         {'label': 'Номер (G)', 'field': 'g_num', 'expr': 'g.g_num', 'edit': True, 'table': 'gun', 'col': 'g_num',
          'hint': 'Уникальный номер клещей. Дубликаты запрещены.'},
         {'label': 'Тип клещей', 'field': 'gun_type', 'expr': 'g.gun_type', 'edit': True, 'table': 'gun', 'col': 'gun_type'},
-        # ПЕРЕНОС ГАНА: выбираете трансформатор (в т.ч. другой станции) — старая привязка
-        # закрывается датой, создаётся новая; станция/линия пересчитываются, точки едут с ганом.
-        {'label': 'Трансформатор', 'field': 'transformer_id', 'expr': 'gta.transformer_id', 'edit': True,
-         'fk': 'trans', 'setter': 'gun_transformer',
-         'hint': 'Перенос гана: выберите трансформатор (можно другой станции) — старая привязка закроется датой, точки переедут вместе с ганом.'},
-        {'label': 'Станция', 'field': 'station_name', 'expr': "COALESCE(st.station_name,'—')", 'edit': False,
-         'hint': 'Вычисляется по трансформатору. Для переноса гана меняйте «Трансформатор».'},
+        # Трансформатор — ручная характеристика пистолета (последняя активная привязка).
+        {'label': 'Трансформатор', 'field': 'transformer_id',
+         'expr': '(SELECT gta.transformer_id FROM gun_transformer_assignment gta '
+                 'WHERE gta.gun_id = g.UniqueID AND gta.is_active = 1 ORDER BY gta.UniqueID DESC LIMIT 1)',
+         'edit': True, 'fk': 'trans', 'setter': 'gun_transformer',
+         'hint': 'Какой трансформатор стоит у этого пистолета (ручное поле). На станцию не влияет — '
+                 'станция берётся из Weld Balance. Начните печатать номер/название трансформатора; '
+                 'очистите ячейку, чтобы снять привязку.'},
+        {'label': 'Станция (по WB)', 'field': 'station_name', 'edit': False, 'expr': GUN_WB_STATION_NAME,
+         'hint': 'Только из Weld Balance. «⚠ нет в WB» и «⚠ несколько станций» — в «Сверке» '
+                 '(запрос ИТО): правится в WB, не здесь.'},
         {'label': 'Линия', 'field': 'brand', 'expr': "COALESCE(b.brand,'—')", 'edit': False},
     ],
 }
@@ -475,21 +478,28 @@ def resolve_weld_point_links(db, wp_ids) -> None:
        история сохраняется в welding_setup и в Журнале.
 
     Клещи с несуществующим номером не создаём (опечатка вероятнее) — остаётся NULL.
+    5. Станция строки ('Станция' WB, текст) → справочник станций → weld_point.station_id.
+       WB — единственный источник станции точки и пистолета (app/wb_source.py).
+       Не сопоставилось — station_id NULL, проблема уходит в Сверку (без окон и
+       предупреждений: вставке из Excel ничего не мешает).
     """
     from datetime import date
+
+    from app.wb_source import StationMatcher, parse_g
     today = date.today().isoformat()
+    matcher = StationMatcher(db)   # справочники читаем один раз на пакет
     for wp_id in wp_ids:
-        row = db.execute('SELECT gun_mntc, model_code, spot_number, welding_type, gun_id, spot_id '
+        row = db.execute('SELECT gun_mntc, model_code, spot_number, welding_type, gun_id, spot_id, wb_station '
                          'FROM weld_point WHERE id=?', (wp_id,)).fetchone()
         if not row:
             continue
         gun_mntc, code, spot_number, welding_type = row[0], row[1], row[2], row[3]
         old_spot_id = row[5]
-        # 1) клещи
+        # 1) клещи (при дубле G-номера — детерминированно первый; дубль виден в Сверке)
         gun_id = None
-        m = re.search(r'G[.\s]*0*(\d+)', gun_mntc or '')
-        if m:
-            g = db.execute('SELECT UniqueID FROM gun WHERE g_num=?', (int(m.group(1)),)).fetchone()
+        g_num = parse_g(gun_mntc)
+        if g_num is not None:
+            g = db.execute('SELECT UniqueID FROM gun WHERE g_num=? ORDER BY UniqueID LIMIT 1', (g_num,)).fetchone()
             gun_id = g[0] if g else None
         # 2) карточки точки во всех модификациях кода: найти или создать
         new_spots = []
@@ -508,8 +518,8 @@ def resolve_weld_point_links(db, wp_ids) -> None:
         if gun_id is not None:
             for sid in new_spots:
                 _ensure_active_link(db, sid, gun_id, today)
-        db.execute('UPDATE weld_point SET gun_id=?, spot_id=? WHERE id=?',
-                   (gun_id, new_spots[0] if new_spots else None, wp_id))
+        db.execute('UPDATE weld_point SET gun_id=?, spot_id=?, station_id=? WHERE id=?',
+                   (gun_id, new_spots[0] if new_spots else None, matcher.match(code, row[6]), wp_id))
         # 4) закрыть ВСЕ активные связки затронутых карточек, не подтверждённые WB
         #    (старые/новые карточки + «застрявшие» третьи клещи). Проверка идёт по уже
         #    обновлённой строке, поэтому смена G, номера, модели, очистка G и удаление

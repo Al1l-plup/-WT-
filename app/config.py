@@ -65,6 +65,10 @@ class Config:
     # Актуализировать триггеры журнала версий (аудита) при старте.
     AUDIT_ENABLED = True
 
+    # При старте довести WB до актуального состояния (станции, G-номера) и пересобрать
+    # «Сверку» — app/wb_source.sync_wb_on_start. Идемпотентно.
+    WB_SYNC_ON_START = True
+
     DEBUG = False
     TESTING = False
 
@@ -81,6 +85,7 @@ class TestingConfig(Config):
     TESTING = True
     # В тестах путь к БД задаёт фикстура (копия боевой базы во временный файл).
     REQUIRE_DEFECT_PHOTO = False   # требование фото проверяется отдельным тестом (включая флаг)
+    WB_SYNC_ON_START = False       # синхронизация WB проверяется отдельными тестами (tests/test_wb_source.py)
 
 
 _CONFIG_BY_NAME = {

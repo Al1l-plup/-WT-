@@ -664,7 +664,8 @@ function loadBrands() {
 brandSelect.addEventListener('change', () => {
   resetTo('brand');
   if (!brandSelect.value) return;
-  fetch(`/api/stations/${brandSelect.value}`).then(r => r.json()).then(data => {
+  // with_lost=1: в конце списка — «⚠ Пистолеты не из WB» (станция пистолета берётся только из WB)
+  fetch(`/api/stations/${brandSelect.value}?with_lost=1`).then(r => r.json()).then(data => {
     data.forEach(s => stationSelect.add(new Option(s.station_name, s.UniqueID)));
     stationSelect.disabled = false;
   });
@@ -935,7 +936,7 @@ function renderProgress(data) {
   div.innerHTML = html;
 }
 </script>
-<script src="/static/sheet.js?v=12"></script>
+<script src="/static/sheet.js?v=13"></script>
 <script src="/static/editor-embed.js?v=4"></script>
 <script>
 (function(){

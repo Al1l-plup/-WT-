@@ -12,7 +12,8 @@ import sqlite3
 # Таблицы, которые НЕ аудируем и не даём редактировать генерик-редактором.
 # notification_outbox — служебная очередь уведомлений (высокая оборачиваемость:
 # постоянные insert/update/delete), аудит раздул бы change_log; не редактируется руками.
-AUDIT_EXCLUDE = {'change_log', 'restore_point', 'alembic_version', 'sqlite_sequence', 'notification_outbox'}
+AUDIT_EXCLUDE = {'change_log', 'restore_point', 'alembic_version', 'sqlite_sequence', 'notification_outbox',
+                 'wb_issue'}   # Сверка пересобирается автоматически — аудит раздул бы журнал
 
 
 def _q(ident: str) -> str:

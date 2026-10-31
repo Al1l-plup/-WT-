@@ -15,6 +15,7 @@ from app.blueprints import (
     explorer,
     maintenance,
     pages,
+    reconciliation,
     workers,
 )
 
@@ -29,6 +30,7 @@ _BLUEPRINTS = (
     explorer.bp,
     admin.bp,
     admin_users.bp,
+    reconciliation.bp,
 )
 
 

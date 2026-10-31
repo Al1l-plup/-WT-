@@ -6,6 +6,7 @@ from flask import Blueprint, jsonify, request
 from app.db import get_db
 from app.errors import api_error
 from app.snapshots import snapshot_maintenance
+from app.wb_source import GUN_WB_BRAND_ID, GUN_WB_JOIN, GUN_WB_STATION_NAME
 
 bp = Blueprint('maintenance', __name__)
 
@@ -137,20 +138,17 @@ def get_maintenance_schedule():
         SELECT ms.id as schedule_id, ms.gun_id, ms.brand_id, ms.month_number, ms.plan_type,
                g.g_num, g.gun_type as model,
                b.brand,
-               COALESCE(st.station_name, '—') as station_name,
+               {GUN_WB_STATION_NAME} as station_name,
                mdt.id as task_id, COALESCE(mdt.status,'') as task_status,
                COALESCE(w.surname,'') as task_worker
         FROM maintenance_schedule ms
         JOIN gun   g ON ms.gun_id   = g.UniqueID
-        JOIN brand b ON ms.brand_id = b.UniqueID
-        LEFT JOIN gun_transformer_assignment gta ON g.UniqueID=gta.gun_id AND gta.is_active=1
-        LEFT JOIN transformer_station_assignment tsa ON gta.transformer_id=tsa.transformer_id AND tsa.is_active=1
-        LEFT JOIN station st ON tsa.station_id=st.UniqueID
+        JOIN brand b ON ms.brand_id = b.UniqueID{GUN_WB_JOIN}
         LEFT JOIN maintenance_daily_task mdt
                ON ms.gun_id = mdt.gun_id AND mdt.task_date = ? AND mdt.status != 'cancelled'
         LEFT JOIN worker w ON mdt.assigned_worker_id = w.UniqueID
         WHERE {' AND '.join(cond)}
-        ORDER BY b.brand, COALESCE(st.station_name,'я'), g.g_num
+        ORDER BY b.brand, st.station_name IS NULL, st.station_name, g.g_num
     """, [today] + params).fetchall()
     return jsonify([dict(r) for r in rows])
 
@@ -160,20 +158,17 @@ def get_daily_tasks():
     db = get_db()
     task_date = request.args.get('date', '').strip() or date.today().isoformat()
 
-    rows = db.execute("""
+    rows = db.execute(f"""
         SELECT mdt.id, mdt.gun_id, mdt.task_date, mdt.status,
                g.g_num, g.gun_type as gun_model,
-               COALESCE(st.station_name,'—') as station_name,
+               {GUN_WB_STATION_NAME} as station_name,
                COALESCE(b.brand,'—') as brand,
                COALESCE(w_asgn.surname,'') as worker_surname,
                COALESCE(w_asgn.name,'')    as worker_name,
                COALESCE(ms.plan_type,'—')  as plan_type
         FROM maintenance_daily_task mdt
-        JOIN gun g ON mdt.gun_id = g.UniqueID
-        LEFT JOIN gun_transformer_assignment gta ON g.UniqueID=gta.gun_id AND gta.is_active=1
-        LEFT JOIN transformer_station_assignment tsa ON gta.transformer_id=tsa.transformer_id AND tsa.is_active=1
-        LEFT JOIN station st ON tsa.station_id=st.UniqueID
-        LEFT JOIN brand  b  ON st.brand_id=b.UniqueID
+        JOIN gun g ON mdt.gun_id = g.UniqueID{GUN_WB_JOIN}
+        LEFT JOIN brand  b  ON b.UniqueID = {GUN_WB_BRAND_ID}
         LEFT JOIN worker w_asgn ON mdt.assigned_worker_id=w_asgn.UniqueID
         LEFT JOIN maintenance_schedule ms
                ON mdt.gun_id=ms.gun_id

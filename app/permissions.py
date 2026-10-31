@@ -21,7 +21,7 @@ WRITE_METHODS = {'POST', 'PUT', 'DELETE', 'PATCH'}
 
 # Разделы сайта.
 AREAS = ('home', 'maintenance', 'defects', 'analytics', 'workers',
-         'explorer', 'editor', 'catalog')
+         'explorer', 'editor', 'catalog', 'reconciliation')
 
 # Страницы (path → раздел) — для гейта страниц и построения навигации.
 # 'useradmin' — только админ.
@@ -34,6 +34,7 @@ PAGES = [
     ('/explorer', 'explorer', 'Обзор'),
     ('/admin', 'editor', 'Редактор'),
     ('/history', 'editor', 'Журнал'),
+    ('/reconciliation', 'reconciliation', 'Сверка'),
     ('/users', 'useradmin', 'Пользователи'),
 ]
 
@@ -60,6 +61,7 @@ _BP_AREA = {
     'admin': 'editor',
     'catalog': 'catalog',
     'admin_users': 'useradmin',
+    'reconciliation': 'reconciliation',   # «Сверка» с WB: видят все, разбирает ИТО
 }
 
 # Права отдела на разделы: 'w' — чтение+запись, 'r' — только чтение,
@@ -72,7 +74,8 @@ _ALL_W = {a: 'w' for a in AREAS}
 # сам эндпоинт по текущему этапу — см. app/blueprints/defects.py.
 DEPARTMENT_PERMS = {
     'WeldTeam': _ALL_W,                                                  # всё (+ админ/переоткрытие)
-    'ИТО': {**_ALL_R, 'editor': 'w', 'explorer': 'w', 'defects': 'w'},   # Редактор+Обзор+Дефекты
+    'ИТО': {**_ALL_R, 'editor': 'w', 'explorer': 'w', 'defects': 'w',
+            'reconciliation': 'w'},                                     # Редактор+Обзор+Дефекты+Сверка
     'ОТК': {**_ALL_R, 'defects': 'w'},                                   # регистрация + участие
     'Производство': {**_ALL_R, 'defects': 'w'},                          # участие в цепочке
     'ОТО': {**_ALL_R, 'defects': 'w'},                                   # исполнитель по оборудованию

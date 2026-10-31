@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#161b22">
+  <meta name="description" content="WeldTeam MES — сверка данных с Weld Balance">
+  <title>Сверка · WeldTeam MES</title>
+  <script src="/static/theme.js"></script>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    .muted{opacity:.7;font-size:12px}
+    .kinds{display:flex;gap:6px;flex-wrap:wrap;margin:.25rem 0 .9rem}
+    .kchip{border:1px solid var(--border);background:var(--card);color:inherit;border-radius:20px;padding:5px 12px;font-size:13px;cursor:pointer;display:inline-flex;gap:8px;align-items:center}
+    .kchip b{font-variant-numeric:tabular-nums}
+    .kchip.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent)}
+    .bar{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+    .bar input,.bar select{padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit}
+    .rc td{vertical-align:top;font-size:13px}
+    .rc select,.rc input{padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit;font-size:13px;max-width:100%}
+    .rc input.cmt{min-width:160px;width:100%}
+    .obj{font-variant-numeric:tabular-nums;white-space:nowrap}
+    .note{background:color-mix(in srgb,var(--accent) 8%,transparent);border:1px solid var(--border);border-radius:8px;padding:.6rem .85rem;font-size:13px;line-height:1.45;margin-bottom:.9rem}
+    @media (max-width:640px){ .kchip{min-height:44px} .rc input.cmt{min-width:0} }
+  </style>
+</head>
+<body>
+<nav class="nav">
+  <a class="nav-brand" href="/">WeldTeam <span>/ цех BS</span></a>
+  <div class="nav-links">
+    <a class="nav-link" href="/">Главная</a>
+    <a class="nav-link" href="/maintenance">ТО</a>
+    <a class="nav-link" href="/defects">Дефекты</a>
+    <a class="nav-link" href="/analytics">Аналитика</a>
+    <a class="nav-link" href="/workers">Сотрудники</a>
+    <a class="nav-link" href="/explorer">Обзор</a>
+    <a class="nav-link" href="/admin">Редактор</a>
+    <a class="nav-link" href="/history">Журнал</a>
+    <a class="nav-link active" href="/reconciliation">Сверка</a>
+    <button class="btn-theme" id="themeToggle" type="button" aria-label="Переключить тему">☀</button>
+  </div>
+</nav>
+
+<div class="page">
+  <div class="page-head"><h1>Сверка с Weld Balance</h1></div>
+  <div class="note">
+    <b>Weld Balance — единственный источник станции точки и пистолета.</b> Здесь — всё, что с ним не сходится:
+    «потеряшки» и противоречия. Строки появляются и закрываются <b>сами</b>, как только данные сошлись.
+    Разбирает <b>ИТО</b>: статус, ответственный, комментарий. Исправлять — там, где ошибка (обычно в WB или в Перечне).
+  </div>
+
+  <div class="kinds" id="kinds"></div>
+
+  <div class="bar">
+    <select id="fStatus" aria-label="Статус">
+      <option value="open">Требуют разбора</option>
+      <option value="accepted">Принято как есть</option>
+      <option value="resolved">Исправлено</option>
+      <option value="all">Все</option>
+    </select>
+    <input id="fq" placeholder="поиск: модель, точка, G, станция…" autocomplete="off">
+    <button class="btn btn-ghost btn-sm" id="refresh">↻ Обновить</button>
+    <span class="muted" id="count"></span>
+  </div>
+
+  <div class="tbl-wrap">
+    <table class="tbl tbl-mobile rc">
+      <thead><tr>
+        <th>Проблема</th><th>Объект</th><th>Станция в WB</th><th>Подробности</th><th>Где</th>
+        <th>Статус</th><th>Ответственный (ИТО)</th><th>Комментарий</th><th>Появилось</th>
+      </tr></thead>
+      <tbody id="tb"><tr class="empty-row"><td colspan="9">Загрузка…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let DATA = null, FKIND = '';
+const STATUS_BADGE = {new:'bd', in_review:'bw', assigned:'ba', accepted:'bm', resolved:'bs'};
+
+async function load(){
+  $('tb').innerHTML = '<tr class="empty-row"><td colspan="9">Загрузка…</td></tr>';
+  const r = await fetch('/api/wb-issues?status=' + encodeURIComponent($('fStatus').value));
+  DATA = await r.json();
+  renderKinds(); render();
+}
+
+function renderKinds(){
+  const by = DATA.open_by_kind || {};
+  const chips = Object.entries(DATA.kinds).filter(([k]) => by[k]).sort(([a], [b]) => by[b] - by[a]).map(([k, label]) =>
+    `<button class="kchip${FKIND === k ? ' on' : ''}" data-k="${escapeHtml(k)}"><b>${by[k]}</b> ${escapeHtml(label)}</button>`);
+  $('kinds').innerHTML = chips.length
+    ? `<button class="kchip${FKIND ? '' : ' on'}" data-k=""><b>${DATA.open_total}</b> Все требующие разбора</button>` + chips.join('')
+    : '<span class="muted">✓ Расхождений с WB нет</span>';
+  $('kinds').querySelectorAll('.kchip').forEach(b => b.onclick = () => { FKIND = b.dataset.k; renderKinds(); render(); });
+}
+
+// 1 строка / 2 строки / 5 строк
+const plural = (n, f) => f[(n % 10 === 1 && n % 100 !== 11) ? 0
+  : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) ? 1 : 2];
+
+function detailsText(i){
+  const p = [];
+  if (i.details) p.push(i.details);
+  if (i.rows_count) p.push(i.rows_count + ' ' + plural(i.rows_count, i.kind === 'dup_g_num'
+    ? ['запись в Перечне', 'записи в Перечне', 'записей в Перечне'] : ['строка WB', 'строки WB', 'строк WB']));
+  return p.join(' · ') || '—';
+}
+
+function objectText(i){
+  const p = [];
+  if (i.model_code) p.push(i.model_code);
+  if (i.spot_number) p.push('точка ' + i.spot_number);
+  if (i.g_num != null) p.push('G' + i.g_num);
+  if (i.defect_id) p.push('дефект #' + i.defect_id);
+  return p.join(' · ') || '—';
+}
+
+function render(){
+  const q = $('fq').value.trim().toLowerCase();
+  const rows = DATA.issues.filter(i => (!FKIND || i.kind === FKIND) &&
+    (!q || [objectText(i), i.wb_station, detailsText(i), i.where_found, i.comment, DATA.kinds[i.kind]]
+            .some(v => String(v || '').toLowerCase().includes(q))));
+  $('count').textContent = `показано: ${rows.length}`;
+  if (!rows.length){ $('tb').innerHTML = '<tr class="empty-row"><td colspan="9">Пусто</td></tr>'; return; }
+  const ed = DATA.can_edit;
+  const stOpts = cur => DATA.status_order.filter(k => k !== 'resolved')
+    .map(k => `<option value="${k}"${k === cur ? ' selected' : ''}>${escapeHtml(DATA.statuses[k])}</option>`).join('');
+  const engOpts = cur => '<option value="">—</option>' + DATA.engineers
+    .map(e => `<option value="${e.UniqueID}"${e.UniqueID === cur ? ' selected' : ''}>${escapeHtml(e.name)}</option>`).join('');
+  $('tb').innerHTML = rows.map(i => `<tr data-id="${i.id}">
+    <td data-label="Проблема">${escapeHtml(DATA.kinds[i.kind] || i.kind)}</td>
+    <td data-label="Объект" class="obj">${escapeHtml(objectText(i))}</td>
+    <td data-label="Станция в WB">${escapeHtml(i.wb_station || '—')}</td>
+    <td data-label="Подробности">${escapeHtml(detailsText(i))}</td>
+    <td data-label="Где">${escapeHtml(i.where_found || '—')}</td>
+    <td data-label="Статус">${ed && i.status !== 'resolved'
+        ? `<select class="f-st" aria-label="Статус">${stOpts(i.status)}</select>`
+        : `<span class="badge ${STATUS_BADGE[i.status] || 'bm'}">${escapeHtml(DATA.statuses[i.status] || i.status)}</span>`}</td>
+    <td data-label="Ответственный">${ed && i.status !== 'resolved'
+        ? `<select class="f-as" aria-label="Ответственный">${engOpts(i.assignee_id)}</select>` : escapeHtml(i.assignee_name || '—')}</td>
+    <td data-label="Комментарий">${ed && i.status !== 'resolved'
+        ? `<input class="cmt f-cm" value="${escapeHtml(i.comment || '')}" placeholder="что выяснили / что сделать">` : escapeHtml(i.comment || '—')}</td>
+    <td data-label="Появилось" class="muted">${escapeHtml((i.first_seen || '').replace('T', ' ').slice(0, 16))}${i.resolved_at ? '<br>закрыто ' + escapeHtml(i.resolved_at.replace('T', ' ').slice(0, 16)) : ''}</td>
+  </tr>`).join('');
+  if (!ed) return;
+  $('tb').querySelectorAll('tr[data-id]').forEach(tr => {
+    const id = +tr.dataset.id, st = tr.querySelector('.f-st'), as = tr.querySelector('.f-as'), cm = tr.querySelector('.f-cm');
+    if (st) st.onchange = () => save(id, {status: st.value});
+    if (as) as.onchange = () => save(id, {assignee_id: as.value || null});
+    if (cm) cm.onchange = () => save(id, {comment: cm.value});
+  });
+}
+
+async function save(id, patch){
+  const r = await fetch(`/api/wb-issues/${id}`, {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(patch)});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok){ alert(d.message || 'Не удалось сохранить'); return load(); }
+  const it = DATA.issues.find(x => x.id === id);
+  if (it) Object.assign(it, patch, patch.assignee_id !== undefined
+    ? {assignee_id: patch.assignee_id ? +patch.assignee_id : null,
+       assignee_name: (DATA.engineers.find(e => e.UniqueID === +patch.assignee_id) || {}).name || ''} : {});
+}
+
+$('fStatus').onchange = load;
+$('refresh').onclick = load;
+$('fq').oninput = () => DATA && render();
+load();
+</script>
+</body>
+</html>

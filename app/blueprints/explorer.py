@@ -3,6 +3,14 @@ from flask import Blueprint, jsonify, request
 
 from app.db import get_db
 from app.errors import api_error
+from app.wb_source import (
+    GUN_TRANSFORMER_NAME,
+    GUN_WB_BRAND_ID,
+    GUN_WB_JOIN,
+    GUN_WB_STATION_NAME,
+    POINT_WB_JOIN,
+    POINT_WB_STATION_NAME,
+)
 
 bp = Blueprint('explorer', __name__)
 
@@ -10,18 +18,15 @@ bp = Blueprint('explorer', __name__)
 @bp.route('/api/explorer/gun/<int:gun_id>')
 def explorer_gun(gun_id):
     db = get_db()
-    gun = db.execute("""
+    gun = db.execute(f"""
         SELECT g.UniqueID, g.g_num, g.gun_type,
                COALESCE(st.UniqueID, 0)       as station_id,
-               COALESCE(st.station_name, '—') as station_name,
+               {GUN_WB_STATION_NAME}          as station_name,
                COALESCE(b.UniqueID, 0)         as brand_id,
-               COALESCE(b.brand, '—')          as brand
-        FROM gun g
-        LEFT JOIN gun_transformer_assignment gta ON g.UniqueID=gta.gun_id AND gta.is_active=1
-        LEFT JOIN trans t ON gta.transformer_id=t.UniqueID
-        LEFT JOIN transformer_station_assignment tsa ON t.UniqueID=tsa.transformer_id AND tsa.is_active=1
-        LEFT JOIN station st ON tsa.station_id=st.UniqueID
-        LEFT JOIN brand b ON st.brand_id=b.UniqueID
+               COALESCE(b.brand, '—')          as brand,
+               {GUN_TRANSFORMER_NAME}         as transformer
+        FROM gun g{GUN_WB_JOIN}
+        LEFT JOIN brand b ON b.UniqueID = {GUN_WB_BRAND_ID}
         WHERE g.UniqueID=?
     """, (gun_id,)).fetchone()
     if not gun:
@@ -141,52 +146,45 @@ def explorer_station(station_id):
     if not station:
         return jsonify({'status': 'error', 'message': 'Станция не найдена'}), 404
 
-    guns = db.execute("""
+    # Всё по Weld Balance: пистолеты и точки станции — строки WB этой станции.
+    wb_guns = '(SELECT DISTINCT gun_id FROM weld_point WHERE station_id=? AND gun_id IS NOT NULL)'
+    guns = db.execute(f"""
         SELECT DISTINCT g.UniqueID, g.g_num, g.gun_type,
                p.mode, p.pressure, p.heat_1, p.heat_2
         FROM gun g
-        JOIN gun_transformer_assignment gta ON g.UniqueID=gta.gun_id AND gta.is_active=1
-        JOIN transformer_station_assignment tsa ON gta.transformer_id=tsa.transformer_id AND tsa.is_active=1
         LEFT JOIN welding_setup ws ON g.UniqueID=ws.gun_id AND ws.is_active=1
         LEFT JOIN parameters p ON ws.parameter_id=p.UniqueID
-        WHERE tsa.station_id=?
+        WHERE g.UniqueID IN {wb_guns}
         ORDER BY g.g_num
     """, (station_id,)).fetchall()
 
+    # дефекты станции — по зафиксированной при регистрации станции дефекта (тоже из WB)
     defects_summary = db.execute("""
         SELECT d.problem_code, COUNT(*) as cnt,
                COALESCE(dc.name, d.problem_code) as name
         FROM defects d
-        JOIN gun g ON d.gun_id=g.UniqueID
-        JOIN gun_transformer_assignment gta ON g.UniqueID=gta.gun_id AND gta.is_active=1
-        JOIN transformer_station_assignment tsa ON gta.transformer_id=tsa.transformer_id AND tsa.is_active=1
         LEFT JOIN defect_code dc ON d.problem_code=dc.code
-        WHERE tsa.station_id=?
+        WHERE d.snap_station_id=?
         GROUP BY d.problem_code ORDER BY cnt DESC
     """, (station_id,)).fetchall()
 
-    recent_maint = db.execute("""
+    recent_maint = db.execute(f"""
         SELECT m.to_date, g.g_num,
                ROUND((m.first_weld+m.second_weld+m.third_weld)/3.0) as avg_weld,
                COALESCE(w.surname,'—') as worker
         FROM maintenance m
         JOIN gun g ON m.gun_id=g.UniqueID
-        JOIN gun_transformer_assignment gta ON g.UniqueID=gta.gun_id AND gta.is_active=1
-        JOIN transformer_station_assignment tsa ON gta.transformer_id=tsa.transformer_id AND tsa.is_active=1
         LEFT JOIN worker w ON m.worker_id=w.UniqueID
-        WHERE tsa.station_id=?
+        WHERE g.UniqueID IN {wb_guns}
         ORDER BY m.to_date DESC, m.UniqueId DESC LIMIT 20
     """, (station_id,)).fetchall()
 
     models_on_station = db.execute("""
-        SELECT DISTINCT mo.model_name, mo.type as model_type, COUNT(s.UniqueID) as spot_count
-        FROM welding_setup ws
-        JOIN gun g ON ws.gun_id=g.UniqueID
-        JOIN gun_transformer_assignment gta ON g.UniqueID=gta.gun_id AND gta.is_active=1
-        JOIN transformer_station_assignment tsa ON gta.transformer_id=tsa.transformer_id AND tsa.is_active=1
-        JOIN spot s ON ws.spot_id=s.UniqueID
+        SELECT mo.model_name, mo.type as model_type, COUNT(DISTINCT s.UniqueID) as spot_count
+        FROM weld_point w
+        JOIN spot s ON s.UniqueID = w.spot_id
         JOIN model mo ON s.model_id=mo.UniqueID
-        WHERE tsa.station_id=? AND ws.is_active=1
+        WHERE w.station_id=?
         GROUP BY mo.UniqueID ORDER BY mo.model_name
     """, (station_id,)).fetchall()
 
@@ -234,17 +232,16 @@ def explorer_spot(spot_id):
     if not spot:
         return jsonify({'status': 'error', 'message': 'Точка не найдена'}), 404
 
-    active_link = db.execute("""
+    active_link = db.execute(f"""
         SELECT ws.UniqueID as setup_id, ws.comments, ws.start_date,
                g.UniqueID as gun_id, g.g_num, g.gun_type,
                p.mode, p.pressure, p.turn_R, p.heat_1, p.heat_2,
-               COALESCE(st.station_name,'—') as station_name
+               {POINT_WB_STATION_NAME} as station_name
         FROM welding_setup ws
         JOIN gun g ON ws.gun_id=g.UniqueID
-        LEFT JOIN parameters p ON ws.parameter_id=p.UniqueID
-        LEFT JOIN gun_transformer_assignment gta ON g.UniqueID=gta.gun_id AND gta.is_active=1
-        LEFT JOIN transformer_station_assignment tsa ON gta.transformer_id=tsa.transformer_id AND tsa.is_active=1
-        LEFT JOIN station st ON tsa.station_id=st.UniqueID
+        JOIN spot s ON s.UniqueID = ws.spot_id
+        JOIN model m ON m.UniqueID = s.model_id
+        LEFT JOIN parameters p ON ws.parameter_id=p.UniqueID{POINT_WB_JOIN}
         WHERE ws.spot_id=? AND ws.is_active=1
         ORDER BY ws.start_date DESC, ws.UniqueID DESC
         LIMIT 1

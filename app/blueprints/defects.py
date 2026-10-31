@@ -112,6 +112,26 @@ def _photo_required_error(db, photos):
     return None
 
 
+def _resolve_spot_gun(db, model_id, spot_number):
+    """Точка и пистолет для регистрации/исправления по (модель, № точки).
+
+    Источник — Weld Balance: если точка есть в WB, пистолет берётся из WB (только если
+    он там один; несколько пистолетов → None, точка уже в Сверке). Точки нет в WB —
+    по действующей связке точка↔пистолет (детерминированно), станции у такого
+    дефекта не будет (строго по WB). Вернёт {'spot_id', 'gun_id'} или None (ручной ввод)."""
+    spot = db.execute('SELECT UniqueID FROM spot WHERE model_id=? AND spot_number=? ORDER BY UniqueID LIMIT 1',
+                      (model_id, spot_number)).fetchone()
+    if not spot:
+        return None
+    wb = db.execute("""SELECT v.gun_id FROM v_wb_point v JOIN model mo ON mo.model_code = v.model_code
+                       WHERE mo.UniqueID=? AND v.spot_number=?""", (model_id, str(spot_number).strip())).fetchone()
+    if wb:
+        return {'spot_id': spot[0], 'gun_id': wb[0]}
+    ws = db.execute('SELECT gun_id FROM welding_setup WHERE spot_id=? AND is_active=1 ORDER BY UniqueID LIMIT 1',
+                    (spot[0],)).fetchone()
+    return {'spot_id': spot[0], 'gun_id': ws[0]} if ws else None
+
+
 @bp.route('/api/defects/register', methods=['POST'])
 def register_defect():
     uid, dept, _is_admin, priv = _ctx()
@@ -129,13 +149,7 @@ def register_defect():
         return err
 
     db = get_db()
-    row = db.execute("""
-        SELECT s.UniqueID as spot_id, ws.gun_id
-        FROM spot s
-        JOIN welding_setup ws ON s.UniqueID = ws.spot_id AND ws.is_active = 1
-        WHERE s.spot_number=? AND s.model_id=?
-        LIMIT 1
-    """, (spot_number, int(model_id))).fetchone()
+    row = _resolve_spot_gun(db, int(model_id), spot_number)
     try:
         if row:
             res = df.register_occurrence(db, problem_code=problem_code, spot_id=row['spot_id'],
@@ -194,7 +208,7 @@ def defects_all():
                COALESCE(d.snap_model_type, m.type, enrich_m.type, '')   as model_type,
                COALESCE(d.snap_g_num, g.g_num, 0)          as g_num,
                COALESCE(d.snap_gun_type, g.gun_type,'—')   as gun_model,
-               COALESCE(d.snap_station_name, d_st.station_name,'—')     as station_name,
+               COALESCE(d.snap_station_name, wbp_st.station_name, wbg_st.station_name, '—') as station_name,
                COALESCE(w_asgn.surname,'')                 as asgn_surname,
                COALESCE(w_solv.surname,'')                 as solv_surname,
                d.manual_spot_number,
@@ -220,15 +234,19 @@ def defects_all():
         LEFT JOIN model  enrich_m ON d.manual_model_id    = enrich_m.UniqueID
         LEFT JOIN brand  enrich_b ON enrich_m.brand_id    = enrich_b.UniqueID
         LEFT JOIN gun    g       ON d.gun_id               = g.UniqueID
-        LEFT JOIN gun_transformer_assignment d_gta ON g.UniqueID=d_gta.gun_id AND d_gta.is_active=1
-        LEFT JOIN transformer_station_assignment d_tsa ON d_gta.transformer_id=d_tsa.transformer_id AND d_tsa.is_active=1
-        LEFT JOIN station d_st   ON d_tsa.station_id      = d_st.UniqueID
+        -- станция (если нет снимка) — только из Weld Balance: точка по модели + №,
+        -- а без точки (регистрация по G-номеру) — станция пистолета по WB
+        LEFT JOIN v_wb_point wbp ON wbp.model_code = COALESCE(m.model_code, enrich_m.model_code)
+                                AND wbp.spot_number = TRIM(COALESCE(CAST(s.spot_number AS TEXT), d.manual_spot_number))
+        LEFT JOIN station wbp_st ON wbp_st.UniqueID = wbp.station_id
+        LEFT JOIN v_wb_gun wbg   ON wbg.gun_id = d.gun_id AND d.spot_id IS NULL AND d.manual_spot_number IS NULL
+        LEFT JOIN station wbg_st ON wbg_st.UniqueID = wbg.station_id
         LEFT JOIN worker w_asgn  ON d.assigned_worker_id  = w_asgn.UniqueID
         LEFT JOIN worker w_solv  ON d.worker_solve_id     = w_solv.UniqueID
         LEFT JOIN worker w_reg   ON d.worker_register_id  = w_reg.UniqueID
     """
-    # GROUP BY d.UniqueID — одна строка на дефект: иначе джойн gun→трансформатор→станция
-    # размножает дефект, если у гана несколько активных назначений трансформатора.
+    # GROUP BY d.UniqueID — одна строка на дефект (страховка: v_wb_point/v_wb_gun уже
+    # сгруппированы по точке/пистолету, но джойны не должны размножать дефект ни при каких данных).
     # Приоритет списка: 1) точки B → 2) серийные → 3) остальные.
     priority = """GROUP BY d.UniqueID
                   ORDER BY CASE WHEN is_b_point THEN 0 WHEN is_serial THEN 1 ELSE 2 END,
@@ -371,7 +389,8 @@ def close_defect():
         cur = db.cursor()
         if needs_enrichment and model_id and gun_num:
             spot_number = defect['manual_spot_number']
-            gun = db.execute('SELECT UniqueID FROM gun WHERE g_num=?', (int(gun_num),)).fetchone()
+            gun = db.execute('SELECT UniqueID FROM gun WHERE g_num=? ORDER BY UniqueID LIMIT 1',
+                             (int(gun_num),)).fetchone()
             if gun:
                 gun_id = gun['UniqueID']
             else:
@@ -481,7 +500,8 @@ def enrich_defect():
         cur = db.cursor()
 
         # Find or create gun
-        gun = db.execute('SELECT UniqueID FROM gun WHERE g_num=?', (int(gun_num),)).fetchone()
+        gun = db.execute('SELECT UniqueID FROM gun WHERE g_num=? ORDER BY UniqueID LIMIT 1',
+                         (int(gun_num),)).fetchone()
         if gun:
             gun_id = gun['UniqueID']
         else:
@@ -544,7 +564,8 @@ def register_defect_manual():
         return err
     db  = get_db()
     try:
-        gun = db.execute('SELECT UniqueID FROM gun WHERE g_num=?', (int(g_num),)).fetchone()
+        gun = db.execute('SELECT UniqueID FROM gun WHERE g_num=? ORDER BY UniqueID LIMIT 1',
+                         (int(g_num),)).fetchone()
         if gun:
             gun_id = gun['UniqueID']
         else:
@@ -682,9 +703,10 @@ def defect_act(defect_id):
             msg = f'Дефект переоткрыт → отдел «{back}»'
         else:
             return jsonify({'status': 'error', 'message': 'Неизвестное действие'}), 400
-        # передача/закрытие/возврат → этап сменился, снимаем «в работе» (следующий возьмёт заново)
+        # передача/закрытие/возврат → этап сменился, снимаем «в работе» (следующий возьмёт заново).
+        # Снимок (станция и пр.) здесь НЕ переснимаем: он фиксируется при регистрации и при
+        # исправлении ОТК — иначе станция на дефекте «плыла» вслед за справочниками.
         db.execute('UPDATE defects SET assigned_worker_id=NULL WHERE UniqueID=?', (defect_id,))
-        snapshot_defect(db, defect_id)
         db.commit()
         return jsonify({'status': 'success', 'message': msg})
     except Exception as e:
@@ -848,10 +870,7 @@ def defect_correct(defect_id):
     if not code or not spot_number or not model_id:
         return jsonify({'status': 'error', 'message': 'Укажите код, модель и номер точки'}), 400
     try:
-        row = db.execute("""SELECT s.UniqueID as spot_id, ws.gun_id FROM spot s
-                            JOIN welding_setup ws ON s.UniqueID = ws.spot_id AND ws.is_active = 1
-                            WHERE s.spot_number=? AND s.model_id=? LIMIT 1""",
-                         (spot_number, int(model_id))).fetchone()
+        row = _resolve_spot_gun(db, int(model_id), spot_number)   # как при регистрации: из WB
         if row:
             db.execute("""UPDATE defects SET problem_code=?, spot_id=?, gun_id=?,
                             manual_spot_number=NULL, manual_model_id=NULL WHERE UniqueID=?""",

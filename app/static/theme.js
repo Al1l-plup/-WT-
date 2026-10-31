@@ -70,6 +70,29 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     });
 
+    // 1б) «Сверка» с WB — видна всем отделам (прозрачность); бейдж — сколько ждут разбора.
+    //     Вкладку добавляем отсюда, чтобы не дублировать её в шаблоне каждой страницы.
+    if (allowed.has('/reconciliation')) {
+      let rec = nav.querySelector('a[href="/reconciliation"]');
+      if (!rec) {
+        rec = document.createElement('a');
+        rec.className = 'nav-link';
+        rec.href = '/reconciliation';
+        rec.textContent = 'Сверка';
+        const hist = nav.querySelector('a[href="/history"]');
+        nav.insertBefore(rec, hist ? hist.nextSibling : btn);
+      }
+      fetch('/api/wb-issues/summary').then(x => x.ok ? x.json() : null).then(s => {
+        if (!s || !s.open || rec.querySelector('.badge')) return;
+        const b = document.createElement('span');
+        b.className = 'badge bw';
+        b.style.cssText = 'margin-left:5px;padding:0 6px';
+        b.textContent = s.open;
+        b.title = 'Расхождений с Weld Balance ждут разбора ИТО';
+        rec.appendChild(b);
+      }).catch(() => {});
+    }
+
     // 2) админу — вкладка «Пользователи»
     if (me.is_admin && !nav.querySelector('a[href="/users"]')) {
       const link = document.createElement('a');

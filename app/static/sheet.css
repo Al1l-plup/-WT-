@@ -19,6 +19,7 @@ table.sheet td.dirty{background:color-mix(in srgb,#e0a800 30%,transparent)}
 table.sheet tr.new td{background:color-mix(in srgb,#2e7d32 12%,transparent)}
 table.sheet tr.deleted td{text-decoration:line-through;opacity:.5}
 table.sheet input.celledit,table.sheet select.celledit{width:100%;box-sizing:border-box;border:none;background:var(--bg);color:inherit;font-size:12px;padding:2px 4px}
+table.sheet input.celledit.bad{outline:2px solid var(--danger);outline-offset:-2px}
 .delrow{border:none;background:none;cursor:pointer;color:var(--muted,#888)}
 /* Excel-операции */
 table.sheet tr.cut td{outline:1px dashed var(--accent);outline-offset:-1px;opacity:.75}

@@ -491,27 +491,59 @@ class Sheet {
     const col = this.cols[ed.c], r = this.view[ed.vr];
     const td = this._td(ed.vr, ed.c); if (!td) return;
     if (td.querySelector('.celledit')) return;
-    let input;
+    let input, fkOpts = null, dl = null;
     if (col.fk) {
+      // Ссылка на справочник — поле с подсказками, а не <select>: в select нажатие
+      // клавиши «перебирало» варианты по первой цифре id и набранный текст терялся.
+      // Здесь вводят название (или выбирают из подсказки); при сохранении текст
+      // сводится к id, неизвестное значение не принимается (см. _fkResolve).
       const fo = await this.fkLoader(col.fk);
-      if (!this._editing) return; // отменили пока грузился справочник
-      input = document.createElement('select');
-      input.innerHTML = '<option value="">—</option>' +
-        (fo ? fo.options.map(o => `<option value="${o.id}"${String(o.id) === String(this.rows[r][col.name]) ? ' selected' : ''}>${o.id} · ${this._esc(o.label)}</option>`).join('') : '');
+      if (!this._editing || td.querySelector('.celledit')) return; // отменили / уже открыт, пока грузился справочник
+      fkOpts = (fo && fo.options) || [];
+      if (!ed.fkInit) { // первый показ: id → «id · название»; набранный символ (fresh) оставляем как есть
+        const cur = !ed.fresh && fkOpts.find(o => String(o.id) === ed.value);
+        if (cur) ed.value = this._fkText(cur);
+        ed.fkInit = true;
+      }
+      dl = document.createElement('datalist');
+      dl.id = 'fkdl-' + Math.random().toString(36).slice(2);
+      dl.innerHTML = fkOpts.map(o => `<option value="${this._esc(this._fkText(o))}"></option>`).join('');
+      input = document.createElement('input');
+      input.setAttribute('list', dl.id);
+      input.autocomplete = 'off';
+      input.placeholder = 'название или номер…';
+      input.title = 'Начните вводить и выберите из списка. Пусто — убрать значение.';
     } else {
       input = document.createElement('input');
-      input.value = ed.value;
     }
+    input.value = ed.value;
     input.className = 'celledit';
-    td.textContent = ''; td.appendChild(input); input.focus();
+    td.textContent = ''; td.appendChild(input); if (dl) td.appendChild(dl); input.focus();
     // курсор в конец текста (для дозаписи), без выделения всего содержимого —
     // двойной клик / F2 открывают ячейку с готовой к правке строкой, как в Excel
     if (input.setSelectionRange) input.setSelectionRange(input.value.length, input.value.length);
-    input.oninput = () => { if (this._editing) this._editing.value = input.value; };
-    const commit = (move, fillAll) => {
-      input.onblur = null; input.remove();
-      const val = input.value;
+    input.oninput = () => {
+      if (this._editing) this._editing.value = input.value;
+      if (fkOpts) { input.setCustomValidity(''); input.classList.remove('bad'); }
+    };
+    const cancel = () => { input.onblur = null; input.remove(); if (dl) dl.remove(); this._editing = null; this._renderCell(ed.vr, ed.c); };
+    const commit = (move, fillAll, fromBlur) => {
+      let val = input.value;
+      if (fkOpts) {
+        const res = this._fkResolve(fkOpts, val);
+        if (res.error) {
+          // ушли из ячейки с непонятным значением — не портим данные, возвращаем как было
+          if (fromBlur) { cancel(); return; }
+          input.setCustomValidity(res.error); input.classList.add('bad'); input.reportValidity();
+          return;
+        }
+        val = res.id;
+      }
+      input.onblur = null; input.remove(); if (dl) dl.remove();
       this._editing = null;
+      // фокус обратно в таблицу (как в Excel: после Enter/Tab сразу стрелки и ввод);
+      // если ушли кликом в другое место — фокус не перехватываем
+      if (!fromBlur) this.el.focus({ preventScroll: true });
       if (fillAll) this.fillSelection(val);
       else { this._setCells([{ r, name: col.name, val }]); this._renderCell(ed.vr, ed.c); }
       // Enter в последней строке — дотянуть новую строку и перейти в неё (как в Excel:
@@ -526,10 +558,23 @@ class Sheet {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); commit(null, true); }
       else if (e.key === 'Enter') { e.preventDefault(); commit({ dr: 1, dc: 0 }); }
       else if (e.key === 'Tab') { e.preventDefault(); commit({ dr: 0, dc: e.shiftKey ? -1 : 1 }); }
-      else if (e.key === 'Escape') { e.preventDefault(); input.onblur = null; input.remove(); this._editing = null; this._renderCell(ed.vr, ed.c); this.el.focus(); }
+      else if (e.key === 'Escape') { e.preventDefault(); cancel(); this.el.focus(); }
       e.stopPropagation();
     };
-    input.onblur = () => { if (input.parentNode) commit(null); };
+    input.onblur = () => { if (input.parentNode) commit(null, false, true); };
+  }
+  _fkText(o) { return `${o.id} · ${o.label ?? ''}`; }
+  // Текст из поля ссылки → id записи справочника. Принимается: пусто (убрать значение),
+  // «id · название» из подсказки, точное название, номер id. Иначе — ошибка, не угадываем.
+  _fkResolve(opts, text) {
+    const t = String(text ?? '').trim(), low = t.toLowerCase();
+    if (!t || t === '—') return { id: '' };
+    let m = opts.filter(o => this._fkText(o).trim().toLowerCase() === low);
+    if (!m.length) m = opts.filter(o => String(o.label ?? '').trim().toLowerCase() === low);
+    if (!m.length) m = opts.filter(o => String(o.id) === t);
+    if (m.length === 1) return { id: String(m[0].id) };
+    return { error: m.length ? `«${t}» — несколько совпадений, выберите из списка`
+                             : `«${t}» нет в справочнике — выберите из списка` };
   }
   _renderCell(vr, c) {
     const td = this._td(vr, c); if (!td) return;
@@ -866,7 +911,9 @@ class Sheet {
       else if (k === 'Tab') { e.preventDefault(); this._move(0, e.shiftKey ? -1 : 1); }
       else if (k === 'Enter' || k === 'F2') { e.preventDefault(); this._startEdit(); }
       else if (k === 'Delete') { e.preventDefault(); this._clearSel(); }
-      else if (k.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) { this._startEdit(k); }
+      // символ кладём в редактор сами и гасим действие по умолчанию — иначе браузер
+      // допечатывает ту же клавишу в только что открытое поле («x» → «xx»)
+      else if (k.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); this._startEdit(k); }
     }, sig);
     document.addEventListener('copy', (e) => {
       if (!this.el.contains(document.activeElement) && document.activeElement !== this.el) return;

@@ -9,12 +9,13 @@ from datetime import timedelta
 
 from flask import Flask, g, jsonify, redirect, render_template, request, session
 
-from app.audit import ensure_audit_triggers, max_change_id, stamp_audit
+from app.audit import drop_audit_triggers, ensure_audit_triggers, max_change_id, stamp_audit
 from app.config import Config, get_config
 from app.db import close_db, get_db
 from app.errors import register_error_handlers
 from app.migrations import run_migrations
 from app.permissions import can_access
+from app.wb_source import sync_wb_on_start
 
 # Эндпоинты, доступные без входа (страницы входа/регистрации и статика).
 _PUBLIC_ENDPOINTS = {'auth.login', 'auth.register', 'auth.logout', 'auth.departments', 'static'}
@@ -37,13 +38,25 @@ def create_app(config: type[Config] | None = None) -> Flask:
     if app.config.get('RUN_MIGRATIONS'):
         run_migrations(app.config['DB_PATH'])
 
-    # Триггеры журнала версий (аудит) — актуализируем по текущей схеме при старте.
-    if app.config.get('AUDIT_ENABLED', True):
-        _con = sqlite3.connect(app.config['DB_PATH'])
-        try:
+    # Старт: (1) довести данные Weld Balance (единый источник станции) до актуального
+    # состояния и пересобрать «Сверку»; (2) актуализировать триггеры журнала версий.
+    # Синхронизация WB — производные данные, в журнал правок им не место: на её время
+    # триггеры сняты, затем ensure_audit_triggers пересоздаёт их (он и так делает это при старте).
+    audit_on = app.config.get('AUDIT_ENABLED', True)
+    _con = sqlite3.connect(app.config['DB_PATH'])
+    try:
+        if app.config.get('WB_SYNC_ON_START', True):
+            if audit_on:
+                drop_audit_triggers(_con)
+            try:
+                app.logger.info('Сверка с Weld Balance: %s', sync_wb_on_start(_con))
+            except Exception:  # noqa: BLE001 — сбой синхронизации не должен ронять сайт
+                _con.rollback()
+                app.logger.warning('Синхронизация WB при старте не удалась', exc_info=True)
+        if audit_on:
             ensure_audit_triggers(_con)
-        finally:
-            _con.close()
+    finally:
+        _con.close()
 
     app.teardown_appcontext(close_db)
 

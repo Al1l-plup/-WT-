@@ -4,6 +4,13 @@ from flask import Blueprint, jsonify, request
 from app.db import get_db
 from app.defect_flow import OPEN_STATUSES
 from app.errors import api_error
+from app.wb_source import (
+    GUN_TRANSFORMER_NAME,
+    LOST_GUNS_STATION_ID,
+    LOST_GUNS_STATION_NAME,
+    POINT_WB_JOIN,
+    POINT_WB_STATION_NAME,
+)
 
 bp = Blueprint('catalog', __name__)
 
@@ -29,20 +36,31 @@ def get_all_stations():
 @bp.route('/api/stations/<int:brand_id>')
 def get_stations(brand_id):
     db = get_db()
-    rows = db.execute('SELECT UniqueID, station_name FROM station WHERE brand_id=? ORDER BY station_name', (brand_id,)).fetchall()
-    return jsonify([dict(r) for r in rows])
+    rows = [dict(r) for r in db.execute('SELECT UniqueID, station_name FROM station WHERE brand_id=? '
+                                        'ORDER BY station_name', (brand_id,)).fetchall()]
+    # ?with_lost=1 (страница ТО): в конце — псевдо-станция с пистолетами, которых нет в WB,
+    # чтобы они не пропадали молча из выбора (они же в «Сверке»).
+    if request.args.get('with_lost') == '1':
+        rows.append({'UniqueID': LOST_GUNS_STATION_ID, 'station_name': LOST_GUNS_STATION_NAME})
+    return jsonify(rows)
 
 
 @bp.route('/api/guns/<int:station_id>')
 def get_guns(station_id):
+    """Пистолеты станции — по Weld Balance (у пистолета на нескольких станциях WB он есть
+    в каждой). station_id = 0 — пистолеты, которых в WB нет вовсе."""
     db = get_db()
-    rows = db.execute("""
-        SELECT DISTINCT g.UniqueID, g.g_num, g.gun_type as model
-        FROM gun g
-        JOIN gun_transformer_assignment gta ON g.UniqueID = gta.gun_id
-        JOIN transformer_station_assignment tsa ON gta.transformer_id = tsa.transformer_id
-        WHERE tsa.station_id=? AND gta.is_active=1 AND tsa.is_active=1
-    """, (station_id,)).fetchall()
+    if station_id == LOST_GUNS_STATION_ID:
+        rows = db.execute("""
+            SELECT g.UniqueID, g.g_num, g.gun_type as model FROM gun g
+            WHERE g.UniqueID NOT IN (SELECT gun_id FROM weld_point WHERE gun_id IS NOT NULL)
+            ORDER BY g.g_num""").fetchall()
+    else:
+        rows = db.execute("""
+            SELECT DISTINCT g.UniqueID, g.g_num, g.gun_type as model
+            FROM weld_point w JOIN gun g ON g.UniqueID = w.gun_id
+            WHERE w.station_id = ?
+            ORDER BY g.g_num""", (station_id,)).fetchall()
     return jsonify([dict(r) for r in rows])
 
 
@@ -196,10 +214,10 @@ def search_spot():
     if not spot_number or not model_id:
         return jsonify({'status': 'error', 'message': 'Введите номер точки и модель авто'}), 400
     db = get_db()
-    rows = db.execute("""
-        SELECT s.UniqueID as spot_id, s.spot_number, st.station_name,
+    rows = db.execute(f"""
+        SELECT s.UniqueID as spot_id, s.spot_number, {POINT_WB_STATION_NAME} as station_name,
                g.g_num, g.gun_type as gun_model, g.UniqueID as gun_id,
-               t.transID as trans_name,
+               {GUN_TRANSFORMER_NAME} as trans_name,
                p.UniqueID as parameter_id, p.mode, p.pressure, p.squeeze_time,
                p.up_slope_time, p.weld_1, p.heat_1, p.cool_1, p.weld_2, p.heat_2, p.hold, p.turn_R
         FROM spot s
@@ -207,11 +225,7 @@ def search_spot():
         LEFT JOIN brand b ON m.brand_id = b.UniqueID
         JOIN welding_setup ws ON s.UniqueID = ws.spot_id AND ws.is_active=1
         JOIN gun g ON ws.gun_id = g.UniqueID
-        LEFT JOIN parameters p ON ws.parameter_id = p.UniqueID
-        LEFT JOIN gun_transformer_assignment gta ON g.UniqueID=gta.gun_id AND gta.is_active=1
-        LEFT JOIN trans t ON gta.transformer_id=t.UniqueID
-        LEFT JOIN transformer_station_assignment tsa ON t.UniqueID=tsa.transformer_id AND tsa.is_active=1
-        LEFT JOIN station st ON tsa.station_id=st.UniqueID
+        LEFT JOIN parameters p ON ws.parameter_id = p.UniqueID{POINT_WB_JOIN}
         WHERE s.spot_number=? AND s.model_id=?
     """, (spot_number, model_id)).fetchall()
     if not rows:

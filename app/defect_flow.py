@@ -86,17 +86,14 @@ def vin_required_segments(conn):
 
 
 def station_name_for(conn, defect_id):
-    """Имя станции дефекта: снимок snap_station_name; иначе live через gun→трансформатор→станцию.
-    Для ручных/пистолетных дефектов может быть None (станция не определена)."""
+    """Имя станции дефекта: снимок snap_station_name; иначе живьём из Weld Balance
+    (единственный источник станции, app/wb_source.py). Нет в WB / неоднозначно → None."""
     r = conn.execute('SELECT snap_station_name FROM defects WHERE UniqueID=?', (defect_id,)).fetchone()
     if r and r[0]:
         return r[0]
-    r2 = conn.execute("""SELECT st.station_name
-        FROM defects d JOIN gun g ON d.gun_id=g.UniqueID
-        JOIN gun_transformer_assignment gta ON gta.gun_id=g.UniqueID AND gta.is_active=1
-        JOIN transformer_station_assignment tsa ON tsa.transformer_id=gta.transformer_id AND tsa.is_active=1
-        JOIN station st ON st.UniqueID=tsa.station_id
-        WHERE d.UniqueID=? LIMIT 1""", (defect_id,)).fetchone()
+    from app.wb_source import defect_station
+    sid = defect_station(conn, defect_id)
+    r2 = conn.execute('SELECT station_name FROM station WHERE UniqueID=?', (sid,)).fetchone() if sid else None
     return r2[0] if r2 else None
 
 
