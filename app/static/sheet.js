@@ -30,6 +30,7 @@ class Sheet {
       pk: !!c.pk,
       hidden: !!c.hidden,
       hint: c.hint || null,
+      origin: c.origin || null,   // 'wb' — из Weld Balance, 'auto' — заполняется само (цвет черты заголовка)
       editable: c.editable !== undefined ? c.editable : !c.pk,
     }));
     this.cols = this.allCols.filter(c => !c.hidden);
@@ -375,7 +376,8 @@ class Sheet {
       const ci = this.cols.indexOf(c);
       const mark = this._sort && this._sort.col === c.name ? (this._sort.dir === 'desc' ? ' ↓' : ' ↑') : '';
       const hint = c.hint ? `<span class="colhint" data-hint="${this._esc(c.hint)}" title="${this._esc(c.hint)}">❓</span>` : '';
-      head += `<th data-c-name="${c.name}" title="клик — сортировка (А→Я → Я→А → сброс)">${this._esc(c.label)}${c.fk ? ' 🔗' : ''}${c.pk ? ' 🔑' : ''}${!c.editable ? ' 🔒' : ''}${mark}${hint}<span class="colresize" data-rs="${ci}"></span></th>`;
+      const ot = c.origin === 'wb' ? ' · значение из Weld Balance' : c.origin === 'auto' ? ' · заполняется само' : '';
+      head += `<th data-c-name="${c.name}"${c.origin ? ` class="o-${c.origin}"` : ''} title="клик — сортировка (А→Я → Я→А → сброс)${ot}">${this._esc(c.label)}${c.fk ? ' 🔗' : ''}${c.pk ? ' 🔑' : ''}${!c.editable ? ' 🔒' : ''}${mark}${hint}<span class="colresize" data-rs="${ci}"></span></th>`;
     }
     head += '<th class="rownum"></th></tr>';
     // строка фильтров: кнопка-воронка на колонку (открывает Excel-подобную форму)

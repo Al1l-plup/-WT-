@@ -19,10 +19,11 @@ from app.audit import (
     stamp_audit,
     table_meta,
 )
+from app.data_map import ABOUT, GROUPS, about_key, site_map
 from app.db import get_db
 from app.documents import TOKEN_RE, close_removed_wb_rows, doc_list, get_documents, resolve_weld_point_links
 from app.errors import api_error
-from app.wb_source import rebuild_issues
+from app.wb_source import OPEN_ISSUE_STATUSES, open_issue_count, rebuild_issues
 
 bp = Blueprint('admin', __name__)
 
@@ -291,6 +292,40 @@ def list_docs():
     return jsonify(doc_list(get_db()))
 
 
+def _doc_issues(db, doc_id, cfg):
+    """Открытые строки Сверки, относящиеся к документу (+ ссылка на Сверку с этим фильтром).
+    Вкладка WB — только своя модель (по коду модели вкладки)."""
+    kinds = ABOUT.get(about_key(doc_id), {}).get('issue_kinds') or []
+    if not kinds:
+        return {}
+    sql = (f"SELECT COUNT(*) FROM wb_issue WHERE status IN ({','.join('?' * len(OPEN_ISSUE_STATUSES))}) "
+           f"AND kind IN ({','.join('?' * len(kinds))})")
+    params = [*OPEN_ISSUE_STATUSES, *kinds]
+    link = '/reconciliation?kinds=' + ','.join(kinds)
+    model = (cfg.get('insert_defaults') or {}).get('model_code') if about_key(doc_id) == 'weld_balance' else None
+    if model:
+        sql += ' AND model_code = ?'
+        params.append(model)
+        link += '&model=' + model
+    return {'issues': db.execute(sql, params).fetchone()[0], 'issues_link': link}
+
+
+@bp.route('/api/admin/data-map')
+def data_map():
+    """«Карта данных» Редактора: какие вкладки сайта что берут из документов + живые цифры
+    (строк в документе, открытых строк Сверки по нему). Тексты — app/data_map.py."""
+    db = get_db()
+    docs = get_documents(db)
+    out = {}
+    for doc_id, cfg in docs.items():
+        where = f" WHERE {cfg['where']}" if cfg.get('where') else ''
+        out[doc_id] = {'title': cfg['title'],
+                       'rows': db.execute(f"SELECT COUNT(*) {cfg['base']}{where}").fetchone()[0],
+                       **_doc_issues(db, doc_id, cfg)}
+    return jsonify({'groups': [{'key': k, 'title': t, 'about': a} for k, t, a in GROUPS],
+                    'tabs': site_map(docs), 'docs': out, 'open_issues': open_issue_count(db)})
+
+
 @bp.route('/api/admin/wb-tabs', methods=['POST'])
 def create_wb_tab():
     """Создать новую вкладку Weld Balance (для новой модели)."""
@@ -548,8 +583,11 @@ def _doc_read(db, cfg, args):
     total = db.execute(f'SELECT COUNT(*) {base}{where}', params).fetchone()[0]
     rows = db.execute(f'SELECT {", ".join(pk_sel + col_sel)} {base}{where}{order} LIMIT ? OFFSET ?',
                       params + [limit, offset]).fetchall()
+    # origin — откуда значение колонки (цвет заголовка): 'wb' — из Weld Balance,
+    # 'auto' — заполняется само; у редактируемых колонок — None (вводится вручную)
     columns = [{'field': c['field'], 'label': c['label'], 'editable': bool(c.get('edit')),
-                'fk': c.get('fk'), 'hidden': bool(c.get('hidden')), 'hint': c.get('hint')}
+                'fk': c.get('fk'), 'hidden': bool(c.get('hidden')), 'hint': c.get('hint'),
+                'origin': c.get('origin') or (None if c.get('edit') else 'auto')}
                for c in cols]
     return {'title': cfg['title'], 'columns': columns, 'rows': [dict(r) for r in rows],
             'total': total, 'primary': cfg['primary'], 'child': cfg.get('child'),

@@ -9,9 +9,53 @@
   <script src="/static/theme.js"></script>
   <link rel="stylesheet" href="/static/style.css">
   <style>
-    .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
-    .tab{padding:8px 14px;border:1px solid var(--border);border-radius:8px 8px 0 0;cursor:pointer;background:var(--bg);font-size:14px}
+    /* вкладки, сгруппированные по смыслу данных (тексты групп — app/data_map.py) */
+    .tgroups{display:flex;gap:10px 22px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px}
+    .tgroup{display:flex;flex-direction:column;gap:4px;min-width:0}
+    .tglbl{font-size:11px;color:var(--muted);cursor:help}
+    .trow{display:flex;gap:6px;flex-wrap:wrap}
+    .tab{padding:7px 13px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:var(--bg);color:inherit;font-size:13px;font-family:inherit}
     .tab.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+    @media (max-width:640px){ .tab{min-height:44px} .tgroups{gap:10px} }
+    /* баннер документа: свёрнутая строка «правило → куда идёт», по клику — ветки с пояснениями */
+    .bn{margin-bottom:8px}
+    .bn-top{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap}
+    .bn-head{flex:1;min-width:0;display:flex;gap:6px 8px;align-items:center;flex-wrap:wrap;text-align:left;border:1px solid var(--border);background:color-mix(in srgb,var(--accent) 7%,var(--card));border-radius:8px;padding:7px 12px;cursor:pointer;color:inherit;font:inherit;font-size:13px}
+    .bn.open .bn-head{border-radius:8px 8px 0 0}
+    .bn-feed{border:1px solid var(--border);border-radius:12px;padding:0 8px;font-size:12px;background:var(--bg)}
+    .bn-more{margin-left:auto;color:var(--accent);white-space:nowrap}
+    .bn-warn{display:flex;align-items:center;border:1px solid var(--warn);color:var(--warn);border-radius:8px;padding:0 10px;font-size:12px;text-decoration:none;white-space:nowrap}
+    .bn-body{border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;padding:10px 14px;font-size:13px;line-height:1.5}
+    .bn-body a{color:var(--accent)}
+    .tree{list-style:none;margin:0;padding:0}
+    .tree li{position:relative;padding:3px 0 3px 18px}
+    .tree li::before{content:'';position:absolute;left:5px;top:0;bottom:0;border-left:1px solid var(--border)}
+    .tree li::after{content:'';position:absolute;left:5px;top:14px;width:9px;border-top:1px solid var(--border)}
+    .tree li:last-child::before{bottom:auto;height:14px}
+    .bn-legend{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--muted)}
+    .otag{border:1px solid var(--border);border-radius:4px;padding:1px 8px;color:var(--text,inherit)}
+    .otag.o-wb{box-shadow:inset 0 -3px 0 #8b6fd6}
+    .otag.o-auto{box-shadow:inset 0 -3px 0 color-mix(in srgb,var(--muted) 70%,transparent)}
+    table.sheet th.o-wb{box-shadow:inset 0 -3px 0 #8b6fd6}
+    table.sheet th.o-auto{box-shadow:inset 0 -3px 0 color-mix(in srgb,var(--muted) 70%,transparent)}
+    #saveNote{font-size:12px;color:var(--warn)}
+    /* «Карта данных»: вкладка сайта ← откуда берёт */
+    .mapnote{font-size:13px;line-height:1.5;margin:0 0 12px;color:var(--muted)}
+    .mgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+    .mcard{border:1px solid var(--border);border-radius:10px;padding:10px 14px;background:var(--card);min-width:0}
+    .mcard h3{margin:0 0 4px;font-size:15px}
+    .mcard h3 a{color:var(--accent)}
+    .mitem{display:grid;grid-template-columns:minmax(0,130px) minmax(0,1fr);gap:10px;padding:7px 0;border-top:1px solid var(--border);font-size:13px;line-height:1.45}
+    .msrc{display:flex;flex-direction:column;gap:4px;align-items:flex-start}
+    .mmodels{display:flex;gap:4px;flex-wrap:wrap}
+    .dpill{border:1px solid var(--border);border-radius:12px;padding:2px 9px;font-size:12px;cursor:pointer;background:var(--bg);color:inherit;font-family:inherit;text-align:left}
+    .dpill:hover{border-color:var(--accent);color:var(--accent)}
+    .mdocs{margin-top:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+    .mdocs h4{margin:0 0 2px;font-size:13px}
+    .mdocs p{margin:0 0 6px;font-size:12px;color:var(--muted)}
+    .mdocs .row{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:3px 0;font-size:13px}
+    .mdocs .row a{color:var(--warn);font-size:12px;white-space:nowrap}
+    @media (max-width:640px){ .dpill{min-height:44px;padding:4px 12px} .mitem{grid-template-columns:1fr} .mgrid{grid-template-columns:1fr} }
     .tab .tabdel{margin-left:8px;opacity:.45;font-size:11px;cursor:pointer}
     .tab .tabdel:hover{opacity:1;color:var(--danger,#c0392b)}
     .wrap{display:flex;gap:14px;align-items:flex-start}
@@ -99,14 +143,18 @@
 
 <div class="page">
   <div class="page-head" style="display:flex;justify-content:space-between;align-items:center">
-    <div><h1>Редактор данных</h1><p class="badge">Как в Excel: правка в ячейках · <b>правая кнопка</b> — вставка/удаление/перемещение строк · Ctrl+C/V копипаст · Ctrl+Z/Y отмена/повтор · Ctrl+D заливка вниз · Ctrl+Enter — залить выделение · Alt+↑/↓ сдвиг строк · клик по № — выделить строку · 🔒 только чтение · «Сохранить» пишет пакет в Журнал (там же откат). Автор правок — ваш вход.</p></div>
+    <div><h1>Редактор данных</h1><p class="badge">Документы цеха — как в Excel. «Карта данных» показывает, какая вкладка сайта что берёт и откуда.
+      Над каждым документом — пояснение (нажмите, чтобы раскрыть). Горячие клавиши — кнопка «?».</p></div>
   </div>
 
-  <div class="tabs" id="tabs"></div>
+  <div class="tgroups" id="tabs" role="tablist" aria-label="Документы"></div>
 
-  <div class="wrap">
+  <div id="mapView" style="display:none"></div>
+
+  <div class="wrap" id="editorArea">
     <div class="side" id="tables" style="display:none"></div>
     <div class="main">
+      <div id="docBanner"></div>
       <div class="bar">
         <strong id="title"></strong>
         <input id="q" placeholder="поиск…" style="flex:1;min-width:120px">
@@ -116,6 +164,7 @@
         <label class="badge" style="cursor:pointer"><input type="checkbox" id="mergeChk"> объединять одинаковые</label>
         <button id="saveBtn" class="primary">Сохранить <span id="cnt"></span></button>
         <button id="cancelBtn">Отменить</button>
+        <span id="saveNote" role="status"></span>
         <span class="badge" id="pageInfo"></span>
         <button id="prev">←</button><button id="next">→</button>
         <button id="helpBtn" title="Инструкция">?</button>
@@ -142,7 +191,18 @@
     <button class="rowbtn" onclick="document.getElementById('helpDlg').close()" style="padding:4px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit;cursor:pointer">✕ Закрыть (Esc)</button>
   </div>
   <p>Редактор работает как Excel: выбираете документ во вкладке сверху, правите ячейки, затем нажимаете
-     <b>«Сохранить»</b> — все правки уходят одним пакетом в <b>Журнал</b>, где их можно откатить.</p>
+     <b>«Сохранить»</b> — все правки уходят одним пакетом в <b>Журнал</b>, где их можно откатить.
+     Автор правок — ваш вход.</p>
+
+  <h3>Как устроены данные</h3>
+  <ul>
+    <li>Вкладки сгруппированы: <b>Эталон</b> (Weld Balance), <b>Справочники</b> (Перечень оборудования,
+        Параметры сварки), <b>Записи — исправления</b> (ТО, Дефекты), <b>Настройки</b>.</li>
+    <li><b>«Карта данных»</b> — какая вкладка сайта (Дефекты, ТО, Обзор…) что берёт и из какого документа.</li>
+    <li>Над каждым документом — строка-пояснение: нажмите, чтобы увидеть «откуда → что правят → куда идёт».</li>
+    <li>Цвет черты под заголовком колонки: <b>фиолетовая 🔒</b> — значение из Weld Balance (здесь не правится),
+        <b>серая 🔒</b> — заполняется само; без черты — вводится вручную.</li>
+  </ul>
 
   <h3>Навигация и выделение</h3>
   <ul>
@@ -156,7 +216,9 @@
   <ul>
     <li>Двойной клик, <kbd>Enter</kbd>, <kbd>F2</kbd> или просто начните печатать — правка ячейки.</li>
     <li><b>Строка адреса</b> над таблицей: показывает адрес (B7) и содержимое активной ячейки; длинный текст удобно править там (Enter — применить).</li>
-    <li>Поля со значком 🔗 — выбор из списка (например, Станция, Модель); 🔑 — ключ (не меняется); 🔒 — только чтение.</li>
+    <li>Поля со значком 🔗 — ссылка на справочник (например, Трансформатор, Сотрудник): начните вводить
+        название или номер и выберите из подсказки. Чего нет в справочнике — не сохранится (рамка станет красной);
+        пустое значение — убрать. 🔑 — ключ (не меняется); 🔒 — только чтение.</li>
     <li>Изменённые ячейки подсвечиваются жёлтым, новые строки — зелёным, удалённые — зачёркнуты.</li>
   </ul>
 
@@ -201,10 +263,12 @@
     <li>После сохранения — вкладка <b>Журнал</b>: «Откатить» правку, пакет или всю базу к точке восстановления.</li>
   </ul>
 
-  <h3>Связь Weld Balance с карточками (Обзор, Дефекты)</h3>
+  <h3>Weld Balance — эталон</h3>
   <ul>
-    <li>Weld Balance — <b>источник правды</b> для привязок «точка ↔ клещи»: Обзор и Дефекты
-        показывают ровно то, что записано здесь.</li>
+    <li>Станция <b>точки и пистолета</b> на всём сайте (Дефекты, ТО, Обзор, Перечень) берётся
+        <b>только</b> из Weld Balance: из колонок «Станция» и «Клещи (G)». Всё, что с WB не сходится,
+        само попадает в <b>«Сверку»</b> (её разбирает ИТО) — вставку из Excel ничто не прерывает.</li>
+    <li>Станция дефекта запоминается при регистрации и потом не меняется — даже если WB поправят.</li>
     <li>Чтобы новая точка работала во всех вкладках, заполните <b>«Клещи (G)»</b> (например G.043),
         <b>«Модель (код)»</b> (A13T, A01, P01G, CS55, CS65) и <b>«№ точки»</b> — при сохранении
         карточка точки и связка с клещами создадутся автоматически. Коды с двумя модификациями
@@ -216,20 +280,28 @@
 
   <h3>Перенос точки на другие клещи/станцию</h3>
   <ul>
-    <li>В строке Weld Balance смените <b>«Клещи (G)»</b> (напр. G.043 → G.050) и сохраните:
+    <li>В строке Weld Balance смените <b>«Клещи (G)»</b> (напр. G.043 → G.050) и/или <b>«Станция»</b> и сохраните:
         старая связка закроется датой (история сохранится), точка привяжется к новым клещам —
-        Обзор и Дефекты сразу увидят её на новой станции.</li>
+        Обзор и ТО сразу увидят её на новой станции. Уже зарегистрированные дефекты останутся на старой.</li>
     <li><b>Очистили «Клещи (G)»</b> или <b>удалили строку</b> — связка закрывается датой,
         в Обзоре на гане станет на одну точку меньше. Если ту же точку с теми же клещами
         описывает другая строка WB — связка остаётся, пока жива хоть одна такая строка.</li>
   </ul>
 
-  <h3>Перенос гана (клещей) на другую станцию</h3>
+  <h3>Пистолет и его станция</h3>
   <ul>
-    <li>В «Перечне оборудования» смените <b>«Трансформатор»</b> (выпадающий список — можно выбрать
-        трансформатор другой станции) и сохраните: старая привязка закроется датой, создастся новая.
-        <b>Станция и линия пересчитаются, все точки гана переедут вместе с ним.</b></li>
-    <li>Столбец «Станция» — вычисляемый (🔒): он всегда показывает станцию текущего трансформатора.</li>
+    <li>Станция пистолета = станция его строк в Weld Balance. Чтобы «перенести» пистолет — поправьте
+        «Станция» в WB. В «Перечне оборудования» колонки «Станция (по WB)» и «Линия» только для чтения.</li>
+    <li><b>«Трансформатор»</b> в Перечне — ручная пометка (какой трансформатор стоит у пистолета).
+        На станцию он <b>не влияет</b>.</li>
+    <li>«⚠ нет в WB» — пистолет есть в Перечне, но ни одной строки WB с ним нет (он в «Сверке»).</li>
+  </ul>
+
+  <h3>Горячие клавиши (кратко)</h3>
+  <ul>
+    <li><b>Правая кнопка</b> — вставка/удаление/перемещение строк · <kbd>Ctrl+C</kbd>/<kbd>Ctrl+V</kbd> копипаст ·
+        <kbd>Ctrl+Z</kbd>/<kbd>Ctrl+Y</kbd> отмена/повтор · <kbd>Ctrl+D</kbd> заливка вниз ·
+        <kbd>Ctrl+Enter</kbd> залить выделение · <kbd>Alt+↑/↓</kbd> сдвиг строк · клик по № — выделить строку.</li>
   </ul>
 
   <h3>Проверки при вводе</h3>
@@ -256,7 +328,7 @@
   </ul>
 </dialog>
 
-<script src="/static/sheet.js?v=13"></script>
+<script src="/static/sheet.js?v=14"></script>
 <script>
 const $ = s => document.querySelector(s);
 // автор правок определяется на сервере по сессии входа
@@ -290,26 +362,107 @@ function wireSheet(s){
   s._emitActive();
 }
 
+// ── вкладки по группам, «Карта данных», баннер документа (тексты — app/data_map.py) ──
+let DOCS=[], MAP=null, lastCols=[];
+const GROUPS_FALLBACK=[{key:'source',title:'Эталон'},{key:'refs',title:'Справочники'},
+                       {key:'facts',title:'Записи — исправления'},{key:'settings',title:'Настройки'}];
+// localStorage может быть недоступен (приватный режим) — это только удобство, не данные
+const lsGet=k=>{ try{ return localStorage.getItem(k); }catch(e){ return null; } };
+const lsSet=(k,v)=>{ try{ localStorage.setItem(k,v); }catch(e){} };
+async function refreshMap(){ try{ MAP = await jget('/api/admin/data-map'); }catch(e){ MAP=null; } }
+
 async function init(openId){
   try {
-    const docs = await jget('/api/admin/docs');
-    $('#tabs').innerHTML = docs.map(d=>`<div class="tab" data-doc="${escapeHtml(d.id)}">${escapeHtml(d.title)}`+
-        (d.wb_tab_id?`<span class="tabdel" data-del="${d.wb_tab_id}" title="Удалить пустую вкладку">✕</span>`:'')+`</div>`).join('')
-      + `<div class="tab" data-add="1" title="Новая вкладка Weld Balance для модели">+ вкладка</div>`
-      + `<div class="tab" data-raw="1">Все таблицы (админ)</div>`;
+    [DOCS] = await Promise.all([jget('/api/admin/docs'), refreshMap()]);
+    const groups = (MAP && MAP.groups) || GROUPS_FALLBACK;
+    const tab = d=>`<button type="button" class="tab" data-doc="${escapeHtml(d.id)}">${escapeHtml(d.title)}`+
+        (d.wb_tab_id?`<span class="tabdel" data-del="${d.wb_tab_id}" title="Удалить пустую вкладку">✕</span>`:'')+`</button>`;
+    $('#tabs').innerHTML =
+        `<div class="tgroup"><span class="tglbl">Как устроено</span><div class="trow">`+
+        `<button type="button" class="tab" data-map="1">🗺 Карта данных</button></div></div>`+
+      groups.map(g=>`<div class="tgroup"><span class="tglbl" title="${escapeHtml(g.about||'')}">${escapeHtml(g.title)}</span><div class="trow">`+
+        DOCS.filter(d=>d.group===g.key).map(tab).join('')+
+        (g.key==='source'?`<button type="button" class="tab" data-add="1" title="Новая вкладка Weld Balance для модели">+ вкладка</button>`:'')+
+        (g.key==='settings'?`<button type="button" class="tab" data-raw="1">Все таблицы (админ)</button>`:'')+
+        `</div></div>`).join('');
     $('#tabs').querySelectorAll('.tab').forEach(t=>t.onclick=(e)=>{
       const del=e.target.closest('.tabdel');
       if(del){ e.stopPropagation(); deleteTab(del.dataset.del); return; }
       if(!guard())return;
       if(t.dataset.add) addTab();
       else if(t.dataset.raw) openRaw();
+      else if(t.dataset.map) showMap();
       else openDoc(t.dataset.doc, t);
     });
-    const start = openId && docs.find(d=>d.id===openId) ? openId : docs[0].id;
-    openDoc(start, [...$('#tabs').querySelectorAll('.tab')].find(t=>t.dataset.doc===start));
+    // открываем то, на чём остановились (первый вход — «Карта данных»)
+    const want = openId || lsGet('wt-editor-view');
+    if(want && DOCS.some(d=>d.id===want)) openDoc(want); else showMap();
   } catch(e){
-    $('#tabs').innerHTML = `<div style="color:var(--danger,#c0392b);padding:8px 0">Не удалось загрузить редактор (${e.message}).<br>Обновите страницу; если не помогло — перезапустите сервер (обновилась версия кода).</div>`;
+    $('#tabs').innerHTML = `<div style="color:var(--danger,#c0392b);padding:8px 0">Не удалось загрузить редактор (${escapeHtml(e.message)}).<br>Обновите страницу; если не помогло — перезапустите сервер (обновилась версия кода).</div>`;
   }
+}
+
+function showArea(which){
+  $('#mapView').style.display = which==='map' ? '' : 'none';
+  $('#editorArea').style.display = which==='map' ? 'none' : '';
+}
+function showMap(){
+  mode='map'; cur=null; sheet=null; childSheet=null; lsSet('wt-editor-view','map');
+  markTab([...$('#tabs').querySelectorAll('.tab')].find(t=>t.dataset.map));
+  showArea('map'); renderMap();
+}
+const shortWb = t=>t.replace(/^WB · /,'').replace(/\s*\(.*\)$/,'');   // «WB · A01 (Jolion…)» → «A01»
+function renderMap(){
+  if(!MAP){ $('#mapView').innerHTML='<p class="mapnote">Не удалось загрузить карту данных — обновите страницу.</p>'; return; }
+  const pill=(id,label)=>`<button type="button" class="dpill" data-open="${escapeHtml(id)}">${escapeHtml(label)}</button>`;
+  const src=it=> it.docs.length>1
+    ? `<b>${escapeHtml(it.doc_title)}</b><div class="mmodels">${it.docs.map(d=>pill(d.doc, shortWb(d.title))).join('')}</div>`
+    : pill(it.docs[0].doc, it.doc_title);
+  const fmt=n=>Number(n).toLocaleString('ru-RU');
+  let h = `<p class="mapnote">Карточка — вкладка сайта, внутри — <b>откуда</b> она берёт данные и <b>что именно</b>.
+    Нажмите на документ, чтобы открыть его. Weld Balance — эталон станций: что с ним не сходится,
+    видно в <a href="/reconciliation">«Сверке»</a> (сейчас ждут разбора: ${fmt(MAP.open_issues)}).</p>`;
+  h += '<div class="mgrid">' + MAP.tabs.map(t=>`<section class="mcard"><h3><a href="${escapeHtml(t.href)}">${escapeHtml(t.tab)}</a></h3>`+
+         t.items.map(it=>`<div class="mitem"><div class="msrc">${src(it)}</div><div>${escapeHtml(it.what)}</div></div>`).join('')+
+       '</section>').join('') + '</div>';
+  // документы по группам: сколько строк и сколько расхождений в Сверке
+  h += '<div class="mdocs">' + MAP.groups.map(g=>`<section class="mcard"><h4>${escapeHtml(g.title)}</h4><p>${escapeHtml(g.about)}</p>`+
+         DOCS.filter(d=>d.group===g.key).map(d=>{ const m=MAP.docs[d.id]||{};
+           return `<div class="row">${pill(d.id, d.title)}<span>строк: ${fmt(m.rows||0)}`+
+             (m.issues?` · <a href="${escapeHtml(m.issues_link)}">⚠ ${fmt(m.issues)} в Сверке</a>`:'')+`</span></div>`; }).join('')+
+       '</section>').join('') + '</div>';
+  $('#mapView').innerHTML = h;
+  $('#mapView').querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>openDoc(b.dataset.open));
+}
+
+function renderBanner(id, columns){
+  const d = DOCS.find(x=>x.id===id), a = d && d.about;
+  if(!a){ $('#docBanner').innerHTML=''; return; }
+  const m = (MAP && MAP.docs[id]) || {};
+  const open = lsGet('wt-banner-open')==='1';
+  const origins = new Set((columns||[]).filter(c=>!c.hidden).map(c=>c.origin||'manual'));
+  const legend = [['manual','','без черты — вводится вручную'],['wb','o-wb','🔒 из Weld Balance'],['auto','o-auto','🔒 заполняется само']]
+    .filter(([k])=>origins.has(k)).map(([,cls,t])=>`<span class="otag ${cls}">${t}</span>`).join('');
+  $('#docBanner').innerHTML = `<div class="bn${open?' open':''}">
+    <div class="bn-top">
+      <button type="button" class="bn-head" aria-expanded="${open}" aria-controls="bnBody">
+        <span aria-hidden="true">ⓘ</span><span>${escapeHtml(a.note)}</span>
+        <span style="color:var(--muted)">→ идёт в:</span>${a.feeds.map(f=>`<span class="bn-feed">${escapeHtml(f.tab)}</span>`).join('')}
+        <span class="bn-more">${open?'Свернуть ▴':'Как это работает ▾'}</span>
+      </button>
+      ${m.issues?`<a class="bn-warn" href="${escapeHtml(m.issues_link)}" title="Расхождения с WB по этому документу — их разбирает ИТО">⚠ в Сверке: ${m.issues}</a>`:''}
+    </div>
+    <div class="bn-body" id="bnBody"${open?'':' hidden'}>
+      <ul class="tree">
+        <li><b>Откуда строки:</b> ${escapeHtml(a.source)}</li>
+        <li><b>Что здесь правят:</b> ${escapeHtml(a.edit)}</li>
+        <li><b>Кто правит:</b> ${escapeHtml(a.who)}</li>
+        <li><b>Куда идёт на сайте:</b>
+          <ul class="tree">${a.feeds.map(f=>`<li><a href="${escapeHtml(f.href)}">${escapeHtml(f.tab)}</a> — ${escapeHtml(f.what)}</li>`).join('')}</ul></li>
+      </ul>
+      ${legend?`<div class="bn-legend">Колонки: ${legend} · ❓ в заголовке — подсказка</div>`:''}
+    </div></div>`;
+  $('#docBanner .bn-head').onclick=()=>{ lsSet('wt-banner-open', open?'0':'1'); renderBanner(id, columns); };
 }
 async function addTab(){
   const title = prompt('Название вкладки (например: WB · CS65 (Changan)):'); if(!title) return;
@@ -328,6 +481,7 @@ function markTab(el){ $('#tabs').querySelectorAll('.tab').forEach(x=>x.classList
 async function openDoc(id, el){
   mode='doc'; cur=id; page=0; sort=''; $('#q').value=''; $('#tables').style.display='none';
   markTab(el||[...$('#tabs').querySelectorAll('.tab')].find(t=>t.dataset.doc===id));
+  lsSet('wt-editor-view', id); showArea('doc'); $('#saveNote').textContent='';
   await loadDoc();
 }
 async function loadDoc(){
@@ -344,6 +498,7 @@ async function loadDoc(){
   sheet.onSelect = childCfg ? (r,row)=>selectPoint(row) : null;
   wireSheet(sheet);
   $('#title').textContent=d.title;
+  lastCols=d.columns; renderBanner(cur, lastCols);
   pageBar(d);
   // под-таблица деталей
   if(childCfg){ $('#childWrap').style.display='block'; $('#childTitle').textContent=childCfg.title; childPointId=null; childSheet=null; $('#childSheet').innerHTML=''; $('#childHint').textContent='Выберите точку выше'; }
@@ -358,12 +513,14 @@ async function saveDoc(){
   }
   if(!changes.length){ alert('Нет изменений'); return; }
   const res = await (await fetch(`/api/admin/doc/${cur}/batch`,{method:'POST',headers:hdr(),body:JSON.stringify({changes})})).json();
-  if(res.status==='success'){ fkCache={}; showWarnings(res); loadDoc(); } else alert(res.message||'Ошибка');
+  if(res.status==='success'){ fkCache={}; showWarnings(res); await refreshMap(); loadDoc(); } else alert(res.message||'Ошибка');
 }
+// Замечания после сохранения — спокойной строкой у кнопки, без модального окна:
+// вставку из Excel ничто не должно прерывать (полный текст — во всплывающей подсказке)
 function showWarnings(res){
-  if(!res.warnings||!res.warnings.length) return;
-  const more = res.warnings_total>res.warnings.length ? `\n…и ещё ${res.warnings_total-res.warnings.length}` : '';
-  alert('Сохранено, но есть замечания по модели:\n• '+res.warnings.join('\n• ')+more);
+  const n = res.warnings_total || (res.warnings||[]).length;
+  $('#saveNote').textContent = n ? `Сохранено. Строк с нераспознанной моделью: ${n} — их точки не привязаны` : '';
+  $('#saveNote').title = n ? (res.warnings||[]).join('\n') + (n>(res.warnings||[]).length?`\n…и ещё ${n-res.warnings.length}`:'') : '';
 }
 
 // ── под-таблица деталей (weld_point_part) ────────────────────────────────────
@@ -387,6 +544,7 @@ async function saveChild(){
 // ── режим «Все таблицы» ──────────────────────────────────────────────────────
 async function openRaw(){
   mode='raw'; cur=null; $('#childWrap').style.display='none'; $('#title').textContent='';
+  showArea('doc'); $('#docBanner').innerHTML=''; $('#saveNote').textContent='';
   markTab([...$('#tabs').querySelectorAll('.tab')].find(t=>t.dataset.raw));
   $('#tables').style.display=''; $('#sheet').innerHTML='';
   const t = await jget('/api/admin/tables');

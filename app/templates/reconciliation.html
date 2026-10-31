@@ -77,6 +77,9 @@
 <script>
 const $ = id => document.getElementById(id);
 let DATA = null, FKIND = '';
+// фильтр из ссылки Редактора («⚠ в Сверке» над документом): ?kinds=a,b&model=A13T
+const URLP = new URLSearchParams(location.search);
+let PRE_KINDS = (URLP.get('kinds') || '').split(',').filter(Boolean), PRE_MODEL = URLP.get('model') || '';
 const STATUS_BADGE = {new:'bd', in_review:'bw', assigned:'ba', accepted:'bm', resolved:'bs'};
 
 async function load(){
@@ -90,10 +93,16 @@ function renderKinds(){
   const by = DATA.open_by_kind || {};
   const chips = Object.entries(DATA.kinds).filter(([k]) => by[k]).sort(([a], [b]) => by[b] - by[a]).map(([k, label]) =>
     `<button class="kchip${FKIND === k ? ' on' : ''}" data-k="${escapeHtml(k)}"><b>${by[k]}</b> ${escapeHtml(label)}</button>`);
+  const pre = PRE_KINDS.length || PRE_MODEL
+    ? `<button class="kchip on" id="preClr" title="${escapeHtml(PRE_KINDS.map(k => DATA.kinds[k] || k).join('\n'))}\n\nНажмите — сбросить фильтр">Фильтр из Редактора: ${PRE_MODEL ? 'модель ' + escapeHtml(PRE_MODEL) + ' · ' : ''}${PRE_KINDS.length} ${plural(PRE_KINDS.length, ['тип', 'типа', 'типов'])} ✕</button>`
+    : '';
   $('kinds').innerHTML = chips.length
-    ? `<button class="kchip${FKIND ? '' : ' on'}" data-k=""><b>${DATA.open_total}</b> Все требующие разбора</button>` + chips.join('')
+    ? pre + `<button class="kchip${FKIND ? '' : ' on'}" data-k=""><b>${DATA.open_total}</b> Все требующие разбора</button>` + chips.join('')
     : '<span class="muted">✓ Расхождений с WB нет</span>';
-  $('kinds').querySelectorAll('.kchip').forEach(b => b.onclick = () => { FKIND = b.dataset.k; renderKinds(); render(); });
+  $('kinds').querySelectorAll('.kchip[data-k]').forEach(b => b.onclick = () => { FKIND = b.dataset.k; renderKinds(); render(); });
+  if ($('preClr')) $('preClr').onclick = () => {
+    PRE_KINDS = []; PRE_MODEL = ''; history.replaceState(null, '', location.pathname); renderKinds(); render();
+  };
 }
 
 // 1 строка / 2 строки / 5 строк
@@ -120,6 +129,7 @@ function objectText(i){
 function render(){
   const q = $('fq').value.trim().toLowerCase();
   const rows = DATA.issues.filter(i => (!FKIND || i.kind === FKIND) &&
+    (!PRE_KINDS.length || PRE_KINDS.includes(i.kind)) && (!PRE_MODEL || i.model_code === PRE_MODEL) &&
     (!q || [objectText(i), i.wb_station, detailsText(i), i.where_found, i.comment, DATA.kinds[i.kind]]
             .some(v => String(v || '').toLowerCase().includes(q))));
   $('count').textContent = `показано: ${rows.length}`;

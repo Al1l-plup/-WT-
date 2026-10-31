@@ -20,6 +20,9 @@ table.sheet tr.new td{background:color-mix(in srgb,#2e7d32 12%,transparent)}
 table.sheet tr.deleted td{text-decoration:line-through;opacity:.5}
 table.sheet input.celledit,table.sheet select.celledit{width:100%;box-sizing:border-box;border:none;background:var(--bg);color:inherit;font-size:12px;padding:2px 4px}
 table.sheet input.celledit.bad{outline:2px solid var(--danger);outline-offset:-2px}
+/* черта под заголовком колонки: откуда значение (как в Редакторе) */
+table.sheet th.o-wb{box-shadow:inset 0 -3px 0 #8b6fd6}
+table.sheet th.o-auto{box-shadow:inset 0 -3px 0 color-mix(in srgb,var(--muted) 70%,transparent)}
 .delrow{border:none;background:none;cursor:pointer;color:var(--muted,#888)}
 /* Excel-операции */
 table.sheet tr.cut td{outline:1px dashed var(--accent);outline-offset:-1px;opacity:.75}

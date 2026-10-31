@@ -15,6 +15,7 @@
 """
 import re
 
+from app.data_map import about
 from app.wb_source import GUN_WB_BRAND_ID, GUN_WB_JOIN, GUN_WB_STATION_NAME
 
 # ── колонки Weld Balance = ТОЧНОЕ зеркало листа «Welds» Excel (колонка-в-колонку,
@@ -186,10 +187,11 @@ _EQUIPMENT_DOC = {
          'hint': 'Какой трансформатор стоит у этого пистолета (ручное поле). На станцию не влияет — '
                  'станция берётся из Weld Balance. Начните печатать номер/название трансформатора; '
                  'очистите ячейку, чтобы снять привязку.'},
-        {'label': 'Станция (по WB)', 'field': 'station_name', 'edit': False, 'expr': GUN_WB_STATION_NAME,
+        {'label': 'Станция (по WB)', 'field': 'station_name', 'edit': False, 'expr': GUN_WB_STATION_NAME, 'origin': 'wb',
          'hint': 'Только из Weld Balance. «⚠ нет в WB» и «⚠ несколько станций» — в «Сверке» '
                  '(запрос ИТО): правится в WB, не здесь.'},
-        {'label': 'Линия', 'field': 'brand', 'expr': "COALESCE(b.brand,'—')", 'edit': False},
+        {'label': 'Линия', 'field': 'brand', 'expr': "COALESCE(b.brand,'—')", 'edit': False, 'origin': 'wb',
+         'hint': 'Линия (бренд) станции из Weld Balance.'},
     ],
 }
 
@@ -343,8 +345,13 @@ def get_documents(db) -> dict:
 
 
 def doc_list(db):
-    return [{'id': k, 'title': v['title'], 'wb_tab_id': v.get('wb_tab_id')}
-            for k, v in get_documents(db).items()]
+    """Документы для вкладок Редактора: группа и пояснение «откуда → куда» (app/data_map.py)."""
+    out = []
+    for k, v in get_documents(db).items():
+        a = about(k)
+        out.append({'id': k, 'title': v['title'], 'wb_tab_id': v.get('wb_tab_id'),
+                    'group': a['group'] if a else 'settings', 'about': a})
+    return out
 
 
 def _parse_spot_num(spot_number):
