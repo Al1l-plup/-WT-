@@ -1,5 +1,5 @@
 """Telegram-уведомления = «Мои входящие» в виде пингов. Адресация (зоны / WeldTeam
-только на своём этапе / ОТК-опенер), outbox и отправка. Сеть мокаем."""
+только на своём этапе / ОТК — все контролёры), outbox и отправка. Сеть мокаем."""
 import sqlite3
 from datetime import date, datetime, timedelta
 from datetime import time as dtime
@@ -66,10 +66,14 @@ def test_enqueue_weldteam_only_on_its_stage(register_client, app):
     assert _chats(db) == ['301']
 
 
-def test_enqueue_otk_goes_to_opener_only(register_client, app):
+def test_enqueue_otk_goes_to_all_otk(register_client, app):
+    """Проверить закрытие может любой ОТК → пинг всем подключённым ОТК, а не только
+    открывшему (= «Мои входящие» ОТК). WeldTeam/Производство на этапе ОТК молчат."""
     did, ids, db = _setup(app, register_client)
+    register_client(department='ОТК', login='n_otk2@weldteam.kz')          # второй контролёр, НЕ открывший
+    db.execute("UPDATE worker SET tg_chat_id='112' WHERE login='n_otk2@weldteam.kz'"); db.commit()
     enqueue_stage_arrival(db, did, 'ОТК'); db.commit()
-    assert _chats(db) == ['111']               # только открывший контролёр, без WeldTeam
+    assert _chats(db) == ['111', '112']
 
 
 def test_open_stage_triggers_enqueue(register_client, app):

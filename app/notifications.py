@@ -9,10 +9,10 @@
 
 Кому слать — ровно «Мои входящие», но в виде уведомления: работник получает пинг,
 когда дефект попадает в его «входящие» (его текущий этап согласования):
-* отдел-получатель — работникам этого отдела, у кого дефект попадает в их участок
-  (бренд+участок) или у кого зоны не заданы (WeldTeam без зон → по всем станциям,
-  но только когда дефект на этапе WeldTeam);
-* ОТК — ТОЛЬКО контролёру, который открыл дефект (worker_register_id), а не всем ОТК.
+работникам отдела этапа, у кого дефект попадает в их участок (бренд+участок) или у кого
+зоны не заданы. У ОТК и WeldTeam зон нет → пинг получает весь отдел (по всем станциям),
+но только когда дефект на ИХ этапе. Так у ОТК: проверить закрытие может любой
+контролёр — пинг тоже всем ОТК (а не только открывшему).
 Шлём только тем, кто подключил Telegram (worker.tg_chat_id задан) и активен.
 
 Без токена (config TG_BOT_TOKEN пуст) фоновый поток не стартует, а send_telegram
@@ -30,7 +30,7 @@ import urllib.request
 from datetime import datetime, timedelta
 from datetime import time as dtime
 
-from app.defect_flow import OPEN_STATUSES, OTK, _now, defect_area, station_name_for, worker_areas
+from app.defect_flow import OPEN_STATUSES, _now, defect_area, station_name_for, worker_areas
 
 log = logging.getLogger(__name__)
 
@@ -62,18 +62,10 @@ def _in_zone(zone_pairs, zone_segs, brand_txt, seg):
     return False
 
 
-def resolve_recipients(conn, defect_id, dept, brand_txt, seg, reg_id):
+def resolve_recipients(conn, defect_id, dept, brand_txt, seg):
     """{worker_id: chat_id} — кому слать уведомление о попадании дефекта на этап dept.
-    = множество тех, у кого дефект сейчас в «Мои входящие». ОТК — только открывший."""
-    # ОТК — только контролёру, который открыл дефект (а не всем ОТК).
-    if dept == OTK:
-        if not reg_id:
-            return {}
-        r = conn.execute('SELECT tg_chat_id FROM worker '
-                         'WHERE UniqueID=? AND is_active=1 AND tg_chat_id IS NOT NULL', (reg_id,)).fetchone()
-        return {reg_id: r[0]} if r else {}
-    # Остальные отделы (включая WeldTeam без зон = все станции на этапе WeldTeam):
-    # работники этапа, у кого дефект попадает в их участок или зоны не заданы.
+    = ровно те, у кого дефект сейчас в «Мои входящие» (та же логика, что mine на доске):
+    работники этапа, у кого дефект попадает в их участок, или у кого зоны не заданы."""
     recipients = {}
     brand_name = {bid: name for bid, name in conn.execute('SELECT UniqueID, brand FROM brand')}
     for wid, chat in conn.execute('SELECT UniqueID, tg_chat_id FROM worker '
@@ -97,8 +89,7 @@ def enqueue_stage_arrival(conn, defect_id, dept):
     info = conn.execute("""
         SELECT d.problem_code,
                COALESCE(d.snap_brand, b.brand, eb.brand)                      AS brand,
-               COALESCE(d.snap_spot_number, s.spot_number, d.manual_spot_number) AS spot,
-               d.worker_register_id
+               COALESCE(d.snap_spot_number, s.spot_number, d.manual_spot_number) AS spot
         FROM defects d
         LEFT JOIN spot  s  ON d.spot_id = s.UniqueID
         LEFT JOIN model m  ON s.model_id = m.UniqueID
@@ -108,13 +99,13 @@ def enqueue_stage_arrival(conn, defect_id, dept):
         WHERE d.UniqueID=?""", (defect_id,)).fetchone()
     if not info:
         return 0
-    code, brand_txt, spot, reg_id = info
+    code, brand_txt, spot = info
     seg = defect_area(station_name_for(conn, defect_id))
     # анкор часового ритма напоминаний на текущем открытом этапе (ставится и при первом
     # пинге, и при каждом повторном — даже если подключённых получателей сейчас нет)
     conn.execute('UPDATE defect_stage SET last_notified_at=? WHERE defect_id=? AND left_at IS NULL',
                  (_now(), defect_id))
-    recipients = resolve_recipients(conn, defect_id, dept, brand_txt, seg, reg_id)
+    recipients = resolve_recipients(conn, defect_id, dept, brand_txt, seg)
     if not recipients:
         return 0
     text = _compose_message(code, spot, seg, dept, os.environ.get('WELDTEAM_SITE_URL', ''))
