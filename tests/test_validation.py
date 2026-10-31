@@ -45,15 +45,6 @@ def test_spot_unique_within_model_only(client, app):
     assert r.status_code == 200
 
 
-def test_doc_batch_insert_validated(client):
-    """Валидация работает и в редакторе документов (batch), а не только в generic-CRUD."""
-    client.post('/api/admin/table/gun', json={'values': {'g_num': 90004, 'gun_type': 'X'}})
-    r = client.post('/api/admin/doc/equipment/batch', json={'changes': [
-        {'op': 'insert', 'values': {'g_num': 90004, 'gun_type': 'X'}}]})
-    assert r.status_code == 400
-    assert 'уже существуют' in r.get_json()['message']
-
-
 def test_unknown_model_code_rejected(client):
     from tests.test_admin_docs import wb_doc
     doc = wb_doc(client, 'A13T')

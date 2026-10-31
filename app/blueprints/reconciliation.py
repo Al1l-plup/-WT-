@@ -8,11 +8,19 @@ WB — единственный источник станции точки и п
 Наполняется и закрывается автоматически (rebuild_issues) при старте, после сохранения
 документов Редактора и при открытии страницы; решения ИТО при этом не затираются.
 """
-from flask import Blueprint, jsonify, render_template, request, session
+from flask import Blueprint, current_app, jsonify, render_template, request, session
 
 from app.db import get_db
 from app.errors import api_error
-from app.wb_source import ISSUE_KINDS, ISSUE_STATUSES, OPEN_ISSUE_STATUSES, open_issue_count, rebuild_issues
+from app.wb_source import (
+    ISSUE_KINDS,
+    ISSUE_STATUSES,
+    OPEN_ISSUE_STATUSES,
+    open_issue_count,
+    rebuild_issues,
+    run_wb_sync,
+    wb_health,
+)
 
 bp = Blueprint('reconciliation', __name__)
 
@@ -64,7 +72,33 @@ def list_issues():
     return jsonify({'issues': [dict(r) for r in rows],
                     'kinds': ISSUE_KINDS, 'statuses': ISSUE_STATUSES, 'status_order': list(ISSUE_STATUSES),
                     'open_by_kind': by_kind, 'open_total': sum(by_kind.values()),
-                    'engineers': [dict(e) for e in engineers], 'can_edit': _can_edit()})
+                    'engineers': [dict(e) for e in engineers], 'can_edit': _can_edit(),
+                    'health': wb_health(db), 'sync': _sync_view(current_app.config.get('WB_SYNC_LAST'))})
+
+
+def _sync_view(res):
+    """Итог последней синхронизации с WB. Тексты ошибок — только тем, кто разбирает
+    Сверку (ИТО/WeldTeam/админ): остальным достаточно «не удалась»."""
+    if not res:
+        return None
+    out = {k: res.get(k) for k in ('ok', 'at', 'trigger', 'relinked', 'relink_failed',
+                                   'stations_updated', 'errors_total')}
+    if _can_edit():
+        out['errors'] = res.get('errors') or []
+    return out
+
+
+@bp.route('/api/wb-issues/sync', methods=['POST'])
+def sync_now():
+    """«Синхронизировать сейчас»: то же, что при старте сервера (довязка G, станции, Сверка)."""
+    if not _can_edit():
+        return jsonify({'status': 'error', 'message': 'Запускать синхронизацию может ИТО'}), 403
+    res = run_wb_sync(current_app.config['DB_PATH'], audit=current_app.config.get('AUDIT_ENABLED', True),
+                      trigger=session.get('uname') or 'вручную')
+    current_app.config['WB_SYNC_LAST'] = res
+    (current_app.logger.info if res['ok'] else current_app.logger.warning)('Синхронизация с WB: %s', res)
+    return jsonify({'status': 'success' if res['ok'] else 'error', 'sync': _sync_view(res),
+                    'health': wb_health(get_db())})
 
 
 @bp.route('/api/wb-issues/summary')

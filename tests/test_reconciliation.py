@@ -57,3 +57,15 @@ def test_resolved_is_automatic_and_input_validated(register_client, client, app)
     assert ito.put('/api/wb-issues/99999999', json={'comment': 'x'}).status_code == 404
     # снять ответственного / очистить комментарий
     assert ito.put(f'/api/wb-issues/{iid}', json={'assignee_id': None, 'comment': ''}).status_code == 200
+
+
+def test_sync_button_rights_and_status(register_client, client):
+    assert register_client(department='ОТК').post('/api/wb-issues/sync').status_code == 403
+    ito = register_client(department='ИТО')
+    r = ito.post('/api/wb-issues/sync')
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()['sync']['ok'] is True
+    d = ito.get('/api/wb-issues').get_json()
+    assert d['sync']['trigger'] and d['health']['wb_rows'] >= 0
+    # не-ИТО видит итог, но без текстов ошибок
+    assert 'errors' not in register_client(department='Производство').get('/api/wb-issues').get_json()['sync']

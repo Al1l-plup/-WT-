@@ -43,6 +43,11 @@ def _dir_code(name):
     return _BRAND_PREFIX_RE.sub('', (name or '').strip().upper())
 
 
+def _model_key(code):
+    """Код модели без учёта регистра и пробелов: 'a01 ' и 'A01' — одна модель."""
+    return (code or '').strip().upper()
+
+
 class StationMatcher:
     """Сопоставление текста станции WB со справочником station (в рамках бренда модели).
     Справочники читаются один раз — для пакетной обработки тысяч строк."""
@@ -50,7 +55,7 @@ class StationMatcher:
     def __init__(self, db):
         self.brands = defaultdict(set)
         for code, bid in db.execute('SELECT model_code, brand_id FROM model'):
-            self.brands[code].add(bid)
+            self.brands[_model_key(code)].add(bid)
         self.stations = defaultdict(list)
         for sid, name, bid in db.execute('SELECT UniqueID, station_name, brand_id FROM station'):
             self.stations[bid].append((sid, _dir_code(name)))
@@ -60,7 +65,7 @@ class StationMatcher:
         code = wb_station_code(text)
         if code is None:
             return None
-        cands = [s for b in self.brands.get(model_code, ()) for s in self.stations[b]]
+        cands = [s for b in self.brands.get(_model_key(model_code), ()) for s in self.stations[b]]
         exact = [sid for sid, c in cands if c == code]
         if len(exact) == 1:
             return exact[0]
@@ -101,18 +106,90 @@ def relinkable_gun_rows(db):
     return out
 
 
-def sync_wb_on_start(db):
-    """Довести производные данные WB до актуального состояния (при старте приложения):
-    довязать G-номера, появившиеся в Перечне после загрузки WB; проставить станции;
-    пересобрать Сверку. Идемпотентно — на согласованных данных ничего не меняет."""
+def _step(db, name, fn, errors):
+    """Шаг синхронизации в своей точке сохранения: сбой шага откатывает только его."""
+    db.execute(f'SAVEPOINT {name}')
+    try:
+        out = fn()
+    except Exception as e:  # noqa: BLE001 — шаг не должен ронять остальные шаги
+        db.execute(f'ROLLBACK TO {name}')
+        db.execute(f'RELEASE {name}')
+        errors.append(f'{name}: {type(e).__name__}: {e}'[:300])
+        return False, None
+    db.execute(f'RELEASE {name}')
+    return True, out
+
+
+def sync_wb(db):
+    """Довести производные данные WB до актуального состояния: довязать G-номера,
+    появившиеся в Перечне после загрузки WB; проставить станции; пересобрать Сверку.
+
+    Шаги независимы (SAVEPOINT): сбой довязки одной строки не мешает остальным строкам,
+    станциям и Сверке (раньше всё откатывалось целиком — и станции оставались пустыми).
+    Идемпотентно. НЕ коммитит — транзакцией владеет вызывающий (run_wb_sync)."""
     from app.documents import resolve_weld_point_links
-    relink = relinkable_gun_rows(db)
-    if relink:
-        resolve_weld_point_links(db, relink)
-    stations = sync_wb_stations(db)
-    open_issues = rebuild_issues(db)
+    from app.equipment import sync_register
+    errors, relinked, failed = [], 0, 0
+    # Перечень (Excel цеха) → пистолеты: сначала он, чтобы новые G сразу довязались в WB
+    _, register = _step(db, 'register', lambda: sync_register(db), errors)
+    for wid in relinkable_gun_rows(db):
+        ok, _ = _step(db, 'wb_relink', lambda w=wid: resolve_weld_point_links(db, [w]), errors)
+        if ok:
+            relinked += 1
+        else:
+            failed += 1
+            errors[-1] = f'строка WB #{wid} — {errors[-1]}'
+    _, stations = _step(db, 'wb_stations', lambda: sync_wb_stations(db), errors)
+    _, open_issues = _step(db, 'wb_issues', lambda: rebuild_issues(db), errors)
+    return {'register': register, 'relinked': relinked, 'relink_failed': failed, 'stations_updated': stations,
+            'open_issues': open_issues, 'errors': errors[:10], 'errors_total': len(errors)}
+
+
+def run_wb_sync(db_path, audit=True, trigger='start'):
+    """Синхронизация WB одной транзакцией (при старте и по кнопке в «Сверке»).
+
+    Производные данные WB — не правки людей, в Журнал им не место: триггеры журнала
+    снимаются и возвращаются ВНУТРИ той же транзакции (DDL в SQLite транзакционен), а
+    BEGIN IMMEDIATE не даёт чужим правкам проскочить мимо Журнала на это время.
+    Возвращает итог для показа в «Сверке» (ok, время, числа, ошибки шагов)."""
+    import sqlite3
+
+    from app.audit import drop_audit_triggers, ensure_audit_triggers
+    con = sqlite3.connect(db_path, timeout=30, isolation_level=None)   # транзакции — вручную
+    at = datetime.now().isoformat(timespec='seconds')
+    try:
+        con.execute('BEGIN IMMEDIATE')
+        if audit:
+            drop_audit_triggers(con, commit=False)
+        res = sync_wb(con)
+        if audit:
+            ensure_audit_triggers(con, commit=False)
+        con.execute('COMMIT')
+        return {'ok': not res['errors_total'], 'at': at, 'trigger': trigger, **res}
+    except Exception as e:  # noqa: BLE001 — итог показываем, сайт не роняем
+        if con.in_transaction:
+            con.execute('ROLLBACK')
+        return {'ok': False, 'at': at, 'trigger': trigger, 'errors': [f'{type(e).__name__}: {e}'[:300]],
+                'errors_total': 1}
+    finally:
+        con.close()
+
+
+def sync_wb_on_start(db):
+    """Совместимость (тесты/скрипты): синхронизация на переданном соединении + commit."""
+    res = sync_wb(db)
     db.commit()
-    return {'relinked': len(relink), 'stations_updated': stations, 'open_issues': open_issues}
+    return res
+
+
+def wb_health(db):
+    """Живое состояние связки с WB (для «Сверки»): сколько строк WB, у скольких станция
+    распознана, у скольких текст станции есть, а станции нет."""
+    total, with_text, linked = db.execute(
+        "SELECT COUNT(*), SUM(TRIM(COALESCE(wb_station,''))<>''), SUM(station_id IS NOT NULL) "
+        'FROM weld_point').fetchone()
+    return {'wb_rows': total or 0, 'with_station_text': with_text or 0, 'station_linked': linked or 0,
+            'station_unlinked': (with_text or 0) - (linked or 0)}
 
 
 # ── SQL-фрагменты «станция пистолета по WB» (алиас пистолета в запросе — g) ───
@@ -194,6 +271,10 @@ ISSUE_KINDS = {
     'gun_multi_station':        'Пистолет в WB стоит на разных станциях',
     'gun_not_in_wb':            'Пистолет есть в Перечне, но его нет в WB',
     'defect_not_in_wb':         'Открытый дефект: станция не определяется по WB',
+    'register_station_mismatch': 'Станция пистолета по Перечню не совпадает с WB',
+    'register_no_station':      'Пистолет в Перечне: станция не определяется',
+    'register_dup_g':           'G-номер повторяется в Перечне',
+    'gun_not_in_register':      'Пистолета нет в Перечне (а на сайте он есть)',
 }
 
 
@@ -237,6 +318,8 @@ def _collect_issues(db):
     for g, n in db.execute('SELECT g_num, COUNT(*) FROM gun GROUP BY g_num HAVING COUNT(*) > 1'):
         add(f'dupg:{g}', 'dup_g_num', g_num=g, where_found='Перечень', rows_count=n)
 
+    _collect_register_issues(db, add)
+
     names = {sid: nm for sid, nm in db.execute('SELECT UniqueID, station_name FROM station')}
     for code, num, ids in db.execute("""
             SELECT model_code, TRIM(spot_number), GROUP_CONCAT(DISTINCT station_id) FROM weld_point
@@ -265,6 +348,39 @@ def _collect_issues(db):
         if defect_station(db, did) is None:
             add(f'def:{did}', 'defect_not_in_wb', defect_id=did, where_found='Дефект')
     return issues
+
+
+def _collect_register_issues(db, add):
+    """Перечень оборудования (Excel цеха) против WB и справочника пистолетов.
+    Пока Перечень пуст (ещё не вставлен) — молчим, чтобы не завалить Сверку."""
+    from app.equipment import same_station
+    reg = db.execute('SELECT el.g_num, el.gun_id, el.reg_station, el.station_id, ei.location '
+                     'FROM equipment_link el JOIN equipment_item ei ON ei.id = el.item_id '
+                     'WHERE el.g_num IS NOT NULL ORDER BY ei.row_order, ei.id').fetchall()
+    if not reg:
+        return
+    counts = defaultdict(int)
+    for row in reg:
+        counts[row[0]] += 1
+    for g, n in counts.items():
+        if n > 1:
+            add(f'regdup:{g}', 'register_dup_g', g_num=g, where_found='Перечень', rows_count=n)
+    wb_names = {gid: set(names.split(',')) for gid, names in db.execute(
+        'SELECT gun_id, station_names FROM v_wb_gun WHERE station_names IS NOT NULL')}
+    seen = set()
+    for g, gid, reg_station, reg_station_id, location in reg:
+        if g in seen:                                      # повтор G — по первой строке
+            continue
+        seen.add(g)
+        if reg_station_id is None:
+            add(f'regnost:{g}', 'register_no_station', g_num=g, gun_id=gid, where_found='Перечень',
+                details=f'«Станция» в Перечне: {location or "пусто"}')
+        elif gid in wb_names and not any(same_station(reg_station, n) for n in wb_names[gid]):
+            add(f'regst:{g}', 'register_station_mismatch', g_num=g, gun_id=gid, where_found='Перечень / WB',
+                wb_station=' / '.join(sorted(wb_names[gid])), details=f'по Перечню: {reg_station}')
+    for gid, g in db.execute('SELECT UniqueID, g_num FROM gun'):
+        if g not in counts:
+            add(f'noreg:{gid}', 'gun_not_in_register', gun_id=gid, g_num=g, where_found='ТО / дефекты')
 
 
 _ISSUE_COLS = ('kind', 'model_code', 'spot_number', 'g_num', 'gun_id', 'defect_id',

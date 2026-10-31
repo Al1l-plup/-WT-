@@ -21,7 +21,10 @@
     .rc input.cmt{min-width:160px;width:100%}
     .obj{font-variant-numeric:tabular-nums;white-space:nowrap}
     .note{background:color-mix(in srgb,var(--accent) 8%,transparent);border:1px solid var(--border);border-radius:8px;padding:.6rem .85rem;font-size:13px;line-height:1.45;margin-bottom:.9rem}
-    @media (max-width:640px){ .kchip{min-height:44px} .rc input.cmt{min-width:0} }
+    .sync{display:flex;gap:8px 14px;align-items:center;flex-wrap:wrap;font-size:13px;margin:-.3rem 0 .9rem}
+    .sync .bad{color:var(--danger)} .sync .good{color:var(--success)}
+    .sync .errs{flex-basis:100%;font-size:12px;color:var(--danger);white-space:pre-wrap}
+    @media (max-width:640px){ .kchip{min-height:44px} .rc input.cmt{min-width:0} .sync button{min-height:44px} }
   </style>
 </head>
 <body>
@@ -48,6 +51,8 @@
     «потеряшки» и противоречия. Строки появляются и закрываются <b>сами</b>, как только данные сошлись.
     Разбирает <b>ИТО</b>: статус, ответственный, комментарий. Исправлять — там, где ошибка (обычно в WB или в Перечне).
   </div>
+
+  <div class="sync" id="syncBox" role="status"></div>
 
   <div class="kinds" id="kinds"></div>
 
@@ -86,7 +91,27 @@ async function load(){
   $('tb').innerHTML = '<tr class="empty-row"><td colspan="9">Загрузка…</td></tr>';
   const r = await fetch('/api/wb-issues?status=' + encodeURIComponent($('fStatus').value));
   DATA = await r.json();
-  renderKinds(); render();
+  renderSync(); renderKinds(); render();
+}
+
+// Состояние связки с WB: сколько строк со станцией распознано + итог последней синхронизации
+function renderSync(){
+  const h = DATA.health || {}, s = DATA.sync, fmt = n => Number(n || 0).toLocaleString('ru-RU');
+  const when = s ? escapeHtml((s.at || '').replace('T', ' ').slice(0, 16)) + (s.trigger === 'start' ? ' (при запуске сервера)' : ' (' + escapeHtml(s.trigger) + ')') : '';
+  let html = `<span>Строк WB: <b>${fmt(h.wb_rows)}</b> · станция распознана: <b>${fmt(h.station_linked)}</b>` +
+    (h.station_unlinked ? ` · <span class="bad">не распознана: <b>${fmt(h.station_unlinked)}</b></span>` : '') + `</span>`;
+  html += s ? `<span>Синхронизация ${when}: ${s.ok ? '<span class="good">✓ прошла</span>'
+                : `<span class="bad">✗ с ошибками (${s.errors_total})</span>`}</span>` : '<span class="muted">синхронизация ещё не запускалась</span>';
+  if (DATA.can_edit) html += `<button class="btn btn-ghost btn-sm" id="syncBtn" title="Довязать G-номера, проставить станции из WB, пересобрать Сверку">⟳ Синхронизировать сейчас</button>`;
+  if (s && s.errors && s.errors.length) html += `<div class="errs">${s.errors.map(escapeHtml).join('\n')}</div>`;
+  $('syncBox').innerHTML = html;
+  if ($('syncBtn')) $('syncBtn').onclick = async () => {
+    $('syncBtn').disabled = true; $('syncBtn').textContent = 'Синхронизация…';
+    const r = await fetch('/api/wb-issues/sync', {method: 'POST'});
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok && !d.sync) alert(d.message || 'Не удалось запустить синхронизацию');
+    load();
+  };
 }
 
 function renderKinds(){

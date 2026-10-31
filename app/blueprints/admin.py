@@ -4,7 +4,6 @@
 Каждое изменение фиксируется в change_log (через триггеры), автор проставляется здесь.
 ВНИМАНИЕ: аутентификации пока нет — доступ открыт (журнал+откат страхуют). Auth — отдельный этап.
 """
-import re
 import uuid
 
 from flask import Blueprint, current_app, jsonify, render_template, request
@@ -22,8 +21,9 @@ from app.audit import (
 from app.data_map import ABOUT, GROUPS, about_key, site_map
 from app.db import get_db
 from app.documents import TOKEN_RE, close_removed_wb_rows, doc_list, get_documents, resolve_weld_point_links
+from app.equipment import sync_register
 from app.errors import api_error
-from app.wb_source import OPEN_ISSUE_STATUSES, open_issue_count, rebuild_issues
+from app.wb_source import OPEN_ISSUE_STATUSES, open_issue_count, rebuild_issues, relinkable_gun_rows
 
 bp = Blueprint('admin', __name__)
 
@@ -442,42 +442,6 @@ def _refresh_reconciliation(db):
         current_app.logger.warning('Не удалось пересобрать Сверку', exc_info=True)
 
 
-def _resolve_transformer(db, value):
-    """Значение ячейки «Трансформатор» → trans.UniqueID. Принимает id, вид «id · название»
-    (как в списке) и само название (transID, без учёта регистра) — в т.ч. вставку из Excel."""
-    s = str(value).strip()
-    m = re.match(r'^(\d+)(?:\s*·.*)?$', s)
-    if m and db.execute('SELECT 1 FROM trans WHERE UniqueID=?', (int(m.group(1)),)).fetchone():
-        return int(m.group(1))
-    hits = db.execute('SELECT UniqueID FROM trans WHERE UPPER(TRIM(transID)) = UPPER(?)', (s,)).fetchall()
-    if len(hits) == 1:
-        return hits[0][0]
-    raise ValueError(f'Трансформатор «{s}» не найден' if not hits else f'Трансформатор «{s}» неоднозначен')
-
-
-def sync_gun_transformer(db, gun_id, transformer_id):
-    """Трансформатор пистолета — ручная характеристика (какой трансформатор стоит у гана).
-    На станцию НЕ влияет: станция пистолета берётся только из Weld Balance (app/wb_source.py).
-    Пустое значение — снять привязку. Тот же трансформатор — ничего не меняем.
-    История сохраняется: старая привязка закрывается датой."""
-    from datetime import date as _date
-    today = _date.today().isoformat()
-    if transformer_id in (None, ''):
-        db.execute("UPDATE gun_transformer_assignment SET is_active=0, end_date=? "
-                   "WHERE gun_id=? AND is_active=1", (today, gun_id))
-        return
-    tid = _resolve_transformer(db, transformer_id)
-    active = {r[0] for r in db.execute('SELECT transformer_id FROM gun_transformer_assignment '
-                                       'WHERE gun_id=? AND is_active=1', (gun_id,))}
-    if active == {tid}:
-        return
-    db.execute("UPDATE gun_transformer_assignment SET is_active=0, end_date=? "
-               "WHERE gun_id=? AND is_active=1", (today, gun_id))
-    db.execute("INSERT INTO gun_transformer_assignment (start_date, end_date, is_active, comments, "
-               "gun_id, transformer_id) VALUES (?, NULL, 1, 'изменено в редакторе', ?, ?)",
-               (today, gun_id, tid))
-
-
 def sync_parameter_guns(db, parameter_id, value):
     """Синхронизировать привязку параметра к клещам (M:N через welding_setup) по списку G-номеров."""
     import re as _re
@@ -546,10 +510,6 @@ def _run_doc_setter(db, c, pks, value, wp_pk):
         pid = pks.get('parameters')
         if pid not in (None, ''):
             sync_parameter_guns(db, pid, value)
-    elif s == 'gun_transformer':
-        gid = pks.get('gun')
-        if gid not in (None, ''):
-            sync_gun_transformer(db, gid, value)
     elif s == 'raw_extra':
         if wp_pk not in (None, ''):
             set_raw_extra(db, wp_pk, c['raw_key'], value)
@@ -690,6 +650,12 @@ def batch_doc(doc_id):
             resolve_weld_point_links(db, set(wp_touched))
         if wp_removed:
             close_removed_wb_rows(db, wp_removed)
+        # Перечень (Excel цеха) → справочник пистолетов и их трансформаторы — тем же пакетом
+        if primary == 'equipment_item' and changes:
+            sync_register(db)
+            relink = relinkable_gun_rows(db)        # новые G из Перечня — сразу в строки WB
+            if relink:
+                resolve_weld_point_links(db, relink)
         stamp_audit(db, _author(), batch, since)
         db.commit()
         _refresh_reconciliation(db)
@@ -711,6 +677,7 @@ def batch_doc(doc_id):
 # Русские названия таблиц для журнала (остальные показываются техническим именем).
 TABLE_TITLES = {
     'weld_point': 'Weld Balance', 'weld_point_part': 'Детали точки', 'wb_material': 'Материалы',
+    'equipment_item': 'Перечень оборудования',
     'gun': 'Клещи', 'parameters': 'Параметры сварки', 'station': 'Станции', 'brand': 'Линии',
     'model': 'Модели', 'spot': 'Точки', 'trans': 'Трансформаторы', 'worker': 'Сотрудники',
     'transformer_station_assignment': 'Привязка станции', 'gun_transformer_assignment': 'Привязка клещей',
@@ -722,7 +689,12 @@ TABLE_TITLES = {
 @bp.route('/api/admin/field-labels')
 def field_labels():
     """Русские метки полей (из конфигурации документов) + названия таблиц — для журнала."""
-    labels = {}
+    # справочники, которые заполняются из Перечня (своих колонок в документах у них нет)
+    labels = {'gun': {'g_num': 'Номер (G)', 'gun_type': 'Тип клещей'},
+              'trans': {'transID': 'Трансформатор', 'type': 'Тип (AC/DC)'},
+              'gun_transformer_assignment': {'transformer_id': 'Трансформатор', 'gun_id': 'Пистолет',
+                                             'is_active': 'Активна', 'start_date': 'С', 'end_date': 'По',
+                                             'comments': 'Комментарий'}}
     for cfg in get_documents(get_db()).values():
         for c in cfg['columns']:
             if c.get('table') and c.get('col'):

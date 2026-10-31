@@ -68,7 +68,7 @@ def test_data_map_endpoint_counts_and_tabs(client, register_client):
     # вкладки WB сведены в один пункт «Weld Balance» и идут первыми (эталон)
     first = tabs['/defects']['items'][0]
     assert first['doc_title'] == 'Weld Balance' and all(x['doc'].startswith('weld_balance_') for x in first['docs'])
-    assert d['docs']['equipment']['rows'] >= 1
+    assert d['docs']['equipment']['rows'] >= 0 and d['docs']['parameters']['rows'] >= 1
     assert d['docs']['equipment']['issues_link'].startswith('/reconciliation?kinds=')
     # «Карта данных» — для всех отделов (раздел Редактора на чтение)
     assert register_client(department='ОТК').get('/api/admin/data-map').status_code == 200
@@ -77,5 +77,5 @@ def test_data_map_endpoint_counts_and_tabs(client, register_client):
 def test_columns_carry_origin(client):
     cols = {c['label']: c for c in client.get('/api/admin/doc/equipment?limit=1').get_json()['columns']}
     assert cols['Станция (по WB)']['origin'] == 'wb'
-    assert cols['Линия']['origin'] == 'wb'
-    assert cols['Номер (G)']['origin'] is None            # вводится вручную
+    assert cols['Станция (по Перечню)']['origin'] == 'auto'
+    assert cols['ID']['origin'] is None                   # вводится вручную (как в Excel)

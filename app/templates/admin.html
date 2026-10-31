@@ -72,6 +72,8 @@
     .primary{background:var(--accent);color:#fff;border:none!important}
     .badge{font-size:12px;opacity:.75}
     .grid{max-height:56vh;overflow:auto;border:1px solid var(--border);border-radius:8px;outline:none}
+    #sheet{min-height:140px}   /* пустой документ: есть куда кликнуть перед Ctrl+V */
+    #sheet:focus{border-color:var(--accent)}
     table.sheet{border-collapse:separate;border-spacing:0;font-size:12px;table-layout:fixed;min-width:100%}
     table.sheet th,table.sheet td{border-right:1px solid var(--border);border-bottom:1px solid var(--border);padding:3px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     table.sheet thead th{position:sticky;top:0;z-index:2;background:var(--card);cursor:pointer;user-select:none}
@@ -288,13 +290,18 @@
         описывает другая строка WB — связка остаётся, пока жива хоть одна такая строка.</li>
   </ul>
 
-  <h3>Пистолет и его станция</h3>
+  <h3>Перечень оборудования — как Excel цеха</h3>
   <ul>
-    <li>Станция пистолета = станция его строк в Weld Balance. Чтобы «перенести» пистолет — поправьте
-        «Станция» в WB. В «Перечне оборудования» колонки «Станция (по WB)» и «Линия» только для чтения.</li>
-    <li><b>«Трансформатор»</b> в Перечне — ручная пометка (какой трансформатор стоит у пистолета).
-        На станцию он <b>не влияет</b>.</li>
-    <li>«⚠ нет в WB» — пистолет есть в Перечне, но ни одной строки WB с ним нет (он в «Сверке»).</li>
+    <li>Колонки те же, что в файле «Перечень оборудования»: ID, Наименование, Тип, Замечание, Бренд, Участок,
+        Станция, Подразделение, Категория. В Excel выделите строки от «ID» до «Категория», в Перечне кликните
+        первую ячейку «ID» нужной строки (для пустого Перечня — первую) и нажмите <kbd>Ctrl+V</kbd>:
+        недостающие строки добавятся сами. Затем <b>«Сохранить»</b>.</li>
+    <li>Пистолеты сайт берёт из строк с ID вида <b>G.001</b>: номер, «Тип» = тип клещей, «Станция» = ID
+        трансформатора (или робота) пистолета.</li>
+    <li>В конце — колонки только для чтения: <b>«Станция (по Перечню)»</b> (пистолет → трансформатор → станция),
+        <b>«Станция (по WB)»</b> и <b>«Сходится с WB»</b>. Дефекты и ТО работают по WB; если станции разные —
+        строка в «Сверке», ИТО разбирается, где ошибка: в Перечне или в WB.</li>
+    <li>Пистолет, которого нет в Перечне, с сайта не удаляется (на нём история ТО и дефектов) — он в «Сверке».</li>
   </ul>
 
   <h3>Горячие клавиши (кратко)</h3>
@@ -499,6 +506,9 @@ async function loadDoc(){
   wireSheet(sheet);
   $('#title').textContent=d.title;
   lastCols=d.columns; renderBanner(cur, lastCols);
+  // пустой документ: куда кликнуть, чтобы вставить лист из Excel
+  if(d.total===0 && !$('#q').value)
+    $('#saveNote').textContent = 'Документ пуст: в Excel выделите строки (от первой колонки), кликните по пустому полю таблицы ниже и нажмите Ctrl+V — строки добавятся сами';
   pageBar(d);
   // под-таблица деталей
   if(childCfg){ $('#childWrap').style.display='block'; $('#childTitle').textContent=childCfg.title; childPointId=null; childSheet=null; $('#childSheet').innerHTML=''; $('#childHint').textContent='Выберите точку выше'; }

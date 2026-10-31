@@ -54,10 +54,12 @@ def test_wb_save_sets_station_and_gun_station_comes_from_wb(client, app):
     db = _db(app)
     assert db.execute("SELECT station_id FROM weld_point WHERE spot_number='93001'").fetchone()[0] == sid
     assert db.execute('SELECT station_id FROM v_wb_gun WHERE gun_id=?', (gid,)).fetchone()[0] == sid
-    # Перечень показывает станцию из WB, трансформатор на неё не влияет
+    # Перечень показывает рядом станцию из WB (на дефекты и ТО влияет только она)
+    client.post('/api/admin/doc/equipment/batch', json={'changes': [{'op': 'insert', 'values': {
+        'item_code': 'G.93001', 'name': 'AC пистолет', 'item_type': 'X', 'location': 'НЕ ВАЖНО'}}]})
     row = next(r for r in client.get('/api/admin/doc/equipment?limit=100000').get_json()['rows']
-               if r['__pk_gun'] == gid)
-    assert row['station_name'] == name
+               if r['item_code'] == 'G.93001')
+    assert row['wb_station_name'] == name
     # выбор пистолетов по станции при вводе ТО — по WB
     assert any(g['UniqueID'] == gid for g in client.get(f'/api/guns/{sid}').get_json())
     assert not any(g['UniqueID'] == gid for g in client.get('/api/guns/0').get_json())   # не «потеряшка»
@@ -144,3 +146,49 @@ def test_lost_guns_pseudo_station_for_maintenance(client, app):
     assert stations[-1]['UniqueID'] == 0 and 'не из WB' in stations[-1]['station_name']
     assert all(s['UniqueID'] != 0 for s in client.get('/api/stations/1').get_json())   # без флага — нет
     assert any(g['UniqueID'] == gid for g in client.get('/api/guns/0').get_json())
+
+
+def test_matcher_ignores_model_code_case_and_spaces(app):
+    (sid, _n, code), = _chery_stations(app, 1)
+    assert StationMatcher(_db(app)).match(' a13t ', code) == sid
+
+
+def test_sync_step_failure_does_not_block_stations(client, app, monkeypatch):
+    """Раньше сбой довязки G откатывал ВСЮ синхронизацию — станции оставались пустыми."""
+    import app.documents as documents
+    from app.wb_source import sync_wb
+    (sid, _n, code), = _chery_stations(app, 1)
+    _wb_row(client, 93011, 93011, code)              # G.93011 нет в Перечне → строка ждёт довязки
+    _gun(client, 93011)
+    db = _db(app)
+    db.execute("UPDATE weld_point SET station_id=NULL WHERE spot_number='93011'")
+    db.commit()
+
+    def boom(_db, _ids):
+        raise RuntimeError('сбой довязки')
+    monkeypatch.setattr(documents, 'resolve_weld_point_links', boom)
+    res = sync_wb(db)
+    db.commit()
+    assert res['relink_failed'] >= 1 and 'сбой довязки' in res['errors'][0]
+    assert db.execute("SELECT station_id FROM weld_point WHERE spot_number='93011'").fetchone()[0] == sid
+    assert res['open_issues'] is not None             # Сверка тоже пересобрана
+
+
+def test_run_wb_sync_keeps_journal_clean_and_triggers_back(client, app):
+    from app.wb_source import run_wb_sync
+    (sid, _n, code), = _chery_stations(app, 1)
+    _wb_row(client, 93012, 93012, code)
+    db = _db(app)
+
+    def trig():
+        return db.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name LIKE 'audit_%'").fetchone()[0]
+    n_trig = trig()
+    db.execute("UPDATE weld_point SET station_id=NULL WHERE spot_number='93012'")
+    db.commit()
+    log_before = db.execute('SELECT MAX(id) FROM change_log').fetchone()[0]
+    res = run_wb_sync(app.config['DB_PATH'], audit=True, trigger='test')
+    assert res['ok'] and res['stations_updated'] >= 1, res
+    db = _db(app)
+    assert db.execute("SELECT station_id FROM weld_point WHERE spot_number='93012'").fetchone()[0] == sid
+    assert db.execute('SELECT MAX(id) FROM change_log').fetchone()[0] == log_before   # производное — не в Журнал
+    assert trig() == n_trig                                                            # триггеры журнала на месте

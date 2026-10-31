@@ -20,37 +20,6 @@ def test_docs_list(client):
         assert t in titles  # 4 вкладки WB из wb_tab
 
 
-def test_equipment_linked_edit(client, app):
-    eq = client.get('/api/admin/doc/equipment?limit=50').get_json()
-    # «Трансформатор» — ручная характеристика (редактируемая); «Станция (по WB)» — только
-    # из Weld Balance, read-only. В тестовой БД WB пуст → явно «⚠ нет в WB».
-    assert any(c['label'] == 'Трансформатор' and c['editable'] and c['fk'] == 'trans' for c in eq['columns'])
-    assert any(c['label'] == 'Станция (по WB)' and not c['editable'] for c in eq['columns'])
-    row = next(r for r in eq['rows'] if r['transformer_id'])
-    gun, old_trans = row['__pk_gun'], row['transformer_id']
-    assert row['station_name'] == '⚠ нет в WB'
-    db = sqlite3.connect(app.config['DB_PATH'])
-    new_trans = db.execute('SELECT UniqueID FROM trans WHERE UniqueID!=? LIMIT 1', (old_trans,)).fetchone()[0]
-    res = client.post('/api/admin/doc/equipment/batch', json={'changes': [
-        {'op': 'update', 'field': 'transformer_id', 'value': new_trans, 'row_pks': {'gun': gun}},
-        {'op': 'update', 'field': 'gun_type', 'value': 'DOCT', 'row_pks': {'gun': gun}},
-    ]}).get_json()
-    assert res['status'] == 'success'
-    bid = res['batch_id']
-
-    # обе правки — под одним пакетом, в двух РАЗНЫХ таблицах (связанное редактирование)
-    hist = client.get('/api/admin/history').get_json()['entries']
-    tables = {e['table_name'] for e in hist if e['batch_id'] == bid}
-    assert tables == {'gun', 'gun_transformer_assignment'}
-
-    assert db.execute("SELECT transformer_id FROM gun_transformer_assignment WHERE gun_id=? AND is_active=1",
-                      (gun,)).fetchone()[0] == new_trans
-    assert db.execute("SELECT gun_type FROM gun WHERE UniqueID=?", (gun,)).fetchone()[0] == 'DOCT'
-    # смена трансформатора НЕ меняет станцию — она только из WB
-    after = next(r for r in client.get('/api/admin/doc/equipment?limit=50').get_json()['rows'] if r['__pk_gun'] == gun)
-    assert after['station_name'] == '⚠ нет в WB'
-
-
 def test_parameters_doc_edit(client, app):
     d = client.get('/api/admin/doc/parameters?limit=3').get_json()
     labels = [c['label'] for c in d['columns']]

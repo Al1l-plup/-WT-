@@ -13,7 +13,8 @@ import sqlite3
 # notification_outbox — служебная очередь уведомлений (высокая оборачиваемость:
 # постоянные insert/update/delete), аудит раздул бы change_log; не редактируется руками.
 AUDIT_EXCLUDE = {'change_log', 'restore_point', 'alembic_version', 'sqlite_sequence', 'notification_outbox',
-                 'wb_issue'}   # Сверка пересобирается автоматически — аудит раздул бы журнал
+                 'wb_issue',          # Сверка пересобирается автоматически — аудит раздул бы журнал
+                 'equipment_link'}    # производные связи Перечня — пересобираются после сохранения
 
 
 def _q(ident: str) -> str:
@@ -56,25 +57,28 @@ def _triggers_for(table: str, pk: str, cols: list[str]) -> list[str]:
     ]
 
 
-def drop_audit_triggers(db: sqlite3.Connection) -> None:
-    """Снять все триггеры аудита (для bulk-загрузок, чтобы не засорять журнал)."""
+def drop_audit_triggers(db: sqlite3.Connection, commit: bool = True) -> None:
+    """Снять все триггеры аудита (для bulk-загрузок, чтобы не засорять журнал).
+    commit=False — внутри транзакции вызывающего (см. wb_source.run_wb_sync)."""
     names = [r[0] for r in db.execute(
         "SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'audit\\_%' ESCAPE '\\'")]
     for n in names:
         db.execute(f'DROP TRIGGER IF EXISTS {_q(n)}')
-    db.commit()
+    if commit:
+        db.commit()
 
 
-def ensure_audit_triggers(db: sqlite3.Connection) -> None:
+def ensure_audit_triggers(db: sqlite3.Connection, commit: bool = True) -> None:
     """Пересоздать триггеры аудита по текущей схеме (идемпотентно)."""
-    drop_audit_triggers(db)
+    drop_audit_triggers(db, commit=False)
     for t in editable_tables(db):
         pk, cols = table_meta(db, t)
         if not pk:
             continue
         for stmt in _triggers_for(t, pk, cols):
             db.execute(stmt)
-    db.commit()
+    if commit:
+        db.commit()
 
 
 # ── журнал/откат ────────────────────────────────────────────────────────────

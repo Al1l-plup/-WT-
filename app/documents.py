@@ -16,7 +16,7 @@
 import re
 
 from app.data_map import about
-from app.wb_source import GUN_WB_BRAND_ID, GUN_WB_JOIN, GUN_WB_STATION_NAME
+from app.wb_source import GUN_WB_JOIN, GUN_WB_STATION_NAME
 
 # ── колонки Weld Balance = ТОЧНОЕ зеркало листа «Welds» Excel (колонка-в-колонку,
 #    col0..col52), чтобы Ctrl+V из Excel вставлялся 1:1 без сдвига столбцов. Детали
@@ -167,31 +167,53 @@ def _wb_doc(title, where, manual_src, model_code=None):
 
 
 # ── статические документы ──
+def _ei(label, col, **extra):
+    """Колонка Перечня оборудования — ровно как в Excel-файле цеха (вставка 1:1)."""
+    return {'label': label, 'field': col, 'expr': f'e.{col}', 'edit': True,
+            'table': 'equipment_item', 'col': col, **extra}
+
+
 _EQUIPMENT_DOC = {
     'title': 'Перечень оборудования',
-    # Станция пистолета — ТОЛЬКО из Weld Balance (v_wb_gun, app/wb_source.py).
-    # Трансформатор — ручная характеристика пистолета, на станцию НЕ влияет.
-    'base': 'FROM gun g' + GUN_WB_JOIN + f'\n        LEFT JOIN brand b ON b.UniqueID = {GUN_WB_BRAND_ID}',
-    'pks': {'gun': 'g.UniqueID'},
-    'primary': 'gun',
-    'order': 'g.g_num',
+    # Перечень = Excel-файл цеха 1:1 (app/equipment.py): первые 9 колонок — как в файле,
+    # вставка Ctrl+V. Пистолеты (ID G.xxx) и их трансформаторы сайт берёт отсюда.
+    # Станция пистолета для дефектов и ТО — только из WB; «по Перечню» — справочно,
+    # расхождение — в Сверке.
+    'base': """FROM equipment_item e
+        LEFT JOIN equipment_link el ON el.item_id = e.id
+        LEFT JOIN gun g ON g.UniqueID = el.gun_id""" + GUN_WB_JOIN,
+    'pks': {'equipment_item': 'e.id'},
+    'primary': 'equipment_item',
+    'order': 'e.row_order, e.id',
     'columns': [
-        {'label': 'Номер (G)', 'field': 'g_num', 'expr': 'g.g_num', 'edit': True, 'table': 'gun', 'col': 'g_num',
-         'hint': 'Уникальный номер клещей. Дубликаты запрещены.'},
-        {'label': 'Тип клещей', 'field': 'gun_type', 'expr': 'g.gun_type', 'edit': True, 'table': 'gun', 'col': 'gun_type'},
-        # Трансформатор — ручная характеристика пистолета (последняя активная привязка).
-        {'label': 'Трансформатор', 'field': 'transformer_id',
-         'expr': '(SELECT gta.transformer_id FROM gun_transformer_assignment gta '
-                 'WHERE gta.gun_id = g.UniqueID AND gta.is_active = 1 ORDER BY gta.UniqueID DESC LIMIT 1)',
-         'edit': True, 'fk': 'trans', 'setter': 'gun_transformer',
-         'hint': 'Какой трансформатор стоит у этого пистолета (ручное поле). На станцию не влияет — '
-                 'станция берётся из Weld Balance. Начните печатать номер/название трансформатора; '
-                 'очистите ячейку, чтобы снять привязку.'},
-        {'label': 'Станция (по WB)', 'field': 'station_name', 'edit': False, 'expr': GUN_WB_STATION_NAME, 'origin': 'wb',
-         'hint': 'Только из Weld Balance. «⚠ нет в WB» и «⚠ несколько станций» — в «Сверке» '
-                 '(запрос ИТО): правится в WB, не здесь.'},
-        {'label': 'Линия', 'field': 'brand', 'expr': "COALESCE(b.brand,'—')", 'edit': False, 'origin': 'wb',
-         'hint': 'Линия (бренд) станции из Weld Balance.'},
+        _ei('ID', 'item_code', hint='Как в Excel. Пистолет — G.001 (номер G), трансформатор — CH-EC2-10-T1 и т.п.'),
+        _ei('Наименование', 'name'),
+        _ei('Тип', 'item_type', hint='Для пистолета — тип клещей (UCH-C12071 и т.п.).'),
+        _ei('Замечание', 'note'),
+        _ei('Бренд', 'brand'),
+        _ei('Участок', 'area'),
+        _ei('Станция', 'location', hint='Как в Excel: у пистолета — ID его трансформатора (или робота), '
+                                         'у трансформатора — станция.'),
+        _ei('Подразделение', 'dept'),
+        _ei('Категория', 'category'),
+        # порядок строк как в листе Excel (скрыт; вставка/перемещение строк меняют его)
+        {'label': '#', 'field': 'row_order', 'expr': 'e.row_order', 'edit': True,
+         'table': 'equipment_item', 'col': 'row_order', 'hidden': True},
+        {'label': 'Станция (по Перечню)', 'field': 'reg_station', 'expr': "COALESCE(el.reg_station, '')",
+         'edit': False, 'origin': 'auto',
+         'hint': 'Считается сама по этому же Перечню: пистолет → его трансформатор (или робот) → станция.'},
+        {'label': 'Станция (по WB)', 'field': 'wb_station_name', 'edit': False, 'origin': 'wb',
+         'expr': f"CASE WHEN el.gun_id IS NULL THEN '' ELSE {GUN_WB_STATION_NAME} END",
+         'hint': 'Для пистолета — станция из Weld Balance (по ней работают дефекты и ТО).'},
+        {'label': 'Сходится с WB', 'field': 'wb_match', 'edit': False, 'origin': 'auto',
+         'expr': "CASE WHEN el.gun_id IS NULL THEN '' "
+                 "WHEN vg.gun_id IS NULL THEN '⚠ нет в WB' "
+                 "WHEN el.station_id IS NULL THEN '⚠ станция не определена' "
+                 # 'GW-INR+WH L-10' = 'GW-INR L-10' — то же правило, что equipment.same_station
+                 "WHEN instr(',' || REPLACE(UPPER(vg.station_names), '+WH', '') || ',', "
+                 "',' || REPLACE(UPPER(el.reg_station), '+WH', '') || ',') > 0 THEN '✓' "
+                 "ELSE '⚠ другая станция' END",
+         'hint': 'Сравнение станции по Перечню и по WB. Расхождения — в «Сверке» (разбирает ИТО).'},
     ],
 }
 
