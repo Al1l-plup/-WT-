@@ -17,10 +17,10 @@ v_wb_gun — чтение станции из одного места.
 Всё здесь работает молча: вставке WB из Excel ничего не мешает, проблемы копятся
 в Сверке.
 """
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 from datetime import datetime
 
-from app.normalize import code_key, g_number, spot_key, station_key
+from app.normalize import clean, code_key, g_number, spot_key, station_key
 
 # Контактная сварка — у неё обязан быть пистолет G. CO2/шпилька/автосварка — без G.
 SPOT_WELDING_TYPES = ('PSW', 'RSW')
@@ -349,6 +349,37 @@ ISSUE_KINDS = {
     'gun_not_in_register':      'Пистолета нет в Перечне (а на сайте он есть)',
 }
 
+# Что не так и что сделать — пояснение типа на странице «Сверка», в терминах того, что
+# человек видит сам: колонки WB, строки Перечня, дефекты.
+ISSUE_HELP = {
+    'station_not_in_directory': 'В колонке «Станция» WB стоит станция, которой нет в справочнике станций '
+                                '(или она записана иначе). Опечатка — исправьте в WB; станция новая — '
+                                'её добавляет в справочник WeldTeam.',
+    'wb_no_station':            'В строке WB пустая колонка «Станция». Впишите станцию в WB.',
+    'g_not_in_directory':       'В колонке «Клещи (G)» WB стоит G-номер, которого нет в Перечне. Опечатка — '
+                                'исправьте в WB; пистолет реальный — добавьте строку G.xxx в Перечень.',
+    'wb_spot_no_gun':           'Точка контактной сварки в WB без пистолета: «Клещи (G)» пустая или там не '
+                                'G-номер. Впишите G.xxx в WB.',
+    'dup_g_num':                'В справочнике пистолетов несколько карточек с одним G-номером. Проверьте '
+                                'строки этого G в Перечне — ID G.xxx должен быть у одного пистолета.',
+    'point_two_stations':       'Одна и та же точка записана в WB на разных станциях. Оставьте верную станцию '
+                                'в WB; если точка и правда варится на двух — «Принято как есть».',
+    'gun_multi_station':        'Один пистолет стоит в WB на нескольких станциях. Исправьте станцию или G в WB; '
+                                'если пистолет и правда работает на нескольких — «Принято как есть».',
+    'gun_not_in_wb':            'Пистолет есть в Перечне, но ни одна точка WB его не использует. Резерв или '
+                                'списан — «Принято как есть»; работает — проверьте его G-номер в WB.',
+    'defect_not_in_wb':         'У открытого дефекта не определилась станция: такой точки нет в WB или у неё '
+                                'нет станции. Проверьте номер точки в дефекте или строку точки в WB.',
+    'register_station_mismatch': 'Станция пистолета по Перечню (через его трансформатор) не совпадает со '
+                                 'станцией в WB. Выясните, где пистолет на самом деле, и исправьте Перечень или WB.',
+    'register_no_station':      'В Перечне у пистолета не определяется станция: в колонке «Станция» нет '
+                                'трансформатора или станции, по которым её найти. Заполните «Станцию» в Перечне.',
+    'register_dup_g':           'Один G-номер записан в Перечне несколько раз. Удалите лишнюю строку или '
+                                'исправьте ID.',
+    'gun_not_in_register':      'Пистолет есть на сайте (в WB, ТО или дефектах), но его нет в Перечне. '
+                                'Добавьте строку G.xxx в Перечень оборудования.',
+}
+
 
 def _collect_issues(db):
     """Текущие проблемы данных: {issue_key: dict(колонок wb_issue)}."""
@@ -512,3 +543,120 @@ def rebuild_issues(db):
     for iid in gone:
         db.execute("UPDATE wb_issue SET status='resolved', resolved_at=? WHERE id=?", (now, iid))
     return open_issue_count(db)
+
+
+# ── Сверка → Редактор: строки документов, где проблему исправляют ─────────────
+_WbRow = namedtuple('_WbRow', 'source_file model_key station_key g_num gun_id')
+_REGISTER_KINDS = ('dup_g_num', 'gun_not_in_wb', 'register_no_station', 'register_dup_g',
+                   'register_station_mismatch')
+
+
+class IssueRows:
+    """По строке Сверки — строки документов Редактора, где её исправляют (ссылка
+    «↗ в Редактор» показывает ровно их), и место для группировки на странице
+    («A01 · MB-230», «Перечень · GWM · MB»). Сопоставление — по рабочим ключам
+    (app/normalize.py), как и сама Сверка. Индексы строятся один раз на запрос."""
+
+    def __init__(self, db):
+        self.wb = {}
+        self.by_point, self.by_g, self.by_gun, self.by_station = (defaultdict(list) for _ in range(4))
+        for wid, src, gun_id, station_id, mk, sk, g, stk in db.execute(
+                'SELECT w.id, w.source_file, w.gun_id, w.station_id, k.model_key, k.spot_key, k.g_num, '
+                'k.station_key FROM weld_point w LEFT JOIN weld_point_key k ON k.weld_point_id = w.id'):
+            self.wb[wid] = _WbRow((src or '').lower(), mk, stk, g, gun_id)
+            self.by_point[(mk, sk)].append(wid)
+            if g is not None:
+                self.by_g[g].append(wid)
+            if gun_id is not None:
+                self.by_gun[gun_id].append(wid)
+            if station_id is None:
+                self.by_station[(mk, stk)].append(wid)
+        self.reg, self.by_reg_g = {}, defaultdict(list)
+        for item_id, g, brand, area in db.execute(
+                'SELECT el.item_id, el.g_num, ei.brand, ei.area FROM equipment_link el '
+                'JOIN equipment_item ei ON ei.id = el.item_id WHERE el.g_num IS NOT NULL ORDER BY ei.row_order, ei.id'):
+            self.reg[item_id] = (clean(brand), clean(area))
+            self.by_reg_g[g].append(item_id)
+        self.tabs = [(f'weld_balance_{tid}', title, (token or '').lower()) for tid, title, token in db.execute(
+            'SELECT id, title, match_token FROM wb_tab ORDER BY position, id')]
+        self.defect_model = dict(db.execute(
+            'SELECT d.UniqueID, COALESCE(d.snap_model_name, mo.model_name) FROM defects d '
+            'LEFT JOIN spot s ON s.UniqueID = d.spot_id '
+            'LEFT JOIN model mo ON mo.UniqueID = COALESCE(s.model_id, d.manual_model_id)'))
+
+    def rows(self, it):
+        """{'weld_point' | 'equipment_item' | 'defects': [id, …]} — строки этой проблемы."""
+        kind, wb = it['kind'], []
+        point = (code_key(it.get('model_code')), spot_key(it.get('spot_number')))
+        if kind == 'station_not_in_directory':            # в Сверке уже ключи: модель, станция
+            wb = self.by_station.get((it.get('model_code'), it.get('wb_station')), [])
+        elif kind == 'wb_no_station':
+            wb = [w for w in self.by_point.get(point, []) if self.wb[w].station_key is None]
+        elif kind == 'wb_spot_no_gun':
+            wb = [w for w in self.by_point.get(point, []) if self.wb[w].g_num is None]
+        elif kind == 'point_two_stations':
+            wb = self.by_point.get(point, [])
+        elif kind == 'g_not_in_directory':
+            wb = [w for w in self.by_g.get(it.get('g_num'), []) if self.wb[w].gun_id is None]
+        elif kind in ('gun_multi_station', 'gun_not_in_register', 'register_station_mismatch'):
+            wb = self.by_gun.get(it.get('gun_id'), [])
+        reg = self.by_reg_g.get(it.get('g_num'), []) if kind in _REGISTER_KINDS else []
+        defects = [it['defect_id']] if kind == 'defect_not_in_wb' and it.get('defect_id') else []
+        return {'weld_point': list(wb), 'equipment_item': list(reg), 'defects': defects}
+
+    def _tab(self, wid):
+        src = self.wb[wid].source_file
+        return next(((doc, title) for doc, title, token in self.tabs if token and token in src), None)
+
+    def targets(self, rows):
+        """Документы Редактора со строками проблемы: [{'doc', 'title', 'n'}], больше строк — раньше."""
+        wb = defaultdict(int)
+        titles = {}
+        for wid in rows['weld_point']:
+            tab = self._tab(wid)
+            if tab:
+                wb[tab[0]] += 1
+                titles[tab[0]] = tab[1]
+        out = [{'doc': d, 'title': titles[d], 'n': n} for d, n in sorted(wb.items(), key=lambda x: -x[1])]
+        if rows['equipment_item']:
+            out.append({'doc': 'equipment', 'title': 'Перечень оборудования', 'n': len(rows['equipment_item'])})
+        if rows['defects']:
+            out.append({'doc': 'defects', 'title': 'Дефекты', 'n': len(rows['defects'])})
+        return out
+
+    def cluster(self, it, rows):
+        """Где проблема — для группировки: модель и станция WB, бренд и участок Перечня, модель дефекта."""
+        kind = it['kind']
+        if kind == 'defect_not_in_wb':
+            return 'Дефекты · ' + (self.defect_model.get(it.get('defect_id')) or 'модель не указана')
+        if kind in _REGISTER_KINDS:
+            if not rows['equipment_item']:
+                return 'Справочник пистолетов · в Перечне строки нет'
+            brand, area = self.reg[rows['equipment_item'][0]]
+            return ' · '.join(['Перечень', brand or 'бренд не указан'] + ([area] if area else []))
+        wb = [self.wb[w] for w in rows['weld_point']]
+        models = sorted({r.model_key for r in wb if r.model_key}) or (
+            [code_key(it.get('model_code'))] if it.get('model_code') else [])
+        if not models:
+            return 'в WB не используется'
+        place = ', '.join(models)
+        if kind in ('wb_spot_no_gun', 'g_not_in_directory'):
+            stations = sorted({r.station_key for r in wb if r.station_key})
+            if len(stations) == 1:
+                place += ' · ' + stations[0]
+        return place
+
+
+def issue_doc_ids(db, issue_ids, table):
+    """id строк таблицы table (weld_point / equipment_item / defects), относящихся к этим
+    строкам Сверки, — фильтр документа Редактора по ссылке из Сверки."""
+    ids = list(issue_ids)
+    if not ids:
+        return set()
+    index, out = IssueRows(db), set()
+    rows = db.execute('SELECT id, kind, model_code, spot_number, g_num, gun_id, defect_id, wb_station '
+                      f"FROM wb_issue WHERE id IN ({','.join('?' * len(ids))})", ids).fetchall()
+    cols = ('id', 'kind', 'model_code', 'spot_number', 'g_num', 'gun_id', 'defect_id', 'wb_station')
+    for r in rows:
+        out.update(index.rows(dict(zip(cols, r))).get(table, []))
+    return out

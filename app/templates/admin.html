@@ -39,6 +39,11 @@
     table.sheet th.o-wb{box-shadow:inset 0 -3px 0 #8b6fd6}
     table.sheet th.o-auto{box-shadow:inset 0 -3px 0 color-mix(in srgb,var(--muted) 70%,transparent)}
     #saveNote{font-size:12px;color:var(--warn)}
+    /* открыто по ссылке из «Сверки»: показаны только проблемные строки */
+    .ifchip{display:none;align-items:center;gap:8px;flex-wrap:wrap;border:1px solid var(--warn);border-radius:8px;padding:5px 10px;margin-bottom:8px;font-size:13px}
+    .ifchip.on{display:flex}
+    .ifchip a{color:var(--accent)}
+    .ifchip button{margin-left:auto}
     /* «Карта данных»: вкладка сайта ← откуда берёт */
     .mapnote{font-size:13px;line-height:1.5;margin:0 0 12px;color:var(--muted)}
     .mgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
@@ -157,6 +162,7 @@
     <div class="side" id="tables" style="display:none"></div>
     <div class="main">
       <div id="docBanner"></div>
+      <div class="ifchip" id="ifChip" role="status"></div>
       <div class="bar">
         <strong id="title"></strong>
         <input id="q" placeholder="поиск…" style="flex:1;min-width:120px">
@@ -343,6 +349,11 @@ const hdr = () => ({'Content-Type':'application/json'});
 const jget = async u => { const r = await fetch(u); if(!r.ok) throw new Error(`${u} → HTTP ${r.status}`); return r.json(); };
 
 let mode='doc', cur=null, primary=null, childCfg=null, childPointId=null;
+// ссылка из «Сверки»: /admin?doc=<документ>&issues=1,2,3&t=<что за проблема> — показать только
+// строки, где эти проблемы исправляют (фильтр на сервере, ?issues=). Другой документ — фильтр снят.
+const URLP = new URLSearchParams(location.search);
+const URL_DOC = URLP.get('doc');
+let IFILTER = URL_DOC && URLP.get('issues') !== null ? {ids: URLP.get('issues'), title: URLP.get('t') || 'проблемы Сверки'} : null;
 // грузим таблицу целиком (не выборку) — фильтр/выпадающий список работают по всем строкам
 let sheet=null, childSheet=null, page=0, pageSize=100000, sort='', dir='asc', fkCache={};
 
@@ -403,7 +414,7 @@ async function init(openId){
     });
     // открываем то, на чём остановились (первый вход — «Карта данных»)
     const want = openId || lsGet('wt-editor-view');
-    if(want && DOCS.some(d=>d.id===want)) openDoc(want); else showMap();
+    if(want && DOCS.some(d=>d.id===want)) openDoc(want, null, want===URL_DOC); else showMap();
   } catch(e){
     $('#tabs').innerHTML = `<div style="color:var(--danger,#c0392b);padding:8px 0">Не удалось загрузить редактор (${escapeHtml(e.message)}).<br>Обновите страницу; если не помогло — перезапустите сервер (обновилась версия кода).</div>`;
   }
@@ -414,6 +425,7 @@ function showArea(which){
   $('#editorArea').style.display = which==='map' ? 'none' : '';
 }
 function showMap(){
+  dropIssueFilter();
   mode='map'; cur=null; sheet=null; childSheet=null; lsSet('wt-editor-view','map');
   markTab([...$('#tabs').querySelectorAll('.tab')].find(t=>t.dataset.map));
   showArea('map'); renderMap();
@@ -485,29 +497,45 @@ async function deleteTab(tabId){
 function markTab(el){ $('#tabs').querySelectorAll('.tab').forEach(x=>x.classList.remove('on')); if(el) el.classList.add('on'); }
 
 // ── документы ──────────────────────────────────────────────────────────────
-async function openDoc(id, el){
+async function openDoc(id, el, keepFilter=false){
+  if(!keepFilter) dropIssueFilter();
   mode='doc'; cur=id; page=0; sort=''; $('#q').value=''; $('#tables').style.display='none';
   markTab(el||[...$('#tabs').querySelectorAll('.tab')].find(t=>t.dataset.doc===id));
   lsSet('wt-editor-view', id); showArea('doc'); $('#saveNote').textContent='';
   await loadDoc();
 }
+function dropIssueFilter(){
+  if(!IFILTER) return;
+  IFILTER=null; renderIssueChip(0);
+  history.replaceState(null, '', location.pathname);
+}
+function renderIssueChip(total){
+  const el=$('#ifChip'); el.classList.toggle('on', !!IFILTER);
+  if(!IFILTER){ el.innerHTML=''; return; }
+  el.innerHTML = `<span>Из <a href="/reconciliation">«Сверки»</a>: <b>${escapeHtml(IFILTER.title)}</b> — `+
+    (total ? `показаны только эти строки: ${total}` : 'проблемных строк уже нет — похоже, исправлено')+`</span>`+
+    `<button type="button" class="btn-sm" id="ifClr">✕ Показать весь документ</button>`;
+  $('#ifClr').onclick=()=>{ if(guard()){ dropIssueFilter(); page=0; loadDoc(); } };
+}
 async function loadDoc(){
   const q=encodeURIComponent($('#q').value.trim());
   const s=sort?`&sort=${sort}&dir=${dir}`:'';
-  const d = await jget(`/api/admin/doc/${cur}?limit=${pageSize}&offset=${page*pageSize}&q=${q}${s}`);
+  const f=IFILTER?`&issues=${encodeURIComponent(IFILTER.ids)}`:'';
+  const d = await jget(`/api/admin/doc/${cur}?limit=${pageSize}&offset=${page*pageSize}&q=${q}${s}${f}`);
   primary=d.primary; childCfg=d.child;
   const fkMaps={};
   for(const c of d.columns) if(c.fk){ const fo=await fkLoader(c.fk); fkMaps[c.field]=new Map(fo.options.map(o=>[String(o.id), o.label])); }
+  // при фильтре из Сверки строки — выборка: вставка/перенос строк заблокированы (позиция неоднозначна)
   sheet = new Sheet($('#sheet'), {columns:d.columns, rows:d.rows, fkLoader, fkMaps,
-                                  naturalOrder: sort==='', storageKey: cur, sortField: sort, sortDir: dir});
+                                  naturalOrder: sort==='' && !IFILTER, storageKey: cur, sortField: sort, sortDir: dir});
   sheet.onChange=setCnt;
   sheet.onSort=col=>{ if(!guard())return; if(sort===col){ if(dir==='asc'){dir='desc';} else {sort=''; dir='asc';} }else{sort=col;dir='asc';} page=0; loadDoc(); };
   sheet.onSelect = childCfg ? (r,row)=>selectPoint(row) : null;
   wireSheet(sheet);
   $('#title').textContent=d.title;
-  lastCols=d.columns; renderBanner(cur, lastCols);
+  lastCols=d.columns; renderBanner(cur, lastCols); renderIssueChip(d.total);
   // пустой документ: куда кликнуть, чтобы вставить лист из Excel
-  if(d.total===0 && !$('#q').value)
+  if(d.total===0 && !$('#q').value && !IFILTER)
     $('#saveNote').textContent = 'Документ пуст: в Excel выделите строки (от первой колонки), кликните по пустому полю таблицы ниже и нажмите Ctrl+V — строки добавятся сами';
   pageBar(d);
   // под-таблица деталей
@@ -553,6 +581,7 @@ async function saveChild(){
 
 // ── режим «Все таблицы» ──────────────────────────────────────────────────────
 async function openRaw(){
+  dropIssueFilter();
   mode='raw'; cur=null; $('#childWrap').style.display='none'; $('#title').textContent='';
   showArea('doc'); $('#docBanner').innerHTML=''; $('#saveNote').textContent='';
   markTab([...$('#tabs').querySelectorAll('.tab')].find(t=>t.dataset.raw));
@@ -605,7 +634,7 @@ $('#fxval').addEventListener('keydown', e=>{
 $('#helpBtn').onclick=()=>document.getElementById('helpDlg').showModal();
 let qt; $('#q').oninput=()=>{ clearTimeout(qt); qt=setTimeout(()=>{ if(guard()){page=0; reload();} },400); };
 window.onbeforeunload=()=> ((sheet&&sheet.dirtyCount())||(childSheet&&childSheet.dirtyCount()))?'Есть несохранённые изменения':undefined;
-init();
+init(URL_DOC);
 </script>
 </body>
 </html>

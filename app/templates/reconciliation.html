@@ -24,7 +24,26 @@
     .sync{display:flex;gap:8px 14px;align-items:center;flex-wrap:wrap;font-size:13px;margin:-.3rem 0 .9rem}
     .sync .bad{color:var(--danger)} .sync .good{color:var(--success)}
     .sync .errs{flex-basis:100%;font-size:12px;color:var(--danger);white-space:pre-wrap}
-    @media (max-width:640px){ .kchip{min-height:44px} .rc input.cmt{min-width:0} .sync button{min-height:44px} }
+    /* тип проблемы → группы «где» (модель·станция WB / бренд·участок Перечня) → строки */
+    .kg{margin:0 0 1.3rem}
+    .kg h2{font-size:15px;margin:0 0 .25rem;display:flex;gap:8px;align-items:baseline}
+    .kg h2 .n{color:var(--muted);font-variant-numeric:tabular-nums;font-weight:500}
+    .fix{font-size:13px;line-height:1.45;color:var(--muted);margin:0 0 .5rem;max-width:110ch}
+    details.cl{border:1px solid var(--border);border-radius:8px;margin:0 0 6px;background:var(--card)}
+    details.cl>summary{display:flex;gap:6px 12px;align-items:center;flex-wrap:wrap;padding:8px 12px;font-size:13px;color:inherit}
+    .cl-name{font-weight:600}
+    .cl-n{font-variant-numeric:tabular-nums}
+    .cl-st{font-size:12px;color:var(--muted)}
+    .cl-go{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+    a.go{border:1px solid var(--accent);color:var(--accent);border-radius:14px;padding:2px 10px;font-size:12px;text-decoration:none;white-space:nowrap;display:inline-block}
+    a.go:hover{background:color-mix(in srgb,var(--accent) 12%,transparent)}
+    a.go.alt{border-color:var(--border);color:inherit}
+    .bulk{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 12px;border-top:1px solid var(--border);font-size:13px}
+    .bulk select{padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit;font-size:13px}
+    details.cl .tbl-wrap{border-top:1px solid var(--border)}
+    .gos{display:flex;gap:4px;flex-wrap:wrap}
+    @media (max-width:640px){ .kchip{min-height:44px} .rc input.cmt{min-width:0} .sync button{min-height:44px}
+      a.go{padding:8px 12px;min-height:44px;display:inline-flex;align-items:center} .bulk select,.bulk button{min-height:44px} .cl-go{margin-left:0} }
   </style>
 </head>
 <body>
@@ -49,7 +68,8 @@
   <div class="note">
     <b>Weld Balance — единственный источник станции точки и пистолета.</b> Здесь — всё, что с ним не сходится:
     «потеряшки» и противоречия. Строки появляются и закрываются <b>сами</b>, как только данные сошлись.
-    Разбирает <b>ИТО</b>: статус, ответственный, комментарий. Исправлять — там, где ошибка (обычно в WB или в Перечне).
+    Разбирает <b>ИТО</b>: статус, ответственный, комментарий. Исправлять — там, где ошибка (обычно в WB или в Перечне):
+    кнопка <b>↗</b> открывает Редактор ровно на проблемных строках.
   </div>
 
   <div class="sync" id="syncBox" role="status"></div>
@@ -68,15 +88,7 @@
     <span class="muted" id="count"></span>
   </div>
 
-  <div class="tbl-wrap">
-    <table class="tbl tbl-mobile rc">
-      <thead><tr>
-        <th>Проблема</th><th>Объект</th><th>Станция в WB</th><th>Подробности</th><th>Где</th>
-        <th>Статус</th><th>Ответственный (ИТО)</th><th>Комментарий</th><th>Появилось</th>
-      </tr></thead>
-      <tbody id="tb"><tr class="empty-row"><td colspan="9">Загрузка…</td></tr></tbody>
-    </table>
-  </div>
+  <div id="groups"><p class="muted">Загрузка…</p></div>
 </div>
 
 <script>
@@ -86,9 +98,10 @@ let DATA = null, FKIND = '';
 const URLP = new URLSearchParams(location.search);
 let PRE_KINDS = (URLP.get('kinds') || '').split(',').filter(Boolean), PRE_MODEL = URLP.get('model') || '';
 const STATUS_BADGE = {new:'bd', in_review:'bw', assigned:'ba', accepted:'bm', resolved:'bs'};
+const OPEN = new Set();          // раскрытые группы (переживают перерисовку)
 
 async function load(){
-  $('tb').innerHTML = '<tr class="empty-row"><td colspan="9">Загрузка…</td></tr>';
+  $('groups').innerHTML = '<p class="muted">Загрузка…</p>';
   const r = await fetch('/api/wb-issues?status=' + encodeURIComponent($('fStatus').value));
   DATA = await r.json();
   renderSync(); renderKinds(); render();
@@ -137,7 +150,7 @@ const plural = (n, f) => f[(n % 10 === 1 && n % 100 !== 11) ? 0
 function detailsText(i){
   const p = [];
   if (i.details) p.push(i.details);
-  if (i.rows_count) p.push(i.rows_count + ' ' + plural(i.rows_count, i.kind === 'dup_g_num'
+  if (i.rows_count) p.push(i.rows_count + ' ' + plural(i.rows_count, ['dup_g_num', 'register_dup_g'].includes(i.kind)
     ? ['запись в Перечне', 'записи в Перечне', 'записей в Перечне'] : ['строка WB', 'строки WB', 'строк WB']));
   return p.join(' · ') || '—';
 }
@@ -151,41 +164,116 @@ function objectText(i){
   return p.join(' · ') || '—';
 }
 
+// ── ссылки «↗ в Редактор»: документ + ровно строки этих проблем (?issues=…) ──
+const shortDoc = t => t.replace(/\s*\(.*\)$/, '');            // «WB · A01 (Jolion…)» → «WB · A01»
+function editorLinks(items, label){
+  const by = new Map();                                         // doc → {title, n, ids}
+  for (const i of items) for (const t of i.targets || []){
+    const g = by.get(t.doc) || {title: t.title, n: 0, ids: []};
+    g.n += t.n; g.ids.push(i.id); by.set(t.doc, g);
+  }
+  return [...by.entries()].map(([doc, g]) =>
+    `<a class="go" href="/admin?doc=${encodeURIComponent(doc)}&issues=${g.ids.join(',')}&t=${encodeURIComponent(label)}"` +
+    ` title="Открыть «${escapeHtml(g.title)}» — только эти строки">↗ ${escapeHtml(shortDoc(g.title))} · ${g.n} ${plural(g.n, ['строка', 'строки', 'строк'])}</a>`).join('');
+}
+// пистолет без строк в документах (нет ни в Перечне, ни в WB) — хотя бы его паспорт в «Обзоре»
+const gunLink = i => i.gun_id ? `<a class="go alt" href="/explorer?mode=gun&id=${i.gun_id}" title="Паспорт пистолета в «Обзоре»">паспорт G${escapeHtml(String(i.g_num ?? ''))}</a>` : '';
+
 function render(){
   const q = $('fq').value.trim().toLowerCase();
   const rows = DATA.issues.filter(i => (!FKIND || i.kind === FKIND) &&
     (!PRE_KINDS.length || PRE_KINDS.includes(i.kind)) && (!PRE_MODEL || i.model_code === PRE_MODEL) &&
-    (!q || [objectText(i), i.wb_station, detailsText(i), i.where_found, i.comment, DATA.kinds[i.kind]]
+    (!q || [objectText(i), i.wb_station, detailsText(i), i.where_found, i.comment, i.cluster, DATA.kinds[i.kind]]
             .some(v => String(v || '').toLowerCase().includes(q))));
   $('count').textContent = `показано: ${rows.length}`;
-  if (!rows.length){ $('tb').innerHTML = '<tr class="empty-row"><td colspan="9">Пусто</td></tr>'; return; }
+  if (!rows.length){ $('groups').innerHTML = '<p class="muted">Пусто</p>'; return; }
+  // тип проблемы → место («A01 · MB-230», «Перечень · GWM · MB»), крупное — выше
+  const kinds = new Map();
+  for (const i of rows){
+    const cl = (kinds.get(i.kind) || kinds.set(i.kind, new Map()).get(i.kind));
+    (cl.get(i.cluster) || cl.set(i.cluster, []).get(i.cluster)).push(i);
+  }
+  const bySize = m => [...m.entries()].sort((a, b) => size(b[1]) - size(a[1]));
+  const size = v => v instanceof Map ? [...v.values()].reduce((s, a) => s + a.length, 0) : v.length;
+  const openAll = rows.length <= 40;
   const ed = DATA.can_edit;
-  const stOpts = cur => DATA.status_order.filter(k => k !== 'resolved')
-    .map(k => `<option value="${k}"${k === cur ? ' selected' : ''}>${escapeHtml(DATA.statuses[k])}</option>`).join('');
-  const engOpts = cur => '<option value="">—</option>' + DATA.engineers
-    .map(e => `<option value="${e.UniqueID}"${e.UniqueID === cur ? ' selected' : ''}>${escapeHtml(e.name)}</option>`).join('');
-  $('tb').innerHTML = rows.map(i => `<tr data-id="${i.id}">
-    <td data-label="Проблема">${escapeHtml(DATA.kinds[i.kind] || i.kind)}</td>
-    <td data-label="Объект" class="obj">${escapeHtml(objectText(i))}</td>
-    <td data-label="Станция в WB">${escapeHtml(i.wb_station || '—')}</td>
-    <td data-label="Подробности">${escapeHtml(detailsText(i))}</td>
-    <td data-label="Где">${escapeHtml(i.where_found || '—')}</td>
-    <td data-label="Статус">${ed && i.status !== 'resolved'
-        ? `<select class="f-st" aria-label="Статус">${stOpts(i.status)}</select>`
-        : `<span class="badge ${STATUS_BADGE[i.status] || 'bm'}">${escapeHtml(DATA.statuses[i.status] || i.status)}</span>`}</td>
-    <td data-label="Ответственный">${ed && i.status !== 'resolved'
-        ? `<select class="f-as" aria-label="Ответственный">${engOpts(i.assignee_id)}</select>` : escapeHtml(i.assignee_name || '—')}</td>
-    <td data-label="Комментарий">${ed && i.status !== 'resolved'
-        ? `<input class="cmt f-cm" value="${escapeHtml(i.comment || '')}" placeholder="что выяснили / что сделать">` : escapeHtml(i.comment || '—')}</td>
-    <td data-label="Появилось" class="muted">${escapeHtml((i.first_seen || '').replace('T', ' ').slice(0, 16))}${i.resolved_at ? '<br>закрыто ' + escapeHtml(i.resolved_at.replace('T', ' ').slice(0, 16)) : ''}</td>
-  </tr>`).join('');
+  $('groups').innerHTML = bySize(kinds).map(([kind, clusters]) => {
+    const n = size(clusters), label = DATA.kinds[kind] || kind;
+    return `<section class="kg"><h2>${escapeHtml(label)} <span class="n">${n}</span></h2>
+      <p class="fix"><b>Что сделать:</b> ${escapeHtml((DATA.help || {})[kind] || '')}</p>` +
+      bySize(clusters).map(([place, items]) => {
+        const key = kind + '|' + place, title = `${label} · ${place}`;
+        const open = OPEN.has(key) || openAll || clusters.size === 1 && items.length <= 40;
+        const stCnt = {};
+        items.forEach(i => { stCnt[i.status] = (stCnt[i.status] || 0) + 1; });
+        const stText = DATA.status_order.filter(s => stCnt[s]).map(s => `${DATA.statuses[s]}: ${stCnt[s]}`).join(' · ');
+        return `<details class="cl" data-key="${escapeHtml(key)}"${open ? ' open' : ''}>
+          <summary><span class="cl-name">${escapeHtml(place)}</span><b class="cl-n">${items.length}</b>
+            <span class="cl-st">${escapeHtml(stText)}</span><span class="cl-go">${editorLinks(items, title)}</span></summary>
+          ${ed ? bulkBar(items) : ''}
+          <div class="tbl-wrap"><table class="tbl tbl-mobile rc">
+            <thead><tr><th>Объект</th><th>Станция в WB</th><th>Подробности</th><th>Статус</th>
+              <th>Ответственный (ИТО)</th><th>Комментарий</th><th>Появилось</th><th>Где исправить</th></tr></thead>
+            <tbody>${items.map(i => rowHtml(i, label)).join('')}</tbody></table></div>
+        </details>`;
+      }).join('') + '</section>';
+  }).join('');
+  $('groups').querySelectorAll('details.cl').forEach(d => d.ontoggle = () => {
+    if (d.open) OPEN.add(d.dataset.key); else OPEN.delete(d.dataset.key);
+  });
   if (!ed) return;
-  $('tb').querySelectorAll('tr[data-id]').forEach(tr => {
+  $('groups').querySelectorAll('tr[data-id]').forEach(tr => {
     const id = +tr.dataset.id, st = tr.querySelector('.f-st'), as = tr.querySelector('.f-as'), cm = tr.querySelector('.f-cm');
     if (st) st.onchange = () => save(id, {status: st.value});
     if (as) as.onchange = () => save(id, {assignee_id: as.value || null});
     if (cm) cm.onchange = () => save(id, {comment: cm.value});
   });
+  $('groups').querySelectorAll('.bulk').forEach(b => b.querySelector('.b-go').onclick = () => saveBulk(b));
+}
+
+const stOpts = cur => DATA.status_order.filter(k => k !== 'resolved')
+  .map(k => `<option value="${k}"${k === cur ? ' selected' : ''}>${escapeHtml(DATA.statuses[k])}</option>`).join('');
+const engOpts = cur => '<option value="">—</option>' + DATA.engineers
+  .map(e => `<option value="${e.UniqueID}"${e.UniqueID === cur ? ' selected' : ''}>${escapeHtml(e.name)}</option>`).join('');
+
+function rowHtml(i, kindLabel){
+  const ed = DATA.can_edit && i.status !== 'resolved';
+  const go = editorLinks([i], `${kindLabel} · ${objectText(i)}`) + gunLink(i);
+  return `<tr data-id="${i.id}">
+    <td data-label="Объект" class="obj">${escapeHtml(objectText(i))}</td>
+    <td data-label="Станция в WB">${escapeHtml(i.wb_station || '—')}</td>
+    <td data-label="Подробности">${escapeHtml(detailsText(i))}</td>
+    <td data-label="Статус">${ed ? `<select class="f-st" aria-label="Статус">${stOpts(i.status)}</select>`
+        : `<span class="badge ${STATUS_BADGE[i.status] || 'bm'}">${escapeHtml(DATA.statuses[i.status] || i.status)}</span>`}</td>
+    <td data-label="Ответственный">${ed ? `<select class="f-as" aria-label="Ответственный">${engOpts(i.assignee_id)}</select>`
+        : escapeHtml(i.assignee_name || '—')}</td>
+    <td data-label="Комментарий">${ed ? `<input class="cmt f-cm" value="${escapeHtml(i.comment || '')}" placeholder="что выяснили / что сделать">`
+        : escapeHtml(i.comment || '—')}</td>
+    <td data-label="Появилось" class="muted">${escapeHtml((i.first_seen || '').replace('T', ' ').slice(0, 16))}${i.resolved_at ? '<br>закрыто ' + escapeHtml(i.resolved_at.replace('T', ' ').slice(0, 16)) : ''}</td>
+    <td data-label="Где исправить"><span class="gos">${go || '<span class="muted">—</span>'}</span></td>
+  </tr>`;
+}
+
+// статус / ответственный сразу на всю группу (только не «исправленные»)
+function bulkBar(items){
+  const ids = items.filter(i => i.status !== 'resolved').map(i => i.id);
+  if (!ids.length) return '';
+  return `<div class="bulk" data-ids="${ids.join(',')}">Вся группа (${ids.length}):
+    <select class="b-st" aria-label="Статус группы"><option value="">статус — не менять</option>${stOpts('')}</select>
+    <select class="b-as" aria-label="Ответственный группы"><option value="">ответственный — не менять</option>
+      <option value="0">— снять</option>${DATA.engineers.map(e => `<option value="${e.UniqueID}">${escapeHtml(e.name)}</option>`).join('')}</select>
+    <button class="btn btn-ghost btn-sm b-go" type="button">Применить</button></div>`;
+}
+
+async function saveBulk(bar){
+  const patch = {ids: bar.dataset.ids.split(',').map(Number)}, st = bar.querySelector('.b-st').value, as = bar.querySelector('.b-as').value;
+  if (st) patch.status = st;
+  if (as) patch.assignee_id = as === '0' ? null : +as;
+  if (!st && !as) return alert('Выберите статус и/или ответственного для группы');
+  const r = await fetch('/api/wb-issues/bulk', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(patch)});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) alert(d.message || 'Не удалось сохранить');
+  load();
 }
 
 async function save(id, patch){

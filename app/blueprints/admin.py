@@ -4,6 +4,7 @@
 Каждое изменение фиксируется в change_log (через триггеры), автор проставляется здесь.
 ВНИМАНИЕ: аутентификации пока нет — доступ открыт (журнал+откат страхуют). Auth — отдельный этап.
 """
+import json
 import uuid
 
 from flask import Blueprint, current_app, jsonify, render_template, request
@@ -23,7 +24,13 @@ from app.db import get_db
 from app.documents import TOKEN_RE, close_removed_wb_rows, doc_list, get_documents, resolve_weld_point_links
 from app.equipment import sync_register
 from app.errors import api_error
-from app.wb_source import OPEN_ISSUE_STATUSES, open_issue_count, rebuild_issues, relinkable_gun_rows
+from app.wb_source import (
+    OPEN_ISSUE_STATUSES,
+    issue_doc_ids,
+    open_issue_count,
+    rebuild_issues,
+    relinkable_gun_rows,
+)
 
 bp = Blueprint('admin', __name__)
 
@@ -518,6 +525,16 @@ def _run_doc_setter(db, c, pks, value, wp_pk):
             set_wb_part(db, wp_pk, c['part_layer'], c['part_field'], value)
 
 
+MAX_ISSUE_FILTER = 5000
+
+
+def _id_list(raw):
+    """'1,2,3' → [1, 2, 3] (мусор пропускается, не больше MAX_ISSUE_FILTER); нет параметра → None."""
+    if raw is None:
+        return None
+    return [int(x) for x in str(raw).split(',') if x.strip().isdigit()][:MAX_ISSUE_FILTER]
+
+
 def _doc_read(db, cfg, args):
     cols = cfg['columns']
     pk_sel = [f'{expr} AS "__pk_{tbl}"' for tbl, expr in cfg['pks'].items()]
@@ -531,6 +548,12 @@ def _doc_read(db, cfg, args):
     if q:
         conds.append('(' + ' OR '.join(f'({c["expr"]}) || \'\' LIKE ?' for c in cols) + ')')
         params += [f'%{q}%'] * len(cols)
+    # ссылка из «Сверки» (?issues=1,2,3): только строки документа, где эти проблемы исправляют
+    issues = _id_list(args.get('issues'))
+    if issues is not None:
+        ids = issue_doc_ids(db, issues, cfg['primary'])
+        conds.append(f"({cfg['pks'][cfg['primary']]}) IN (SELECT value FROM json_each(?))")
+        params.append(json.dumps(sorted(ids)))
     where = ' WHERE ' + ' AND '.join(conds) if conds else ''
 
     sort = args.get('sort', '').strip()

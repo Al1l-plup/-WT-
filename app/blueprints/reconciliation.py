@@ -8,14 +8,18 @@ WB — единственный источник станции точки и п
 Наполняется и закрывается автоматически (rebuild_issues) при старте, после сохранения
 документов Редактора и при открытии страницы; решения ИТО при этом не затираются.
 """
+import json
+
 from flask import Blueprint, current_app, jsonify, render_template, request, session
 
 from app.db import get_db
 from app.errors import api_error
 from app.wb_source import (
+    ISSUE_HELP,
     ISSUE_KINDS,
     ISSUE_STATUSES,
     OPEN_ISSUE_STATUSES,
+    IssueRows,
     open_issue_count,
     rebuild_issues,
     run_wb_sync,
@@ -52,7 +56,7 @@ def list_issues():
     elif status in ISSUE_STATUSES:
         where, params = 'WHERE i.status = ?', [status]
     rows = db.execute(f"""
-        SELECT i.id, i.kind, i.model_code, i.spot_number, COALESCE(i.g_num, g.g_num) AS g_num,
+        SELECT i.id, i.kind, i.model_code, i.spot_number, COALESCE(i.g_num, g.g_num) AS g_num, i.gun_id,
                i.defect_id, i.wb_station, i.details, i.where_found, i.rows_count, i.status,
                i.assignee_id, i.comment, i.first_seen, i.resolved_at,
                TRIM(COALESCE(w.surname,'') || ' ' || COALESCE(w.name,'')) AS assignee_name
@@ -68,8 +72,15 @@ def list_issues():
         f'SELECT kind, COUNT(*) FROM wb_issue WHERE status IN ({ph}) GROUP BY kind', OPEN_ISSUE_STATUSES)}
     engineers = db.execute("SELECT UniqueID, TRIM(surname || ' ' || COALESCE(name,'')) AS name FROM worker "
                            "WHERE department='ИТО' AND is_active=1 ORDER BY surname").fetchall()
+    # где исправлять: место для группировки и документы Редактора со строками проблемы
+    index, issues = IssueRows(db), []
+    for r in rows:
+        it = dict(r)
+        found = index.rows(it)
+        it['cluster'], it['targets'] = index.cluster(it, found), index.targets(found)
+        issues.append(it)
     # jsonify сортирует ключи словарей — порядок статусов «по ходу разбора» отдаём списком
-    return jsonify({'issues': [dict(r) for r in rows],
+    return jsonify({'issues': issues, 'help': ISSUE_HELP,
                     'kinds': ISSUE_KINDS, 'statuses': ISSUE_STATUSES, 'status_order': list(ISSUE_STATUSES),
                     'open_by_kind': by_kind, 'open_total': sum(by_kind.values()),
                     'engineers': [dict(e) for e in engineers], 'can_edit': _can_edit(),
@@ -107,19 +118,12 @@ def issues_summary():
     return jsonify({'open': open_issue_count(get_db())})
 
 
-@bp.route('/api/wb-issues/<int:issue_id>', methods=['PUT'])
-def update_issue(issue_id):
-    """ИТО: статус / ответственный / комментарий строки Сверки."""
-    if not _can_edit():
-        return jsonify({'status': 'error', 'message': 'Разбирать Сверку может ИТО'}), 403
-    data = request.json or {}
-    db = get_db()
-    if not db.execute('SELECT 1 FROM wb_issue WHERE id=?', (issue_id,)).fetchone():
-        return jsonify({'status': 'error', 'message': 'Строка Сверки не найдена'}), 404
+def _issue_patch(db, data):
+    """Проверенные правки строки Сверки → (['col=?', …], [значения]); ошибка → ValueError."""
     sets, vals = [], []
     if 'status' in data:
         if data['status'] not in ISSUE_STATUSES or data['status'] == 'resolved':
-            return jsonify({'status': 'error', 'message': '«Исправлено» ставится само, когда данные сошлись'}), 400
+            raise ValueError('«Исправлено» ставится само, когда данные сошлись')
         sets.append('status=?'); vals.append(data['status'])
     if 'comment' in data:
         sets.append('comment=?'); vals.append((data.get('comment') or '').strip()[:1000] or None)
@@ -127,14 +131,54 @@ def update_issue(issue_id):
         aid = data.get('assignee_id') or None
         if aid is not None and not db.execute('SELECT 1 FROM worker WHERE UniqueID=? AND is_active=1',
                                               (int(aid),)).fetchone():
-            return jsonify({'status': 'error', 'message': 'Сотрудник не найден'}), 400
+            raise ValueError('Сотрудник не найден')
         sets.append('assignee_id=?'); vals.append(int(aid) if aid else None)
     if not sets:
-        return jsonify({'status': 'error', 'message': 'Нечего менять'}), 400
+        raise ValueError('Нечего менять')
+    return sets, vals
+
+
+@bp.route('/api/wb-issues/<int:issue_id>', methods=['PUT'])
+def update_issue(issue_id):
+    """ИТО: статус / ответственный / комментарий строки Сверки."""
+    if not _can_edit():
+        return jsonify({'status': 'error', 'message': 'Разбирать Сверку может ИТО'}), 403
+    db = get_db()
+    if not db.execute('SELECT 1 FROM wb_issue WHERE id=?', (issue_id,)).fetchone():
+        return jsonify({'status': 'error', 'message': 'Строка Сверки не найдена'}), 404
+    try:
+        sets, vals = _issue_patch(db, request.json or {})
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
     try:
         db.execute(f'UPDATE wb_issue SET {", ".join(sets)} WHERE id=?', (*vals, issue_id))
         db.commit()
         return jsonify({'status': 'success'})
+    except Exception as e:  # noqa: BLE001
+        db.rollback()
+        return api_error(e)
+
+
+@bp.route('/api/wb-issues/bulk', methods=['PUT'])
+def update_issues_bulk():
+    """ИТО: статус / ответственный / комментарий сразу для группы строк Сверки
+    ({'ids': [...], …}). «Исправленные» не трогаем — они закрыты самими данными."""
+    if not _can_edit():
+        return jsonify({'status': 'error', 'message': 'Разбирать Сверку может ИТО'}), 403
+    data = request.json or {}
+    ids = [int(i) for i in data.get('ids') or [] if str(i).isdigit()]
+    if not ids:
+        return jsonify({'status': 'error', 'message': 'Не выбраны строки Сверки'}), 400
+    db = get_db()
+    try:
+        sets, vals = _issue_patch(db, data)
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+    try:
+        cur = db.execute(f"UPDATE wb_issue SET {', '.join(sets)} WHERE status != 'resolved' "
+                         'AND id IN (SELECT value FROM json_each(?))', (*vals, json.dumps(ids)))
+        db.commit()
+        return jsonify({'status': 'success', 'updated': cur.rowcount})
     except Exception as e:  # noqa: BLE001
         db.rollback()
         return api_error(e)
