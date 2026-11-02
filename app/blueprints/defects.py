@@ -8,7 +8,7 @@ from app import defect_flow as df
 from app.db import get_db
 from app.errors import api_error
 from app.snapshots import snapshot_defect
-from app.wb_source import point_gun, spot_key_sql
+from app.wb_source import point_gun
 
 bp = Blueprint('defects', __name__)
 
@@ -193,7 +193,7 @@ def add_defect():
 @bp.route('/api/defects/all')
 def defects_all():
     db = get_db()
-    base = f"""
+    base = """
         SELECT d.UniqueID, d.df_date, d.problem_code,
                COALESCE(d.status,'registered')             as status,
                COALESCE(d.root_cause,'')                   as root_cause,
@@ -230,10 +230,12 @@ def defects_all():
         LEFT JOIN model  enrich_m ON d.manual_model_id    = enrich_m.UniqueID
         LEFT JOIN brand  enrich_b ON enrich_m.brand_id    = enrich_b.UniqueID
         LEFT JOIN gun    g       ON d.gun_id               = g.UniqueID
-        -- станция (если нет снимка) — только из Weld Balance: точка по модели + №,
-        -- а без точки (регистрация по G-номеру) — станция пистолета по WB
-        LEFT JOIN v_wb_point wbp ON wbp.model_code = UPPER(COALESCE(m.model_code, enrich_m.model_code))
-                                AND wbp.spot_number = {spot_key_sql('COALESCE(CAST(s.spot_number AS TEXT), d.manual_spot_number)')}
+        -- станция (если нет снимка) — только из Weld Balance: точка (карточка) по рабочим
+        -- ключам WB; без точки (регистрация по G-номеру) — станция пистолета по WB.
+        -- Ручной № точки сюда не сравнивается сырым текстом: его станция — в снимке
+        -- (регистрация/дозаполнение считают её по app/normalize.py).
+        LEFT JOIN v_wb_point wbp ON wbp.model_key = UPPER(m.model_code)
+                                AND wbp.spot_key = CAST(s.spot_number AS TEXT)
         LEFT JOIN station wbp_st ON wbp_st.UniqueID = wbp.station_id
         LEFT JOIN v_wb_gun wbg   ON wbg.gun_id = d.gun_id AND d.spot_id IS NULL AND d.manual_spot_number IS NULL
         LEFT JOIN station wbg_st ON wbg_st.UniqueID = wbg.station_id

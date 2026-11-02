@@ -16,6 +16,7 @@
 import re
 
 from app.data_map import about
+from app.normalize import code_key, spot_int
 from app.wb_source import GUN_WB_JOIN, GUN_WB_STATION_NAME
 
 # ── колонки Weld Balance = ТОЧНОЕ зеркало листа «Welds» Excel (колонка-в-колонку,
@@ -114,6 +115,18 @@ _WB_COLUMNS = [
     # вставка/перемещение строк в гриде меняет его через обычный batch.
     {'label': '#', 'field': 'row_order', 'expr': 'wp.row_order', 'edit': True,
      'table': 'weld_point', 'col': 'row_order', 'hidden': True},
+    # Как сайт понял строку: рабочие ключи из сырых колонок (app/normalize.py). Сырые
+    # значения выше не меняются никогда — здесь видно, во что их превратила обработка.
+    {'label': '№ точки → сайт', 'field': 'k_spot', 'expr': 'wk.spot_key', 'edit': False, 'origin': 'auto',
+     'hint': 'Как сайт понял «№ точки»: «0020», «20», «20.0» → 20. По этому номеру ищутся точка, дефекты, станция.'},
+    {'label': 'G → сайт', 'field': 'k_g', 'expr': 'wk.g_num', 'edit': False, 'origin': 'auto',
+     'hint': 'Как сайт понял «Клещи (G)»: «G.153», «G 153», «G-153» → 153. Пусто — номер пистолета не найден.'},
+    {'label': 'Станция → сайт', 'field': 'k_station', 'edit': False, 'origin': 'auto',
+     'expr': "CASE WHEN wks.station_name IS NOT NULL THEN wks.station_name "
+             "WHEN wk.station_key IS NULL THEN '' "
+             "ELSE '⚠ ' || wk.station_key || ' — не найдена в справочнике' END",
+     'hint': 'Станция справочника, с которой сайт сопоставил «Станция» строки (по бренду модели). '
+             '«⚠ … не найдена» — строка в Сверке.'},
 ]
 
 # Кол-во колонок, соответствующих листу Excel (col0..col52) — на них рассчитана вставка.
@@ -127,7 +140,9 @@ _WB_BASE = """FROM weld_point wp
         LEFT JOIN weld_point_part p3 ON p3.weld_point_id=wp.id AND p3.layer_no=3
         LEFT JOIN wb_material m1 ON p1.material_id=m1.id
         LEFT JOIN wb_material m2 ON p2.material_id=m2.id
-        LEFT JOIN wb_material m3 ON p3.material_id=m3.id"""
+        LEFT JOIN wb_material m3 ON p3.material_id=m3.id
+        LEFT JOIN weld_point_key wk ON wk.weld_point_id=wp.id
+        LEFT JOIN station wks ON wks.UniqueID=wp.station_id"""
 
 
 def _wb_tab_model_code(db, token):
@@ -206,13 +221,11 @@ _EQUIPMENT_DOC = {
          'expr': f"CASE WHEN el.gun_id IS NULL THEN '' ELSE {GUN_WB_STATION_NAME} END",
          'hint': 'Для пистолета — станция из Weld Balance (по ней работают дефекты и ТО).'},
         {'label': 'Сходится с WB', 'field': 'wb_match', 'edit': False, 'origin': 'auto',
-         'expr': "CASE WHEN el.gun_id IS NULL THEN '' "
-                 "WHEN vg.gun_id IS NULL THEN '⚠ нет в WB' "
-                 "WHEN el.station_id IS NULL THEN '⚠ станция не определена' "
-                 # 'GW-INR+WH L-10' = 'GW-INR L-10' — то же правило, что equipment.same_station
-                 "WHEN instr(',' || REPLACE(UPPER(vg.station_names), '+WH', '') || ',', "
-                 "',' || REPLACE(UPPER(el.reg_station), '+WH', '') || ',') > 0 THEN '✓' "
-                 "ELSE '⚠ другая станция' END",
+         # результат сверки считает приложение (wb_source._collect_register_issues) — одно правило
+         'expr': "CASE el.wb_status WHEN 'ok' THEN '✓' WHEN 'mismatch' THEN '⚠ другая станция' "
+                 "WHEN 'no_wb' THEN '⚠ нет в WB' WHEN 'wb_unknown' THEN '⚠ станция WB не распознана' "
+                 "WHEN 'no_station' THEN '⚠ станция не определена' "
+                 "ELSE '' END",
          'hint': 'Сравнение станции по Перечню и по WB. Расхождения — в «Сверке» (разбирает ИТО).'},
     ],
 }
@@ -376,20 +389,13 @@ def doc_list(db):
     return out
 
 
-def _parse_spot_num(spot_number):
-    """'17' / '17.0' → 17; мусор → None."""
-    try:
-        return int(float(spot_number))
-    except (ValueError, TypeError):
-        return None
-
-
 def _model_ids_for_code(db, code):
-    """Код модели → id всех её модификаций (A01 → Jolion 2WD и 4WD)."""
-    if not code:
+    """Код модели (сырой или ключ) → id всех её модификаций (A01 → Jolion 2WD и 4WD).
+    Сравнение — по рабочему ключу (app/normalize.code_key) с обеих сторон."""
+    key = code_key(code)
+    if not key:
         return []
-    return [r[0] for r in db.execute(
-        'SELECT UniqueID FROM model WHERE UPPER(model_code)=UPPER(?)', (code,))]
+    return [mid for mid, mc in db.execute('SELECT UniqueID, model_code FROM model') if code_key(mc) == key]
 
 
 def _identity_spots(db, spot_id):
@@ -414,12 +420,14 @@ def _identity_spots(db, spot_id):
 def _pair_backed_by_wb(db, spot_id, gun_id):
     """Пара (точка, клещи) подтверждена, если ХОТЬ ОДНА строка WB этой точки
     (по коду модели и номеру) указывает на эти клещи."""
+    # по рабочим ключам строки WB; номер карточки — число, CAST даёт форму spot_key ('20')
     return db.execute(
         """SELECT 1 FROM weld_point wp
+           JOIN weld_point_key k ON k.weld_point_id = wp.id
            JOIN spot s ON s.UniqueID=?
            JOIN model m ON s.model_id=m.UniqueID
-           WHERE UPPER(wp.model_code)=UPPER(m.model_code) AND wp.gun_id=?
-             AND CAST(wp.spot_number AS REAL)=CAST(s.spot_number AS REAL)
+           WHERE k.model_key=UPPER(m.model_code) AND wp.gun_id=?
+             AND k.spot_key=CAST(s.spot_number AS TEXT)
            LIMIT 1""", (spot_id, gun_id)).fetchone() is not None
 
 
@@ -484,7 +492,7 @@ def close_removed_wb_rows(db, removed) -> None:
     from datetime import date
     today = date.today().isoformat()
     for code, spot_number, gun_id in removed:
-        num = _parse_spot_num(spot_number)
+        num = spot_int(spot_number)
         if gun_id is None or num is None:
             continue
         for mid in _model_ids_for_code(db, code):
@@ -514,27 +522,28 @@ def resolve_weld_point_links(db, wp_ids) -> None:
     """
     from datetime import date
 
-    from app.wb_source import StationMatcher, parse_g
+    from app.wb_source import StationMatcher, refresh_wb_keys
     today = date.today().isoformat()
+    wp_ids = list(wp_ids)
+    refresh_wb_keys(db, wp_ids)    # сырые колонки строки → рабочие ключи (app/normalize.py)
     matcher = StationMatcher(db)   # справочники читаем один раз на пакет
     for wp_id in wp_ids:
-        row = db.execute('SELECT gun_mntc, model_code, spot_number, welding_type, gun_id, spot_id, wb_station '
-                         'FROM weld_point WHERE id=?', (wp_id,)).fetchone()
+        row = db.execute('SELECT w.welding_type, w.spot_id, k.model_key, k.spot_key, k.g_num, k.station_key '
+                         'FROM weld_point w LEFT JOIN weld_point_key k ON k.weld_point_id = w.id '
+                         'WHERE w.id=?', (wp_id,)).fetchone()
         if not row:
             continue
-        gun_mntc, code, spot_number, welding_type = row[0], row[1], row[2], row[3]
-        old_spot_id = row[5]
+        welding_type, old_spot_id, model_key, spot_k, g_num, st_key = row
         # 1) клещи (при дубле G-номера — детерминированно первый; дубль виден в Сверке)
         gun_id = None
-        g_num = parse_g(gun_mntc)
         if g_num is not None:
             g = db.execute('SELECT UniqueID FROM gun WHERE g_num=? ORDER BY UniqueID LIMIT 1', (g_num,)).fetchone()
             gun_id = g[0] if g else None
         # 2) карточки точки во всех модификациях кода: найти или создать
         new_spots = []
-        num = _parse_spot_num(spot_number)
+        num = int(spot_k) if spot_k and spot_k.isdigit() else None
         if num is not None:
-            for mid in _model_ids_for_code(db, code):
+            for mid in _model_ids_for_code(db, model_key):
                 s = db.execute('SELECT UniqueID FROM spot WHERE model_id=? AND spot_number=?',
                                (mid, num)).fetchone()
                 if s:
@@ -548,7 +557,7 @@ def resolve_weld_point_links(db, wp_ids) -> None:
             for sid in new_spots:
                 _ensure_active_link(db, sid, gun_id, today)
         db.execute('UPDATE weld_point SET gun_id=?, spot_id=?, station_id=? WHERE id=?',
-                   (gun_id, new_spots[0] if new_spots else None, matcher.match(code, row[6]), wp_id))
+                   (gun_id, new_spots[0] if new_spots else None, matcher.match(model_key, st_key), wp_id))
         # 4) закрыть ВСЕ активные связки затронутых карточек, не подтверждённые WB
         #    (старые/новые карточки + «застрявшие» третьи клещи). Проверка идёт по уже
         #    обновлённой строке, поэтому смена G, номера, модели, очистка G и удаление

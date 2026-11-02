@@ -14,7 +14,8 @@ import sqlite3
 # постоянные insert/update/delete), аудит раздул бы change_log; не редактируется руками.
 AUDIT_EXCLUDE = {'change_log', 'restore_point', 'alembic_version', 'sqlite_sequence', 'notification_outbox',
                  'wb_issue',          # Сверка пересобирается автоматически — аудит раздул бы журнал
-                 'equipment_link'}    # производные связи Перечня — пересобираются после сохранения
+                 'equipment_link',    # производные связи Перечня — пересобираются после сохранения
+                 'weld_point_key'}    # рабочие ключи WB (app/normalize.py) — пересчитываются из сырых строк
 
 
 def _q(ident: str) -> str:

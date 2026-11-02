@@ -18,19 +18,15 @@ import re
 from collections import Counter
 from datetime import date
 
-_G_ID_RE = re.compile(r'^G[.\s]*0*(\d+)$', re.I)
+from app.normalize import code_key, g_id_number
+
 _TAIL_RE = re.compile(r'-[^-]+$')        # «CH-MB-250-R2501» → «CH-MB-250» (робот → станция)
-_NO_PLACE = {'', 'НЕТ', '-', '—'}
+_NO_PLACE = {None, 'НЕТ', 'HET', '-', '—'}   # «Нет» после code_key (кириллица → латиница) = «HET»
 
 
 def gun_number(item_code):
     """ID строки Перечня → номер пистолета: 'G.001' → 1; не пистолет → None."""
-    m = _G_ID_RE.match((item_code or '').strip())
-    return int(m.group(1)) if m else None
-
-
-def _norm(text):
-    return re.sub(r'\s+', ' ', str(text or '').strip()).upper()
+    return g_id_number(item_code)
 
 
 def is_transformer(name):
@@ -50,14 +46,14 @@ class Resolver:
     def __init__(self, items, stations):
         self.by_code = {}
         for it in items:                                   # дубль ID — берём первую строку листа
-            self.by_code.setdefault(_norm(it['item_code']), it)
-        self.stations = {_norm(name): (sid, name) for sid, name in stations}
+            self.by_code.setdefault(code_key(it['item_code']), it)
+        self.stations = {code_key(name): (sid, name) for sid, name in stations}
 
     def station(self, location):
         """(station_id | None, название станции или последний текст цепочки | None)."""
         text, seen = location, set()
         for _ in range(4):
-            key = _norm(text)
+            key = code_key(text)
             if key in _NO_PLACE:
                 return None, None
             if key in self.stations:
@@ -67,7 +63,7 @@ class Resolver:
                 break
             seen.add(key)
             text = item['location']
-        key = _norm(text)
+        key = code_key(text)
         if key in _NO_PLACE:
             return None, None
         for _ in range(2):
@@ -114,10 +110,10 @@ def sync_register(db):
         guns.setdefault(g, uid)                            # дубль G в справочнике — первый
     trans = {}
     for uid, tid in db.execute('SELECT UniqueID, transID FROM trans ORDER BY UniqueID'):
-        trans.setdefault(_norm(tid), uid)
+        trans.setdefault(code_key(tid), uid)
 
     def trans_id(item):
-        key = _norm(item['item_code'])
+        key = code_key(item['item_code'])
         if key not in trans:
             trans[key] = db.execute('INSERT INTO trans (transID, type) VALUES (?, ?)',
                                     (str(item['item_code']).strip(), _trans_type(item['name']))).lastrowid
@@ -141,7 +137,7 @@ def sync_register(db):
             elif gtype and db.execute('SELECT gun_type FROM gun WHERE UniqueID=?', (gun_id,)).fetchone()[0] != gtype:
                 db.execute('UPDATE gun SET gun_type=? WHERE UniqueID=?', (gtype, gun_id))
                 stats['guns_updated'] += 1
-            place = res.by_code.get(_norm(it['location']))
+            place = res.by_code.get(code_key(it['location']))
             tid = trans_id(place) if place and is_transformer(place['name']) else None
             if set_gun_transformer(db, gun_id, tid, 'по Перечню оборудования', today):
                 stats['transformers_relinked'] += 1
@@ -155,4 +151,4 @@ def sync_register(db):
 def same_station(a, b):
     """Одна и та же станция в разных написаниях справочника: 'GW-INR+WH L-10' = 'GW-INR L-10'
     (то же правило, что при сопоставлении текста WB — wb_source.StationMatcher)."""
-    return _norm(a).replace('+WH', '') == _norm(b).replace('+WH', '')
+    return (code_key(a) or '').replace('+WH', '') == (code_key(b) or '').replace('+WH', '')

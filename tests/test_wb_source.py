@@ -5,7 +5,8 @@
 import sqlite3
 
 from app.audit import drop_audit_triggers
-from app.wb_source import StationMatcher, rebuild_issues, sync_wb_on_start, wb_station_code
+from app.normalize import code_key, station_key
+from app.wb_source import StationMatcher, rebuild_issues, sync_wb_on_start
 from tests.test_admin_docs import wb_doc
 
 
@@ -32,19 +33,19 @@ def _wb_row(client, g, spot, station_text):
 
 
 def test_station_code_normalization():
-    assert wb_station_code('MB-250 ROBOT RESPOT') == 'MB-250'
-    assert wb_station_code('wh l-40') == 'WH L-40'
-    assert wb_station_code('WH2 R-10 something') == 'WH2 R-10'
-    assert wb_station_code('  ') is None and wb_station_code(None) is None
+    assert station_key('MB-250 ROBOT RESPOT') == 'MB-250'
+    assert station_key('wh l-40') == 'WH L-40'
+    assert station_key('WH2 R-10 something') == 'WH2 R-10'
+    assert station_key('  ') is None and station_key(None) is None
 
 
 def test_matcher_is_brand_scoped_and_knows_aliases(app):
     db = _db(app)
     (sid, name, code), = _chery_stations(app, 1)
     m = StationMatcher(db)
-    assert m.match('A13T', f'{code} ROBOT SOMETHING') == sid        # Chery-модель → Chery-станция
-    assert m.match('A01', code) != sid                              # A01 = GWM: чужой бренд не берём
-    assert m.match('A13T', 'NOPE-999') is None
+    assert m.match('A13T', station_key(f'{code} ROBOT SOMETHING')) == sid   # Chery-модель → Chery-станция
+    assert m.match('A01', station_key(code)) != sid                         # A01 = GWM: чужой бренд не берём
+    assert m.match('A13T', station_key('NOPE-999')) is None
 
 
 def test_wb_save_sets_station_and_gun_station_comes_from_wb(client, app):
@@ -150,7 +151,7 @@ def test_lost_guns_pseudo_station_for_maintenance(client, app):
 
 def test_matcher_ignores_model_code_case_and_spaces(app):
     (sid, _n, code), = _chery_stations(app, 1)
-    assert StationMatcher(_db(app)).match(' a13t ', code) == sid
+    assert StationMatcher(_db(app)).match(code_key(' a13t '), station_key(code)) == sid
 
 
 def test_sync_step_failure_does_not_block_stations(client, app, monkeypatch):
@@ -192,12 +193,6 @@ def test_run_wb_sync_keeps_journal_clean_and_triggers_back(client, app):
     assert db.execute("SELECT station_id FROM weld_point WHERE spot_number='93012'").fetchone()[0] == sid
     assert db.execute('SELECT MAX(id) FROM change_log').fetchone()[0] == log_before   # производное — не в Журнал
     assert trig() == n_trig                                                            # триггеры журнала на месте
-
-
-def test_spot_key_normalizes_padded_numbers():
-    from app.wb_source import spot_key
-    assert spot_key('0020') == spot_key(' 20 ') == spot_key('20.0') == spot_key(20) == '20'
-    assert spot_key('20A') == '20A' and spot_key('1.2.3') == '1.2.3' and spot_key(None) == ''
 
 
 def test_padded_wb_spot_number_gives_defect_station_and_gun(register_client, client, app):

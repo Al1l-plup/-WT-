@@ -9,105 +9,91 @@
 * чего нет в WB или что в WB противоречиво — «потеряшки»: на сайте явно «нет в WB»,
   а в таблице wb_issue («Сверка») — запрос ИТО на рассмотрение.
 
+Сырые данные WB (что вставили из Excel) не меняются никогда. Вся логика работает по
+рабочим ключам weld_point_key (модель, № точки, G, станция), которые считаются из сырых
+колонок ОДНИМИ правилами — app/normalize.py (refresh_wb_keys). Представления v_wb_point /
+v_wb_gun — чтение станции из одного места.
+
 Всё здесь работает молча: вставке WB из Excel ничего не мешает, проблемы копятся
-в Сверке. Представления v_wb_point / v_wb_gun (миграция 0022) — та же логика в SQL,
-чтобы любое чтение станции шло из одного места.
+в Сверке.
 """
-import re
 from collections import defaultdict
 from datetime import datetime
 
-_WB_STATION_RE = re.compile(r'^([A-Z]+\d*(?: (?:[LR]|\d))?-\d+)')
-_BRAND_PREFIX_RE = re.compile(r'^(CH|GW|CA)-')
-_G_RE = re.compile(r'G[.\s]*0*(\d+)', re.I)
+from app.normalize import code_key, g_number, spot_key, station_key
+
 # Контактная сварка — у неё обязан быть пистолет G. CO2/шпилька/автосварка — без G.
 SPOT_WELDING_TYPES = ('PSW', 'RSW')
 
 
-def spot_key(value):
-    """Номер точки для сравнения: '0020' / '20' / '20.0' → '20'; нечисловое — как есть.
-    В WB номера вставляют из Excel по-разному (с нулями впереди), в карточке точки — число."""
-    s = '' if value is None else str(value).strip()
-    if re.fullmatch(r'[0-9][0-9.]*', s):
-        try:
-            f = float(s)
-        except ValueError:
-            return s
-        if f.is_integer():
-            return str(int(f))
-    return s
-
-
-def spot_key_sql(expr):
-    """То же правило, что spot_key, — в SQL (для представления v_wb_point и соединений)."""
-    t = f'TRIM({expr})'
-    return (f"(CASE WHEN {t} GLOB '[0-9]*' AND {t} NOT GLOB '*[^0-9.]*' "
-            f"AND CAST({t} AS REAL) = CAST(CAST({t} AS REAL) AS INTEGER) "
-            f"THEN CAST(CAST(CAST({t} AS REAL) AS INTEGER) AS TEXT) ELSE {t} END)")
-
-
-def parse_g(text):
-    """'G.153' / 'G 033' → 153 / 33; нет номера → None."""
-    m = _G_RE.search(text or '')
-    return int(m.group(1)) if m else None
-
-
-def wb_station_code(text):
-    """Код станции из текста WB: 'MB-250 ROBOT RESPOT' → 'MB-250', 'WH L-40' → 'WH L-40'."""
-    if not text or not str(text).strip():
-        return None
-    s = str(text).strip().upper()
-    m = _WB_STATION_RE.match(s)
-    return m.group(1) if m else s
-
-
-def _dir_code(name):
-    return _BRAND_PREFIX_RE.sub('', (name or '').strip().upper())
-
-
-def _model_key(code):
-    """Код модели без учёта регистра и пробелов: 'a01 ' и 'A01' — одна модель."""
-    return (code or '').strip().upper()
+# ── сырые строки WB → рабочие ключи (правила — только app/normalize.py) ──────────
+def refresh_wb_keys(db, wp_ids=None):
+    """Пересчитать рабочие ключи строк WB (weld_point_key) из СЫРЫХ колонок weld_point.
+    Сырые колонки не меняются. Пишет только изменившееся; при полном пересчёте удаляет
+    ключи удалённых строк. Возвращает число записанных строк ключей."""
+    sql = 'SELECT id, model_code, spot_number, gun_mntc, wb_station FROM weld_point'
+    ksql = 'SELECT weld_point_id, model_key, spot_key, g_num, station_key FROM weld_point_key'
+    if wp_ids is None:
+        rows, have = db.execute(sql).fetchall(), db.execute(ksql).fetchall()
+    else:
+        ids = list(wp_ids)
+        rows = [r for i in ids for r in db.execute(sql + ' WHERE id=?', (i,)).fetchall()]
+        have = [r for i in ids for r in db.execute(ksql + ' WHERE weld_point_id=?', (i,)).fetchall()]
+    have = {r[0]: tuple(r[1:]) for r in have}
+    upserts = []
+    for wid, model, spot, gun, station in rows:
+        keys = (code_key(model), spot_key(spot), g_number(gun), station_key(station))
+        if have.get(wid) != keys:
+            upserts.append((wid, *keys))
+    db.executemany(
+        'INSERT INTO weld_point_key (weld_point_id, model_key, spot_key, g_num, station_key) VALUES (?,?,?,?,?) '
+        'ON CONFLICT(weld_point_id) DO UPDATE SET model_key=excluded.model_key, spot_key=excluded.spot_key, '
+        'g_num=excluded.g_num, station_key=excluded.station_key', upserts)
+    if wp_ids is None:
+        db.execute('DELETE FROM weld_point_key WHERE weld_point_id NOT IN (SELECT id FROM weld_point)')
+    return len(upserts)
 
 
 class StationMatcher:
-    """Сопоставление текста станции WB со справочником station (в рамках бренда модели).
-    Справочники читаются один раз — для пакетной обработки тысяч строк."""
+    """Ключ станции строки WB → станция справочника (в рамках бренда модели). Справочник
+    приводится к ключам теми же правилами (normalize.station_key). Читается один раз."""
 
     def __init__(self, db):
         self.brands = defaultdict(set)
         for code, bid in db.execute('SELECT model_code, brand_id FROM model'):
-            self.brands[_model_key(code)].add(bid)
+            self.brands[code_key(code)].add(bid)
         self.stations = defaultdict(list)
         for sid, name, bid in db.execute('SELECT UniqueID, station_name, brand_id FROM station'):
-            self.stations[bid].append((sid, _dir_code(name)))
+            self.stations[bid].append((sid, station_key(name)))
 
-    def match(self, model_code, text):
-        """station_id или None (нет текста / нет такой станции / неоднозначно)."""
-        code = wb_station_code(text)
-        if code is None:
+    def match(self, model_key, st_key):
+        """station_id или None (нет станции / нет такой в справочнике / неоднозначно)."""
+        if st_key is None:
             return None
-        cands = [s for b in self.brands.get(_model_key(model_code), ()) for s in self.stations[b]]
-        exact = [sid for sid, c in cands if c == code]
+        cands = [s for b in self.brands.get(model_key, ()) for s in self.stations[b]]
+        exact = [sid for sid, c in cands if c == st_key]
         if len(exact) == 1:
             return exact[0]
         if exact:
             return None
         # варианты написания: 'FR WH 1-10' ↔ 'WH 1-10', 'INR+WH L-10' ↔ 'INR L-10'
-        alias = [sid for sid, c in cands if c.endswith(' ' + code) or c.replace('+WH', '') == code]
+        alias = [sid for sid, c in cands if c.endswith(' ' + st_key) or c.replace('+WH', '') == st_key]
         return alias[0] if len(alias) == 1 else None
 
 
+_KEYED_ROWS = ('SELECT w.id, k.model_key, k.station_key, w.station_id FROM weld_point w '
+               'LEFT JOIN weld_point_key k ON k.weld_point_id = w.id')
+
+
 def sync_wb_stations(db, wp_ids=None, matcher=None):
-    """Проставить weld_point.station_id по тексту станции. Пишет только изменившиеся
+    """Проставить weld_point.station_id по рабочим ключам. Пишет только изменившиеся
     строки (идемпотентно). Возвращает число обновлённых строк."""
     matcher = matcher or StationMatcher(db)
-    sql = 'SELECT id, model_code, wb_station, station_id FROM weld_point'
-    rows = (db.execute(sql).fetchall() if wp_ids is None else
-            [r for i in wp_ids for r in db.execute(sql + ' WHERE id=?', (i,)).fetchall()])
+    rows = (db.execute(_KEYED_ROWS).fetchall() if wp_ids is None else
+            [r for i in wp_ids for r in db.execute(_KEYED_ROWS + ' WHERE w.id=?', (i,)).fetchall()])
     changed = 0
-    for wid, code, text, cur in rows:
-        sid = matcher.match(code, text)
+    for wid, model_key, st_key, cur in rows:
+        sid = matcher.match(model_key, st_key)
         if sid != cur:
             db.execute('UPDATE weld_point SET station_id=? WHERE id=?', (sid, wid))
             changed += 1
@@ -120,12 +106,9 @@ def relinkable_gun_rows(db):
     by_g = defaultdict(list)
     for gid, g in db.execute('SELECT UniqueID, g_num FROM gun'):
         by_g[g].append(gid)
-    out = []
-    for wid, mntc in db.execute('SELECT id, gun_mntc FROM weld_point WHERE gun_id IS NULL'):
-        g = parse_g(mntc)
-        if g is not None and len(by_g.get(g, [])) == 1:
-            out.append(wid)
-    return out
+    return [wid for wid, g in db.execute(
+        'SELECT w.id, k.g_num FROM weld_point w JOIN weld_point_key k ON k.weld_point_id = w.id '
+        'WHERE w.gun_id IS NULL AND k.g_num IS NOT NULL') if len(by_g.get(g, [])) == 1]
 
 
 def _step(db, name, fn, errors):
@@ -152,7 +135,9 @@ def sync_wb(db):
     from app.documents import resolve_weld_point_links
     from app.equipment import sync_register
     errors, relinked, failed = [], 0, 0
-    # Перечень (Excel цеха) → пистолеты: сначала он, чтобы новые G сразу довязались в WB
+    # сырые строки WB → рабочие ключи (первым: на ключах работает всё остальное)
+    _, keys = _step(db, 'wb_keys', lambda: refresh_wb_keys(db), errors)
+    # Перечень (Excel цеха) → пистолеты: до довязки, чтобы новые G сразу довязались в WB
     _, register = _step(db, 'register', lambda: sync_register(db), errors)
     for wid in relinkable_gun_rows(db):
         ok, _ = _step(db, 'wb_relink', lambda w=wid: resolve_weld_point_links(db, [w]), errors)
@@ -164,7 +149,7 @@ def sync_wb(db):
     _, stations = _step(db, 'wb_stations', lambda: sync_wb_stations(db), errors)
     _, defects_filled = _step(db, 'defects_fill', lambda: fill_defects_from_wb(db), errors)
     _, open_issues = _step(db, 'wb_issues', lambda: rebuild_issues(db), errors)
-    return {'register': register, 'relinked': relinked, 'relink_failed': failed, 'stations_updated': stations,
+    return {'keys_updated': keys, 'register': register, 'relinked': relinked, 'relink_failed': failed, 'stations_updated': stations,
             'defects_filled': defects_filled,
             'open_issues': open_issues, 'errors': errors[:10], 'errors_total': len(errors)}
 
@@ -231,10 +216,12 @@ GUN_WB_BRAND_ID = ("COALESCE(st.brand_id, (SELECT st2.brand_id FROM weld_point w
                    "JOIN station st2 ON st2.UniqueID = w2.station_id WHERE w2.gun_id = g.UniqueID LIMIT 1))")
 
 # Станция ТОЧКИ по WB (алиасы: точка — s, модель — m). Подставляется в чтения точки.
+# v_wb_point — по рабочим ключам; справочник модели чистый (код заглавными), номер карточки
+# точки — число, CAST даёт ту же форму, что normalize.spot_key ('20').
 POINT_WB_JOIN = """
-        LEFT JOIN v_wb_point wp ON wp.model_code = UPPER(m.model_code) AND wp.spot_number = CAST(s.spot_number AS TEXT)
+        LEFT JOIN v_wb_point wp ON wp.model_key = UPPER(m.model_code) AND wp.spot_key = CAST(s.spot_number AS TEXT)
         LEFT JOIN station wst ON wst.UniqueID = wp.station_id"""
-POINT_WB_STATION_NAME = ("CASE WHEN wp.model_code IS NULL THEN '⚠ нет в WB' "
+POINT_WB_STATION_NAME = ("CASE WHEN wp.model_key IS NULL THEN '⚠ нет в WB' "
                          "WHEN wp.n_stations = 0 THEN '⚠ станция WB не распознана' "
                          "WHEN wp.n_stations > 1 THEN '⚠ несколько станций в WB' "
                          "ELSE wst.station_name END")
@@ -251,9 +238,9 @@ def point_station(db, model_code, spot_number):
     """(station_id | None, n_stations) точки по WB. Станция — только если она одна."""
     if not model_code or spot_number in (None, ''):
         return None, 0
-    # v_wb_point: номер точки и код модели уже нормализованы ('0020' = '20', 'a01' = 'A01')
-    r = db.execute('SELECT n_stations, station_id FROM v_wb_point WHERE model_code=UPPER(TRIM(?)) AND spot_number=?',
-                   (model_code, spot_key(spot_number))).fetchone()
+    # v_wb_point — по рабочим ключам: ввод приводится теми же правилами (app/normalize.py)
+    r = db.execute('SELECT n_stations, station_id FROM v_wb_point WHERE model_key=? AND spot_key=?',
+                   (code_key(model_code), spot_key(spot_number))).fetchone()
     return (r[1], r[0] or 0) if r else (None, 0)
 
 
@@ -263,8 +250,8 @@ def point_gun(db, model_code, spot_number, spot_id=None):
     None (неоднозначно, это в Сверке)."""
     r = None
     if model_code and spot_number not in (None, ''):
-        r = db.execute('SELECT gun_id, n_guns FROM v_wb_point WHERE model_code=UPPER(TRIM(?)) AND spot_number=?',
-                       (model_code, spot_key(spot_number))).fetchone()
+        r = db.execute('SELECT gun_id, n_guns FROM v_wb_point WHERE model_key=? AND spot_key=?',
+                       (code_key(model_code), spot_key(spot_number))).fetchone()
     if r and r[0] is not None:
         return r[0]
     if (r and r[1] > 1) or spot_id is None:
@@ -370,26 +357,26 @@ def _collect_issues(db):
     def add(key, kind, **kw):
         issues[key] = dict(kind=kind, **kw)
 
+    # всё сопоставление — по рабочим ключам (weld_point_key); в Сверку — сырые значения,
+    # как их ввели (их узнают в Excel), кроме сводных строк по ключу станции / G-номеру
+    keyed = ('SELECT w.model_code, w.spot_number, w.gun_mntc, w.welding_type, w.station_id, w.gun_id, '
+             'k.model_key, k.station_key, k.g_num FROM weld_point w '
+             'LEFT JOIN weld_point_key k ON k.weld_point_id = w.id')
     matcher = StationMatcher(db)
     unmatched = defaultdict(int)
-    for code, text in db.execute('SELECT model_code, wb_station FROM weld_point WHERE station_id IS NULL'):
-        if wb_station_code(text) is None:
-            continue
-        if matcher.match(code, text) is None:
-            unmatched[(code, wb_station_code(text))] += 1
+    for _c, _n, _m, _w, station_id, _g, model_key, st_key, _gn in db.execute(keyed + ' WHERE w.station_id IS NULL'):
+        if st_key is not None and matcher.match(model_key, st_key) is None:
+            unmatched[(model_key, st_key)] += 1
     for (code, st), n in unmatched.items():
         add(f'st:{code}:{st}', 'station_not_in_directory', model_code=code, wb_station=st,
             where_found='WB', rows_count=n)
 
-    for code, num in db.execute("SELECT model_code, spot_number FROM weld_point "
-                                "WHERE TRIM(COALESCE(wb_station,''))=''"):
+    for code, num, *_rest in db.execute(keyed + ' WHERE k.station_key IS NULL'):
         add(f'nost:{code}:{num}', 'wb_no_station', model_code=code, spot_number=num, where_found='WB', rows_count=1)
 
     gnums = {g for (g,) in db.execute('SELECT g_num FROM gun')}
     missing_g = defaultdict(lambda: [0, set()])
-    for code, num, mntc, wtype in db.execute('SELECT model_code, spot_number, gun_mntc, welding_type '
-                                             'FROM weld_point WHERE gun_id IS NULL'):
-        g = parse_g(mntc)
+    for code, num, mntc, wtype, _s, _g, _mk, _sk, g in db.execute(keyed + ' WHERE w.gun_id IS NULL'):
         if g is not None and g not in gnums:
             missing_g[g][0] += 1
             missing_g[g][1].add(code)
@@ -406,11 +393,11 @@ def _collect_issues(db):
     _collect_register_issues(db, add)
 
     names = {sid: nm for sid, nm in db.execute('SELECT UniqueID, station_name FROM station')}
-    for code, num, ids in db.execute(f"""
-            SELECT UPPER(TRIM(model_code)), {spot_key_sql('spot_number')}, GROUP_CONCAT(DISTINCT station_id)
-            FROM weld_point WHERE station_id IS NOT NULL
-            GROUP BY UPPER(TRIM(model_code)), {spot_key_sql('spot_number')}
-            HAVING COUNT(DISTINCT station_id) > 1"""):
+    for code, num, ids in db.execute("""
+            SELECT k.model_key, k.spot_key, GROUP_CONCAT(DISTINCT w.station_id)
+            FROM weld_point w JOIN weld_point_key k ON k.weld_point_id = w.id
+            WHERE w.station_id IS NOT NULL AND k.spot_key IS NOT NULL
+            GROUP BY k.model_key, k.spot_key HAVING COUNT(DISTINCT w.station_id) > 1"""):
         add(f'p2:{code}:{num}', 'point_two_stations', model_code=code, spot_number=num, where_found='WB',
             details=' / '.join(names.get(int(i), i) for i in ids.split(',')))
 
@@ -438,32 +425,50 @@ def _collect_issues(db):
 
 def _collect_register_issues(db, add):
     """Перечень оборудования (Excel цеха) против WB и справочника пистолетов.
+    Сверка строки с WB считается здесь же и сохраняется в equipment_link.wb_status —
+    колонка «Сходится с WB» в Перечне читает готовый результат (одно правило, без SQL-копии).
     Пока Перечень пуст (ещё не вставлен) — молчим, чтобы не завалить Сверку."""
     from app.equipment import same_station
-    reg = db.execute('SELECT el.g_num, el.gun_id, el.reg_station, el.station_id, ei.location '
+    reg = db.execute('SELECT el.item_id, el.g_num, el.gun_id, el.reg_station, el.station_id, ei.location '
                      'FROM equipment_link el JOIN equipment_item ei ON ei.id = el.item_id '
                      'WHERE el.g_num IS NOT NULL ORDER BY ei.row_order, ei.id').fetchall()
     if not reg:
         return
     counts = defaultdict(int)
     for row in reg:
-        counts[row[0]] += 1
+        counts[row[1]] += 1
     for g, n in counts.items():
         if n > 1:
             add(f'regdup:{g}', 'register_dup_g', g_num=g, where_found='Перечень', rows_count=n)
-    wb_names = {gid: set(names.split(',')) for gid, names in db.execute(
-        'SELECT gun_id, station_names FROM v_wb_gun WHERE station_names IS NOT NULL')}
-    seen = set()
-    for g, gid, reg_station, reg_station_id, location in reg:
-        if g in seen:                                      # повтор G — по первой строке
+    wb_guns, wb_names = set(), {}
+    for gid, names in db.execute('SELECT gun_id, station_names FROM v_wb_gun'):
+        wb_guns.add(gid)
+        if names:
+            wb_names[gid] = set(names.split(','))
+    seen, status = set(), []
+    for item_id, g, gid, reg_station, reg_station_id, location in reg:
+        if reg_station_id is None:
+            st = 'no_station'
+        elif gid not in wb_guns:
+            st = 'no_wb'
+        elif gid not in wb_names:
+            st = 'wb_unknown'                              # в WB есть, станция там не распознана
+        elif any(same_station(reg_station, n) for n in wb_names[gid]):
+            st = 'ok'
+        else:
+            st = 'mismatch'
+        status.append((st, item_id))
+        if g in seen:                                      # повтор G — в Сверку по первой строке
             continue
         seen.add(g)
-        if reg_station_id is None:
+        if st == 'no_station':
             add(f'regnost:{g}', 'register_no_station', g_num=g, gun_id=gid, where_found='Перечень',
                 details=f'«Станция» в Перечне: {location or "пусто"}')
-        elif gid in wb_names and not any(same_station(reg_station, n) for n in wb_names[gid]):
+        elif st == 'mismatch':
             add(f'regst:{g}', 'register_station_mismatch', g_num=g, gun_id=gid, where_found='Перечень / WB',
                 wb_station=' / '.join(sorted(wb_names[gid])), details=f'по Перечню: {reg_station}')
+    db.executemany('UPDATE equipment_link SET wb_status=? WHERE item_id=? AND wb_status IS NOT ?',
+                   [(st, iid, st) for st, iid in status])
     for gid, g in db.execute('SELECT UniqueID, g_num FROM gun'):
         if g not in counts:
             add(f'noreg:{gid}', 'gun_not_in_register', gun_id=gid, g_num=g, where_found='ТО / дефекты')
