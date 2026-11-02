@@ -192,3 +192,50 @@ def test_run_wb_sync_keeps_journal_clean_and_triggers_back(client, app):
     assert db.execute("SELECT station_id FROM weld_point WHERE spot_number='93012'").fetchone()[0] == sid
     assert db.execute('SELECT MAX(id) FROM change_log').fetchone()[0] == log_before   # производное — не в Журнал
     assert trig() == n_trig                                                            # триггеры журнала на месте
+
+
+def test_spot_key_normalizes_padded_numbers():
+    from app.wb_source import spot_key
+    assert spot_key('0020') == spot_key(' 20 ') == spot_key('20.0') == spot_key(20) == '20'
+    assert spot_key('20A') == '20A' and spot_key('1.2.3') == '1.2.3' and spot_key(None) == ''
+
+
+def test_padded_wb_spot_number_gives_defect_station_and_gun(register_client, client, app):
+    """Сервер 2026-11-02: в WB номера точек вставлены с нулями («0020») — у дефекта пропадали
+    станция, участок и G. Номер сравнивается нормализованно."""
+    (sid, name, code), = _chery_stations(app, 1)
+    gid = _gun(client, 93020)
+    _wb_row(client, 93020, '0093021', code)                # номер в WB с нулями впереди
+    otk = register_client(department='ОТК', login='wbs_pad@weldteam.kz')
+    did = otk.post('/api/defects/register', json={'model_id': 1, 'spot_number': '93021',
+                                                  'problem_code': 'CR'}).get_json()['defect_id']
+    assert _db(app).execute('SELECT gun_id, snap_station_id FROM defects WHERE UniqueID=?',
+                            (did,)).fetchone() == (gid, sid)
+    row = next(x for x in client.get('/api/defects/all').get_json()['open'] if x['UniqueID'] == did)
+    assert row['station_name'] == name and row['g_num'] == 93020
+
+
+def test_sync_fills_defects_registered_without_station_and_gun(register_client, client, app):
+    """Дефект, зарегистрированный, пока WB не сопоставлялся, — дозаполняется из WB (только пустое)."""
+    from app.wb_source import sync_wb
+    (sid, name, code), = _chery_stations(app, 1)
+    gid = _gun(client, 93030)
+    _wb_row(client, 93030, '0093031', code)
+    otk = register_client(department='ОТК', login='wbs_fill@weldteam.kz')
+    did = otk.post('/api/defects/register', json={'model_id': 1, 'spot_number': '93031',
+                                                  'problem_code': 'CR'}).get_json()['defect_id']
+    db = _db(app)
+    db.execute('UPDATE defects SET gun_id=NULL, snap_g_num=NULL, snap_station_id=NULL, snap_station_name=NULL '
+               'WHERE UniqueID=?', (did,))                 # как на сервере до исправления
+    db.commit()
+    res = sync_wb(db)
+    db.commit()
+    assert res['defects_filled'] >= 1
+    assert db.execute('SELECT gun_id, snap_g_num, snap_station_id, snap_station_name FROM defects WHERE UniqueID=?',
+                      (did,)).fetchone() == (gid, 93030, sid, name)
+    # заполненное не трогаем: станция дефекта «не плывёт»
+    db.execute('UPDATE defects SET snap_station_id=?, snap_station_name=? WHERE UniqueID=?', (sid, 'ЗАФИКСИРОВАНО', did))
+    db.commit()
+    sync_wb(db)
+    db.commit()
+    assert db.execute('SELECT snap_station_name FROM defects WHERE UniqueID=?', (did,)).fetchone()[0] == 'ЗАФИКСИРОВАНО'

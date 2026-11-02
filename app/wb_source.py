@@ -24,6 +24,28 @@ _G_RE = re.compile(r'G[.\s]*0*(\d+)', re.I)
 SPOT_WELDING_TYPES = ('PSW', 'RSW')
 
 
+def spot_key(value):
+    """Номер точки для сравнения: '0020' / '20' / '20.0' → '20'; нечисловое — как есть.
+    В WB номера вставляют из Excel по-разному (с нулями впереди), в карточке точки — число."""
+    s = '' if value is None else str(value).strip()
+    if re.fullmatch(r'[0-9][0-9.]*', s):
+        try:
+            f = float(s)
+        except ValueError:
+            return s
+        if f.is_integer():
+            return str(int(f))
+    return s
+
+
+def spot_key_sql(expr):
+    """То же правило, что spot_key, — в SQL (для представления v_wb_point и соединений)."""
+    t = f'TRIM({expr})'
+    return (f"(CASE WHEN {t} GLOB '[0-9]*' AND {t} NOT GLOB '*[^0-9.]*' "
+            f"AND CAST({t} AS REAL) = CAST(CAST({t} AS REAL) AS INTEGER) "
+            f"THEN CAST(CAST(CAST({t} AS REAL) AS INTEGER) AS TEXT) ELSE {t} END)")
+
+
 def parse_g(text):
     """'G.153' / 'G 033' → 153 / 33; нет номера → None."""
     m = _G_RE.search(text or '')
@@ -140,8 +162,10 @@ def sync_wb(db):
             failed += 1
             errors[-1] = f'строка WB #{wid} — {errors[-1]}'
     _, stations = _step(db, 'wb_stations', lambda: sync_wb_stations(db), errors)
+    _, defects_filled = _step(db, 'defects_fill', lambda: fill_defects_from_wb(db), errors)
     _, open_issues = _step(db, 'wb_issues', lambda: rebuild_issues(db), errors)
     return {'register': register, 'relinked': relinked, 'relink_failed': failed, 'stations_updated': stations,
+            'defects_filled': defects_filled,
             'open_issues': open_issues, 'errors': errors[:10], 'errors_total': len(errors)}
 
 
@@ -208,7 +232,7 @@ GUN_WB_BRAND_ID = ("COALESCE(st.brand_id, (SELECT st2.brand_id FROM weld_point w
 
 # Станция ТОЧКИ по WB (алиасы: точка — s, модель — m). Подставляется в чтения точки.
 POINT_WB_JOIN = """
-        LEFT JOIN v_wb_point wp ON wp.model_code = m.model_code AND wp.spot_number = CAST(s.spot_number AS TEXT)
+        LEFT JOIN v_wb_point wp ON wp.model_code = UPPER(m.model_code) AND wp.spot_number = CAST(s.spot_number AS TEXT)
         LEFT JOIN station wst ON wst.UniqueID = wp.station_id"""
 POINT_WB_STATION_NAME = ("CASE WHEN wp.model_code IS NULL THEN '⚠ нет в WB' "
                          "WHEN wp.n_stations = 0 THEN '⚠ станция WB не распознана' "
@@ -227,10 +251,71 @@ def point_station(db, model_code, spot_number):
     """(station_id | None, n_stations) точки по WB. Станция — только если она одна."""
     if not model_code or spot_number in (None, ''):
         return None, 0
-    r = db.execute('SELECT COUNT(DISTINCT station_id), MIN(station_id) FROM weld_point '
-                   'WHERE model_code=? AND TRIM(spot_number)=?', (model_code, str(spot_number).strip())).fetchone()
-    n = r[0] or 0
-    return (r[1] if n == 1 else None), n
+    # v_wb_point: номер точки и код модели уже нормализованы ('0020' = '20', 'a01' = 'A01')
+    r = db.execute('SELECT n_stations, station_id FROM v_wb_point WHERE model_code=UPPER(TRIM(?)) AND spot_number=?',
+                   (model_code, spot_key(spot_number))).fetchone()
+    return (r[1], r[0] or 0) if r else (None, 0)
+
+
+def point_gun(db, model_code, spot_number, spot_id=None):
+    """Пистолет точки: по WB, если он там один; в WB пистолет не определён (нет G / G не в
+    Перечне) — действующая связка точка↔пистолет; в WB у точки несколько пистолетов —
+    None (неоднозначно, это в Сверке)."""
+    r = None
+    if model_code and spot_number not in (None, ''):
+        r = db.execute('SELECT gun_id, n_guns FROM v_wb_point WHERE model_code=UPPER(TRIM(?)) AND spot_number=?',
+                       (model_code, spot_key(spot_number))).fetchone()
+    if r and r[0] is not None:
+        return r[0]
+    if (r and r[1] > 1) or spot_id is None:
+        return None
+    ws = db.execute('SELECT gun_id FROM welding_setup WHERE spot_id=? AND is_active=1 ORDER BY UniqueID LIMIT 1',
+                    (spot_id,)).fetchone()
+    return ws[0] if ws else None
+
+
+# С какого дня дефекты могли зарегистрироваться без станции/пистолета (развёртывание «WB —
+# эталон», 0022: номера точек WB с нулями не сопоставлялись, станции не были проставлены).
+DEFECT_FILL_SINCE = '2026-10-30'
+
+
+def fill_defects_from_wb(db):
+    """Дозаполнить из WB дефекты, у которых при регистрации не определились пистолет и/или
+    станция. Только ПУСТЫЕ поля — определённая станция дефекта не меняется (правило «не
+    плывёт»). Открытые дефекты + все зарегистрированные с DEFECT_FILL_SINCE. → число дефектов."""
+    from app.defect_flow import OPEN_STATUSES
+    ph = ','.join('?' * len(OPEN_STATUSES))
+    rows = db.execute(f"""
+        SELECT d.UniqueID, d.gun_id, d.snap_station_id, d.snap_g_num, d.spot_id, mo.model_code,
+               COALESCE(CAST(s.spot_number AS TEXT), d.manual_spot_number)
+        FROM defects d
+        LEFT JOIN spot s ON s.UniqueID = d.spot_id
+        LEFT JOIN model mo ON mo.UniqueID = COALESCE(s.model_id, d.manual_model_id)
+        WHERE (d.gun_id IS NULL OR d.snap_station_id IS NULL OR d.snap_g_num IS NULL)
+          AND (COALESCE(d.status, 'registered') IN ({ph}) OR d.df_date >= ?)""",
+        (*OPEN_STATUSES, DEFECT_FILL_SINCE)).fetchall()
+    filled = 0
+    for did, gun_id, station_id, snap_g, spot_id, code, num in rows:
+        changed = False
+        if gun_id is None:
+            gun_id = point_gun(db, code, num, spot_id)
+            if gun_id is not None:
+                db.execute('UPDATE defects SET gun_id=? WHERE UniqueID=?', (gun_id, did))
+                changed = True
+        if snap_g is None and gun_id is not None:
+            db.execute('UPDATE defects SET snap_g_num=(SELECT g_num FROM gun WHERE UniqueID=?), '
+                       'snap_gun_type=(SELECT gun_type FROM gun WHERE UniqueID=?) WHERE UniqueID=?',
+                       (gun_id, gun_id, did))
+            changed = True
+        if station_id is None:
+            sid = defect_station(db, did)
+            if sid is not None:
+                db.execute('UPDATE defects SET snap_station_id=?, '
+                           'snap_station_name=(SELECT station_name FROM station WHERE UniqueID=?) WHERE UniqueID=?',
+                           (sid, sid, did))
+                changed = True
+        filled += changed
+    return filled
 
 
 def gun_station(db, gun_id):
@@ -321,9 +406,10 @@ def _collect_issues(db):
     _collect_register_issues(db, add)
 
     names = {sid: nm for sid, nm in db.execute('SELECT UniqueID, station_name FROM station')}
-    for code, num, ids in db.execute("""
-            SELECT model_code, TRIM(spot_number), GROUP_CONCAT(DISTINCT station_id) FROM weld_point
-            WHERE station_id IS NOT NULL GROUP BY model_code, TRIM(spot_number)
+    for code, num, ids in db.execute(f"""
+            SELECT UPPER(TRIM(model_code)), {spot_key_sql('spot_number')}, GROUP_CONCAT(DISTINCT station_id)
+            FROM weld_point WHERE station_id IS NOT NULL
+            GROUP BY UPPER(TRIM(model_code)), {spot_key_sql('spot_number')}
             HAVING COUNT(DISTINCT station_id) > 1"""):
         add(f'p2:{code}:{num}', 'point_two_stations', model_code=code, spot_number=num, where_found='WB',
             details=' / '.join(names.get(int(i), i) for i in ids.split(',')))

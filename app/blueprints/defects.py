@@ -8,6 +8,7 @@ from app import defect_flow as df
 from app.db import get_db
 from app.errors import api_error
 from app.snapshots import snapshot_defect
+from app.wb_source import point_gun, spot_key_sql
 
 bp = Blueprint('defects', __name__)
 
@@ -115,21 +116,16 @@ def _photo_required_error(db, photos):
 def _resolve_spot_gun(db, model_id, spot_number):
     """Точка и пистолет для регистрации/исправления по (модель, № точки).
 
-    Источник — Weld Balance: если точка есть в WB, пистолет берётся из WB (только если
-    он там один; несколько пистолетов → None, точка уже в Сверке). Точки нет в WB —
-    по действующей связке точка↔пистолет (детерминированно), станции у такого
-    дефекта не будет (строго по WB). Вернёт {'spot_id', 'gun_id'} или None (ручной ввод)."""
+    Пистолет — wb_source.point_gun: из WB, если он там один; в WB не определён —
+    действующая связка точка↔пистолет; несколько в WB → None (Сверка). Номер точки
+    сравнивается нормализованно ('0020' = '20'). Вернёт {'spot_id', 'gun_id'} или None
+    (карточки точки нет — ручной ввод)."""
     spot = db.execute('SELECT UniqueID FROM spot WHERE model_id=? AND spot_number=? ORDER BY UniqueID LIMIT 1',
                       (model_id, spot_number)).fetchone()
     if not spot:
         return None
-    wb = db.execute("""SELECT v.gun_id FROM v_wb_point v JOIN model mo ON mo.model_code = v.model_code
-                       WHERE mo.UniqueID=? AND v.spot_number=?""", (model_id, str(spot_number).strip())).fetchone()
-    if wb:
-        return {'spot_id': spot[0], 'gun_id': wb[0]}
-    ws = db.execute('SELECT gun_id FROM welding_setup WHERE spot_id=? AND is_active=1 ORDER BY UniqueID LIMIT 1',
-                    (spot[0],)).fetchone()
-    return {'spot_id': spot[0], 'gun_id': ws[0]} if ws else None
+    code = db.execute('SELECT model_code FROM model WHERE UniqueID=?', (model_id,)).fetchone()
+    return {'spot_id': spot[0], 'gun_id': point_gun(db, code[0] if code else None, spot_number, spot[0])}
 
 
 @bp.route('/api/defects/register', methods=['POST'])
@@ -197,7 +193,7 @@ def add_defect():
 @bp.route('/api/defects/all')
 def defects_all():
     db = get_db()
-    base = """
+    base = f"""
         SELECT d.UniqueID, d.df_date, d.problem_code,
                COALESCE(d.status,'registered')             as status,
                COALESCE(d.root_cause,'')                   as root_cause,
@@ -236,8 +232,8 @@ def defects_all():
         LEFT JOIN gun    g       ON d.gun_id               = g.UniqueID
         -- станция (если нет снимка) — только из Weld Balance: точка по модели + №,
         -- а без точки (регистрация по G-номеру) — станция пистолета по WB
-        LEFT JOIN v_wb_point wbp ON wbp.model_code = COALESCE(m.model_code, enrich_m.model_code)
-                                AND wbp.spot_number = TRIM(COALESCE(CAST(s.spot_number AS TEXT), d.manual_spot_number))
+        LEFT JOIN v_wb_point wbp ON wbp.model_code = UPPER(COALESCE(m.model_code, enrich_m.model_code))
+                                AND wbp.spot_number = {spot_key_sql('COALESCE(CAST(s.spot_number AS TEXT), d.manual_spot_number)')}
         LEFT JOIN station wbp_st ON wbp_st.UniqueID = wbp.station_id
         LEFT JOIN v_wb_gun wbg   ON wbg.gun_id = d.gun_id AND d.spot_id IS NULL AND d.manual_spot_number IS NULL
         LEFT JOIN station wbg_st ON wbg_st.UniqueID = wbg.station_id
