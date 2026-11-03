@@ -142,3 +142,6 @@ def _configure_logging(app: Flask) -> None:
         ))
         app.logger.addHandler(handler)
     app.logger.setLevel(level)
+    # свой обработчик есть — в root не передаём, иначе строка печатается дважды
+    # (root получает обработчик от wsgi.py basicConfig и от Alembic при миграциях)
+    app.logger.propagate = False

@@ -22,7 +22,9 @@ if not config.get_main_option('sqlalchemy.url'):
     config.set_main_option('sqlalchemy.url', f'sqlite:///{db_path}')
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Миграции запускаются и при старте сервера (create_app): логгеры приложения и waitress
+    # к этому моменту уже созданы — не отключаем их (иначе ошибки API пропадают из лога).
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = None  # схема ведётся вручную (raw SQL), autogenerate не используем
 
