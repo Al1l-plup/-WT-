@@ -331,14 +331,17 @@ def merge_into_open(conn, parent_id, when, registered_by):
 
 def reopen_as_serial(conn, parent_id, when, registered_by):
     """Переоткрыть родителя как серийный: вернуть отделу-закрывшему (для ОТО-кейса — отделу,
-    что передавал в ОТО). Считается возвратом + серией; добавляем новое появление."""
+    что передавал в ОТО). Считается возвратом + серией; добавляем новое появление.
+    Родитель на согласовании ОТК ещё держит открытый этап ОТК — он закрывается повтором
+    (serial_repeat), иначе у дефекта два открытых этапа. Этап сменился → «в работе» снимается."""
     row = conn.execute('SELECT closed_by_dept, delegated_from_dept, problem_code FROM defects WHERE UniqueID=?',
                         (parent_id,)).fetchone()
     closed_by, deleg, code = row[0], row[1], row[2]
     chain = route_for(conn, code)
     back = closed_by or deleg or (chain[0] if chain else None)
+    _close_open_stage(conn, parent_id, 'serial_repeat', note='Повтор на точке — возврат отделу, закрывшему дефект')
     conn.execute("""UPDATE defects SET status='in_review', is_serial=1, current_stage_dept=?,
-                      return_count=return_count+1, stage_entered_at=?
+                      return_count=return_count+1, stage_entered_at=?, assigned_worker_id=NULL
                     WHERE UniqueID=?""", (back, _now(), parent_id))
     _open_stage(conn, parent_id, back, None)
     conn.execute('INSERT INTO defect_occurrence (defect_id, occ_date, registered_by) VALUES (?,?,?)',
@@ -351,7 +354,8 @@ def register_occurrence(conn, *, problem_code, spot_id=None, gun_id=None, regist
     """Зафиксировать дефект. Серийный повтор на той же точке (в окне, та же группа):
     — если прежний дефект уже закрыт/не выявлен → переоткрыть его как серийный;
     — если он ещё открыт → долить появление в него (не плодя карточку).
-    Иначе — создать новый и завести в цепочку. Возвращает {defect_id, serial, stage}."""
+    Иначе — создать новый и завести в цепочку. Возвращает {defect_id, serial, stage, repeat}:
+    repeat — 'reopened' (переоткрыт) / 'merged' (долит в открытый) / None (новый дефект)."""
     when = when or date.today().isoformat()
     code = (problem_code or '').strip().upper()
     parent = find_serial_parent(conn, spot_id, code, when)
@@ -359,10 +363,12 @@ def register_occurrence(conn, *, problem_code, spot_id=None, gun_id=None, regist
         pstatus = conn.execute('SELECT COALESCE(status,"") FROM defects WHERE UniqueID=?', (parent,)).fetchone()[0]
         if pstatus in ('closed', 'pending_otk', 'unresolved'):
             back = reopen_as_serial(conn, parent, when, registered_by)      # закрытый/не выявленный → переоткрыть
+            repeat = 'reopened'
         else:
             merge_into_open(conn, parent, when, registered_by)              # ещё открыт → долить в него
             back = conn.execute('SELECT current_stage_dept FROM defects WHERE UniqueID=?', (parent,)).fetchone()[0]
-        return {'defect_id': parent, 'serial': True, 'stage': back}
+            repeat = 'merged'
+        return {'defect_id': parent, 'serial': True, 'stage': back, 'repeat': repeat}
     cur = conn.execute("""INSERT INTO defects
             (problem_code, root_cause, solution, df_date, created_at, spot_id, gun_id, status,
              manual_spot_number, manual_model_id, worker_register_id)
@@ -375,7 +381,7 @@ def register_occurrence(conn, *, problem_code, spot_id=None, gun_id=None, regist
     # (выше) снимок прежней карточки не трогает — у неё история своего дня.
     snapshot_defect(conn, did, SNAP_REGISTRATION)
     stage = enter_chain(conn, did, registered_by)
-    return {'defect_id': did, 'serial': False, 'stage': stage}
+    return {'defect_id': did, 'serial': False, 'stage': stage, 'repeat': None}
 
 
 def reopen(conn, defect_id, actor_id=None, note=None):

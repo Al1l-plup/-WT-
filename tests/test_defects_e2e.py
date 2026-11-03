@@ -98,6 +98,24 @@ def test_e2e_eo_route_and_unresolved(register_client):
     assert any(d['UniqueID'] == did for d in u['otk'].get('/api/defects/all').get_json()['unresolved'])
 
 
+# ── 3b. Сообщение ОТК о повторе: долит в открытый или переоткрыт ─────────────
+def test_e2e_repeat_message_says_what_happened(register_client, app):
+    db = sqlite3.connect(app.config['DB_PATH'])
+    spot, model_id = db.execute("""SELECT spot_number, model_id FROM spot WHERE UniqueID NOT IN
+                                   (SELECT spot_id FROM defects WHERE spot_id IS NOT NULL) LIMIT 1""").fetchone()
+    db.close()
+    u = _clients(register_client)
+    did = _reg_spot(u['otk'], model_id, spot, code='BT')['defect_id']
+    # повтор, пока дефект на рассмотрении: этап не менялся — так и сказано, код дефекта — свой
+    msg = _reg_spot(u['otk'], model_id, spot, code='LP')['message']
+    assert f'#{did} (BT)' in msg and 'LP' in msg
+    assert 'повтор добавлен' in msg and 'переоткрыт' not in msg
+    # повтор, когда закрытие ждёт ОТК: дефект переоткрыт и вернулся закрывшему отделу
+    _act(u['prod'], did, 'close', cause='x', countermeasure='y', vin='Z1')
+    msg = _reg_spot(u['otk'], model_id, spot, code='SN')['message']
+    assert f'#{did} (BT)' in msg and 'переоткрыт' in msg and 'Производство' in msg
+
+
 # ── 4. Серийность (та же группа) + переоткрытие только WeldTeam ──────────────
 def test_e2e_serial_and_reopen(register_client, app):
     bs = _b_spot(app)

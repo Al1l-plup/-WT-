@@ -129,6 +129,16 @@ def _resolve_spot_gun(db, model_id, spot_number, on_date=None):
     return {'spot_id': spot[0], 'gun_id': point_gun(db, code[0] if code else None, spot_number, spot[0], on_date)}
 
 
+def _repeat_message(db, res, code, spot_number):
+    """Сообщение ОТК о серийном повторе: что стало с прежним дефектом этой точки."""
+    did = res['defect_id']
+    own = db.execute('SELECT problem_code FROM defects WHERE UniqueID=?', (did,)).fetchone()[0]
+    head = f'⚠ ПОВТОР (серийный)! {code} на точке №{spot_number} → дефект #{did} ({own})'
+    if res['repeat'] == 'merged':
+        return f'{head} ещё на рассмотрении у отдела «{res["stage"]}» — повтор добавлен к нему.'
+    return f'{head} переоткрыт и вернулся отделу «{res["stage"]}» на перерассмотрение.'
+
+
 @bp.route('/api/defects/register', methods=['POST'])
 def register_defect():
     uid, dept, _is_admin, priv = _ctx()
@@ -158,8 +168,7 @@ def register_defect():
             msg = (f'Дефект {problem_code} зарегистрирован → отдел «{res["stage"]}». '
                    f'⚠ Точка №{spot_number} не найдена в БД — уточните при рассмотрении.')
         if res['serial']:
-            msg = (f'⚠ ПОВТОР (серийный)! Дефект {problem_code} на точке №{spot_number} '
-                   f'вернулся отделу «{res["stage"]}» на перерассмотрение.')
+            msg = _repeat_message(db, res, problem_code, spot_number)
         _save_photos(db, res['defect_id'], photos, uid)   # снимок сделала регистрация (до цепочки)
         db.commit()
         return jsonify({'status': 'success', 'message': msg, 'serial': res['serial'],
