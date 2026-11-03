@@ -7,7 +7,7 @@ from flask import Blueprint, current_app, jsonify, request, send_file, session
 from app import defect_flow as df
 from app.db import get_db
 from app.errors import api_error
-from app.snapshots import snapshot_defect
+from app.snapshots import SNAP_CORRECTION, SNAP_REGISTRATION, snap_note, snapshot_defect
 from app.wb_source import point_gun
 
 bp = Blueprint('defects', __name__)
@@ -113,19 +113,20 @@ def _photo_required_error(db, photos):
     return None
 
 
-def _resolve_spot_gun(db, model_id, spot_number):
+def _resolve_spot_gun(db, model_id, spot_number, on_date=None):
     """Точка и пистолет для регистрации/исправления по (модель, № точки).
 
     Пистолет — wb_source.point_gun: из WB, если он там один; в WB не определён —
     действующая связка точка↔пистолет; несколько в WB → None (Сверка). Номер точки
-    сравнивается нормализованно ('0020' = '20'). Вернёт {'spot_id', 'gun_id'} или None
+    сравнивается нормализованно ('0020' = '20'). on_date — дата дефекта при исправлении:
+    пистолет на ту дату по истории связок. Вернёт {'spot_id', 'gun_id'} или None
     (карточки точки нет — ручной ввод)."""
     spot = db.execute('SELECT UniqueID FROM spot WHERE model_id=? AND spot_number=? ORDER BY UniqueID LIMIT 1',
                       (model_id, spot_number)).fetchone()
     if not spot:
         return None
     code = db.execute('SELECT model_code FROM model WHERE UniqueID=?', (model_id,)).fetchone()
-    return {'spot_id': spot[0], 'gun_id': point_gun(db, code[0] if code else None, spot_number, spot[0])}
+    return {'spot_id': spot[0], 'gun_id': point_gun(db, code[0] if code else None, spot_number, spot[0], on_date)}
 
 
 @bp.route('/api/defects/register', methods=['POST'])
@@ -159,8 +160,7 @@ def register_defect():
         if res['serial']:
             msg = (f'⚠ ПОВТОР (серийный)! Дефект {problem_code} на точке №{spot_number} '
                    f'вернулся отделу «{res["stage"]}» на перерассмотрение.')
-        _save_photos(db, res['defect_id'], photos, uid)
-        snapshot_defect(db, res['defect_id'])
+        _save_photos(db, res['defect_id'], photos, uid)   # снимок сделала регистрация (до цепочки)
         db.commit()
         return jsonify({'status': 'success', 'message': msg, 'serial': res['serial'],
                         'stage': res['stage'], 'defect_id': res['defect_id'], 'found_in_db': bool(row)})
@@ -182,7 +182,7 @@ def add_defect():
                                  worker_register_id, worker_solve_id, spot_id, gun_id, status)
             VALUES (?, '', '', 'В процессе устранения', DATE('now'), ?, NULL, ?, ?, 'registered')
         """, (data['problem_code'], _current_worker_id(), int(data['spot_id']), int(data['gun_id'])))
-        snapshot_defect(db, cur.lastrowid)
+        snapshot_defect(db, cur.lastrowid, SNAP_REGISTRATION)
         db.commit()
         return jsonify({'status': 'success', 'message': 'Карточка дефекта сохранена!'})
     except Exception as e:
@@ -204,7 +204,7 @@ def defects_all():
                COALESCE(d.snap_model_type, m.type, enrich_m.type, '')   as model_type,
                COALESCE(d.snap_g_num, g.g_num, 0)          as g_num,
                COALESCE(d.snap_gun_type, g.gun_type,'—')   as gun_model,
-               COALESCE(d.snap_station_name, wbp_st.station_name, wbg_st.station_name, '—') as station_name,
+               COALESCE(d.snap_station_name, '—')          as station_name,
                COALESCE(w_asgn.surname,'')                 as asgn_surname,
                COALESCE(w_solv.surname,'')                 as solv_surname,
                d.manual_spot_number,
@@ -230,21 +230,14 @@ def defects_all():
         LEFT JOIN model  enrich_m ON d.manual_model_id    = enrich_m.UniqueID
         LEFT JOIN brand  enrich_b ON enrich_m.brand_id    = enrich_b.UniqueID
         LEFT JOIN gun    g       ON d.gun_id               = g.UniqueID
-        -- станция (если нет снимка) — только из Weld Balance: точка (карточка) по рабочим
-        -- ключам WB; без точки (регистрация по G-номеру) — станция пистолета по WB.
-        -- Ручной № точки сюда не сравнивается сырым текстом: его станция — в снимке
-        -- (регистрация/дозаполнение считают её по app/normalize.py).
-        LEFT JOIN v_wb_point wbp ON wbp.model_key = UPPER(m.model_code)
-                                AND wbp.spot_key = CAST(s.spot_number AS TEXT)
-        LEFT JOIN station wbp_st ON wbp_st.UniqueID = wbp.station_id
-        LEFT JOIN v_wb_gun wbg   ON wbg.gun_id = d.gun_id AND d.spot_id IS NULL AND d.manual_spot_number IS NULL
-        LEFT JOIN station wbg_st ON wbg_st.UniqueID = wbg.station_id
+        -- станция и участок — ТОЛЬКО из снимка дефекта (как было в день дефекта): сегодняшний
+        -- WB историю не переписывает. Не зафиксирована → «—» (карточка подскажет WB сейчас).
         LEFT JOIN worker w_asgn  ON d.assigned_worker_id  = w_asgn.UniqueID
         LEFT JOIN worker w_solv  ON d.worker_solve_id     = w_solv.UniqueID
         LEFT JOIN worker w_reg   ON d.worker_register_id  = w_reg.UniqueID
     """
-    # GROUP BY d.UniqueID — одна строка на дефект (страховка: v_wb_point/v_wb_gun уже
-    # сгруппированы по точке/пистолету, но джойны не должны размножать дефект ни при каких данных).
+    # GROUP BY d.UniqueID — одна строка на дефект (страховка: джойны не должны размножать
+    # дефект ни при каких данных).
     # Приоритет списка: 1) точки B → 2) серийные → 3) остальные.
     priority = """GROUP BY d.UniqueID
                   ORDER BY CASE WHEN is_b_point THEN 0 WHEN is_serial THEN 1 ELSE 2 END,
@@ -417,13 +410,13 @@ def close_defect():
                 WHERE UniqueID=?
             """, (spot_id, gun_id, int(worker_solve_id), root_cause, solution,
                   spot_id if new_spot else None, int(defect_id)))
+            # у дефекта появились точка/пистолет (ввёл человек) — переснять снимок
+            snapshot_defect(db, int(defect_id), SNAP_CORRECTION)
         else:
             cur.execute("""
                 UPDATE defects SET solution=?, root_cause=?, worker_solve_id=?, status='closed'
                 WHERE UniqueID=?
             """, (solution, root_cause, int(worker_solve_id), int(defect_id)))
-        # Перезаписать снимок: при обогащении у дефекта появились точка/пистолет
-        snapshot_defect(db, int(defect_id))
         db.commit()
         return jsonify({'status': 'success', 'message': 'Дефект закрыт!'})
     except Exception as e:
@@ -538,8 +531,8 @@ def enrich_defect():
         """, (spot_id, gun_id, int(worker_id), root_cause,
               spot_id if new_spot else None, int(defect_id)))
 
-        # Перезаписать снимок: у дефекта появились точка/пистолет
-        snapshot_defect(db, int(defect_id))
+        # Перезаписать снимок: у дефекта появились точка/пистолет (ввёл человек)
+        snapshot_defect(db, int(defect_id), SNAP_CORRECTION)
         db.commit()
         return jsonify({'status': 'success', 'message': 'Точка создана, дефект взят в работу!'})
     except Exception as e:
@@ -570,8 +563,7 @@ def register_defect_manual():
             gun_id = db.execute("INSERT INTO gun (g_num, gun_type) VALUES (?, 'Ручной ввод')",
                                 (int(g_num),)).lastrowid
         res = df.register_occurrence(db, problem_code=problem_code, gun_id=gun_id, registered_by=uid)
-        _save_photos(db, res['defect_id'], photos, uid)
-        snapshot_defect(db, res['defect_id'])
+        _save_photos(db, res['defect_id'], photos, uid)   # снимок сделала регистрация (до цепочки)
         db.commit()
         return jsonify({'status': 'success', 'stage': res['stage'], 'serial': res['serial'], 'defect_id': res['defect_id'],
                         'message': f'Дефект {problem_code} на пистолете №{g_num} зафиксирован → отдел «{res["stage"]}»'})
@@ -728,6 +720,7 @@ def defect_detail(defect_id):
                COALESCE(d.snap_spot_number, s.spot_number, d.manual_spot_number, '—') as spot_number,
                COALESCE(d.snap_model_name, m.model_name, '—') as model_name,
                COALESCE(d.snap_g_num, g.g_num, 0) as g_num,
+               d.snap_source, d.snap_dated, d.snap_at,
                CASE WHEN EXISTS(SELECT 1 FROM weld_point wp WHERE wp.spot_id=d.spot_id AND wp.important='B')
                     THEN 1 ELSE 0 END as is_b_point
         FROM defects d
@@ -755,12 +748,16 @@ def defect_detail(defect_id):
     uid, is_admin = session.get('uid'), bool(session.get('is_admin'))
     photos = [{'UniqueID': p['UniqueID'], 'stage_dept': p['stage_dept'], 'stage_id': p['stage_id'], 'ts': p['ts'],
                'can_delete': _can_delete_photo(p, uid, is_admin)} for p in photo_rows]
+    station = df.station_name_for(db, defect_id)          # как было в день дефекта (снимок)
     return jsonify({'status': 'success', 'defect': dict(d),
                     'stages': [dict(r) for r in stages],
                     'occurrences': [r['occ_date'] for r in occ],
                     'photos': photos,
                     'vin_required': df.vin_required(db, defect_id),
-                    'station_name': df.station_name_for(db, defect_id),
+                    'station_name': station,
+                    # не зафиксирована — подсказка «сейчас по WB» (не факт дефекта)
+                    'station_now': None if station else df.station_now_for(db, defect_id),
+                    'snap_note': snap_note(d['snap_source'], d['snap_at'], d['snap_dated']),
                     'my_dept': session.get('dept'),
                     'privileged': bool(session.get('is_admin') or session.get('dept') == 'WeldTeam')})
 
@@ -856,7 +853,7 @@ def defect_correct(defect_id):
     uid, dept, is_admin, _priv = _ctx()
     data, photos = _reg_input()
     db = get_db()
-    d = db.execute('SELECT current_stage_dept FROM defects WHERE UniqueID=?', (defect_id,)).fetchone()
+    d = db.execute('SELECT current_stage_dept, df_date FROM defects WHERE UniqueID=?', (defect_id,)).fetchone()
     if not d:
         return jsonify({'status': 'error', 'message': 'Дефект не найден'}), 404
     if not (is_admin or (dept == 'ОТК' and d['current_stage_dept'] == 'ОТК')):
@@ -868,7 +865,8 @@ def defect_correct(defect_id):
     if not code or not spot_number or not model_id:
         return jsonify({'status': 'error', 'message': 'Укажите код, модель и номер точки'}), 400
     try:
-        row = _resolve_spot_gun(db, int(model_id), spot_number)   # как при регистрации: из WB
+        # как при регистрации: из WB, но пистолет — на дату дефекта (история связок)
+        row = _resolve_spot_gun(db, int(model_id), spot_number, on_date=d['df_date'])
         if row:
             db.execute("""UPDATE defects SET problem_code=?, spot_id=?, gun_id=?,
                             manual_spot_number=NULL, manual_model_id=NULL WHERE UniqueID=?""",
@@ -879,7 +877,7 @@ def defect_correct(defect_id):
                        (code, spot_number, int(model_id), defect_id))
         if photos:
             _save_photos(db, defect_id, photos, uid)
-        snapshot_defect(db, defect_id)
+        snapshot_defect(db, defect_id, SNAP_CORRECTION)
         db.commit()
         msg = 'Данные исправлены' if row else 'Данные исправлены (точка не найдена в БД — сохранена как ручная)'
         return jsonify({'status': 'success', 'message': msg, 'found_in_db': bool(row)})

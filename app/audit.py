@@ -15,7 +15,8 @@ import sqlite3
 AUDIT_EXCLUDE = {'change_log', 'restore_point', 'alembic_version', 'sqlite_sequence', 'notification_outbox',
                  'wb_issue',          # Сверка пересобирается автоматически — аудит раздул бы журнал
                  'equipment_link',    # производные связи Перечня — пересобираются после сохранения
-                 'weld_point_key'}    # рабочие ключи WB (app/normalize.py) — пересчитываются из сырых строк
+                 'weld_point_key',    # рабочие ключи WB (app/normalize.py) — пересчитываются из сырых строк
+                 'wb_station_history'}  # история станций WB — ведёт приложение (wb_source.record_station_history)
 
 
 def _q(ident: str) -> str:

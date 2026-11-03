@@ -607,7 +607,10 @@ function renderDetail(res){
 
   const ribbon = d.is_b_point ? `<div class="b-ribbon">⚠ ТОЧКА ГРУППЫ B — требует немедленного вмешательства</div>` : '';
   const occ = res.occurrences.length > 1 ? `<div class="muted">Появлений: ${res.occurrences.length} (${res.occurrences.map(esc).join(', ')})</div>` : '';
-  const reg = `<div class="muted" style="margin:.2rem 0">Поступил: ${esc((d.created_at||'').replace('T',' ')) || '—'}${res.station_name ? ' · станция ' + esc(res.station_name) : ''}</div>`;
+  // станция — как была в день дефекта (снимок); не зафиксирована — сегодняшний WB только подсказкой
+  const stTxt = res.station_name ? ' · станция ' + esc(res.station_name)
+    : (res.station_now ? ` · станция не зафиксирована <span title="Станция по сегодняшнему Weld Balance — не обязательно та, что была в день дефекта">(сейчас по WB: ${esc(res.station_now)})</span>` : '');
+  const reg = `<div class="muted" style="margin:.2rem 0">Поступил: ${esc((d.created_at||'').replace('T',' ')) || '—'}${stTxt}${res.snap_note ? ' · ' + esc(res.snap_note) : ''}</div>`;
 
   const admin = !!ME.is_admin;   // правка/удаление записей: обходит ограничения только реальный админ (не WeldTeam-отдел)
   const canEditStage = s => admin || (ME.dept && s.dept === ME.dept && !s.left_at);

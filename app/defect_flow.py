@@ -1,8 +1,9 @@
 """Движок процесса дефектов 4M: цепочка согласования, этапы, серийность, ОТО.
 
 Чистая логика над соединением sqlite (работает и с get_db(), и с обычным connection —
-используется и из эндпоинтов, и из тестов). Снимок (snapshot_defect) и commit делает
-вызывающий эндпоинт.
+используется и из эндпоинтов, и из тестов). Снимок нового дефекта (snapshot_defect)
+делает register_occurrence — ДО входа в цепочку, чтобы маршрут, уведомления и VIN сразу
+видели зафиксированную станцию; commit делает вызывающий эндпоинт.
 
 Статусы defects.status:
   registered — только что создан (транзиентно), сразу входит в цепочку;
@@ -18,6 +19,8 @@ BT→MN = не серия. Достаточно 2-й фиксации.
 """
 import re
 from datetime import date, datetime
+
+from app.snapshots import SNAP_REGISTRATION, snapshot_defect
 
 OTO = 'ОТО'
 OTK = 'ОТК'
@@ -86,15 +89,19 @@ def vin_required_segments(conn):
 
 
 def station_name_for(conn, defect_id):
-    """Имя станции дефекта: снимок snap_station_name; иначе живьём из Weld Balance
-    (единственный источник станции, app/wb_source.py). Нет в WB / неоднозначно → None."""
+    """Имя станции дефекта — ТОЛЬКО из снимка (как было в день дефекта). Не зафиксирована
+    → None: сегодняшний WB историю дефекта не переписывает (он — station_now_for)."""
     r = conn.execute('SELECT snap_station_name FROM defects WHERE UniqueID=?', (defect_id,)).fetchone()
-    if r and r[0]:
-        return r[0]
+    return r[0] if r and r[0] else None
+
+
+def station_now_for(conn, defect_id):
+    """Станция точки/пистолета дефекта по СЕГОДНЯШНЕМУ Weld Balance — подсказка в карточке,
+    когда станция дефекта не зафиксирована. Нет в WB / неоднозначно → None."""
     from app.wb_source import defect_station
     sid = defect_station(conn, defect_id)
-    r2 = conn.execute('SELECT station_name FROM station WHERE UniqueID=?', (sid,)).fetchone() if sid else None
-    return r2[0] if r2 else None
+    r = conn.execute('SELECT station_name FROM station WHERE UniqueID=?', (sid,)).fetchone() if sid else None
+    return r[0] if r else None
 
 
 def vin_required(conn, defect_id):
@@ -364,6 +371,9 @@ def register_occurrence(conn, *, problem_code, spot_id=None, gun_id=None, regist
     did = cur.lastrowid
     conn.execute('INSERT INTO defect_occurrence (defect_id, occ_date, registered_by) VALUES (?,?,?)',
                  (did, when, registered_by))
+    # Снимок — один раз, до цепочки: уведомления/VIN сразу видят станцию. Серийный повтор
+    # (выше) снимок прежней карточки не трогает — у неё история своего дня.
+    snapshot_defect(conn, did, SNAP_REGISTRATION)
     stage = enter_chain(conn, did, registered_by)
     return {'defect_id': did, 'serial': False, 'stage': stage}
 

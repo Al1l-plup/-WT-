@@ -18,7 +18,7 @@ v_wb_gun — чтение станции из одного места.
 в Сверке.
 """
 from collections import defaultdict, namedtuple
-from datetime import datetime
+from datetime import date, datetime
 
 from app.normalize import clean, code_key, g_number, spot_key, station_key
 
@@ -125,12 +125,15 @@ def _step(db, name, fn, errors):
     return True, out
 
 
-def sync_wb(db):
+def sync_wb(db, before_facts=None):
     """Довести производные данные WB до актуального состояния: довязать G-номера,
-    появившиеся в Перечне после загрузки WB; проставить станции; пересобрать Сверку.
+    появившиеся в Перечне после загрузки WB; проставить станции; дозаполнить дефекты;
+    пересобрать Сверку.
 
     Шаги независимы (SAVEPOINT): сбой довязки одной строки не мешает остальным строкам,
     станциям и Сверке (раньше всё откатывалось целиком — и станции оставались пустыми).
+    before_facts() вызывается перед дозаполнением дефектов — это уже правка факта, а не
+    производное (run_wb_sync возвращает здесь триггеры журнала).
     Идемпотентно. НЕ коммитит — транзакцией владеет вызывающий (run_wb_sync)."""
     from app.documents import resolve_weld_point_links
     from app.equipment import sync_register
@@ -147,11 +150,18 @@ def sync_wb(db):
             failed += 1
             errors[-1] = f'строка WB #{wid} — {errors[-1]}'
     _, stations = _step(db, 'wb_stations', lambda: sync_wb_stations(db), errors)
+    # история станций — до дозаполнения: оно берёт станцию на дату дефекта
+    _step(db, 'wb_history', lambda: record_station_history(db), errors)
+    if before_facts:
+        before_facts()
     _, defects_filled = _step(db, 'defects_fill', lambda: fill_defects_from_wb(db), errors)
     _, open_issues = _step(db, 'wb_issues', lambda: rebuild_issues(db), errors)
     return {'keys_updated': keys, 'register': register, 'relinked': relinked, 'relink_failed': failed, 'stations_updated': stations,
             'defects_filled': defects_filled,
             'open_issues': open_issues, 'errors': errors[:10], 'errors_total': len(errors)}
+
+
+WB_SYNC_AUTHOR = 'WB-синхронизация'   # автор дозаполнения дефектов в Журнале
 
 
 def run_wb_sync(db_path, audit=True, trigger='start'):
@@ -160,19 +170,22 @@ def run_wb_sync(db_path, audit=True, trigger='start'):
     Производные данные WB — не правки людей, в Журнал им не место: триггеры журнала
     снимаются и возвращаются ВНУТРИ той же транзакции (DDL в SQLite транзакционен), а
     BEGIN IMMEDIATE не даёт чужим правкам проскочить мимо Журнала на это время.
+    Дозаполнение дефектов — правка факта: идёт уже с триггерами, в Журнале под автором
+    WB_SYNC_AUTHOR одним пакетом (откатывается целиком).
     Возвращает итог для показа в «Сверке» (ok, время, числа, ошибки шагов)."""
     import sqlite3
 
-    from app.audit import drop_audit_triggers, ensure_audit_triggers
+    from app.audit import drop_audit_triggers, ensure_audit_triggers, max_change_id, stamp_audit
     con = sqlite3.connect(db_path, timeout=30, isolation_level=None)   # транзакции — вручную
     at = datetime.now().isoformat(timespec='seconds')
     try:
         con.execute('BEGIN IMMEDIATE')
         if audit:
             drop_audit_triggers(con, commit=False)
-        res = sync_wb(con)
+        since = max_change_id(con)
+        res = sync_wb(con, before_facts=(lambda: ensure_audit_triggers(con, commit=False)) if audit else None)
         if audit:
-            ensure_audit_triggers(con, commit=False)
+            stamp_audit(con, WB_SYNC_AUTHOR, f'wb-sync-{at}', since)
         con.execute('COMMIT')
         return {'ok': not res['errors_total'], 'at': at, 'trigger': trigger, **res}
     except Exception as e:  # noqa: BLE001 — итог показываем, сайт не роняем
@@ -244,10 +257,73 @@ def point_station(db, model_code, spot_number):
     return (r[1], r[0] or 0) if r else (None, 0)
 
 
-def point_gun(db, model_code, spot_number, spot_id=None):
+# ── история станций WB по датам (wb_station_history, миграция 0026) ─────────────
+def record_station_history(db, today=None):
+    """Зафиксировать текущие станции WB в истории: точка (model_key, spot_key) и пистолет
+    (gun_id) → станция периодами [valid_from, valid_to). Сам WB истории не хранит —
+    изменение пишется, как только приложение его видит (синхронизация, сохранение в
+    Редакторе, открытие Сверки); точность — день. Только однозначные станции: точка
+    на нескольких станциях / без станции — периода нет. Идемпотентно. → число правок."""
+    today = today or date.today().isoformat()
+    want = {(mk, sk, None): sid for mk, sk, sid in db.execute(
+        'SELECT model_key, spot_key, station_id FROM v_wb_point WHERE station_id IS NOT NULL AND model_key IS NOT NULL')}
+    want.update({(None, None, gid): sid for gid, sid in db.execute(
+        'SELECT gun_id, station_id FROM v_wb_gun WHERE station_id IS NOT NULL')})
+    have = {(mk, sk, gid): (hid, sid, frm) for hid, mk, sk, gid, sid, frm in db.execute(
+        'SELECT id, model_key, spot_key, gun_id, station_id, valid_from FROM wb_station_history WHERE valid_to IS NULL')}
+    changed = 0
+    for key, (hid, sid, frm) in have.items():
+        if want.get(key) != sid:
+            if frm >= today:          # открыт сегодня же — день не прожит, это не история
+                db.execute('DELETE FROM wb_station_history WHERE id=?', (hid,))
+            else:
+                db.execute('UPDATE wb_station_history SET valid_to=? WHERE id=?', (today, hid))
+            changed += 1
+    new = [(*key, sid, today) for key, sid in want.items() if have.get(key, (0, None))[1] != sid]
+    db.executemany('INSERT INTO wb_station_history (model_key, spot_key, gun_id, station_id, valid_from) '
+                   'VALUES (?,?,?,?,?)', new)
+    return changed + len(new)
+
+
+def station_on_date(db, day, model_key=None, spot_key=None, gun_id=None):
+    """(station_id | None, covered) точки или пистолета по истории станций WB на день.
+    covered=False — учёт истории начался позже этого дня (история молчит)."""
+    start = db.execute('SELECT MIN(valid_from) FROM wb_station_history').fetchone()[0]
+    if not start or day < start:
+        return None, False
+    if gun_id is not None:
+        where, params = 'gun_id=?', (gun_id,)
+    else:
+        where, params = 'model_key=? AND spot_key=? AND gun_id IS NULL', (model_key, spot_key)
+    r = db.execute(f'SELECT station_id FROM wb_station_history WHERE {where} AND valid_from<=? '
+                   'AND (valid_to IS NULL OR valid_to>?) LIMIT 1', (*params, day, day)).fetchone()
+    return (r[0] if r else None), True
+
+
+def gun_on_date(db, spot_id, on_date):
+    """(gun_id | None, n_guns) точки по ИСТОРИИ связок welding_setup на дату. Связка
+    действовала, если start_date <= дата < end_date (в день переноса — уже новая).
+    Сам WB истории не хранит; связки по нему ведёт app/documents.resolve_weld_point_links."""
+    r = db.execute('SELECT COUNT(DISTINCT gun_id), MIN(gun_id) FROM welding_setup '
+                   'WHERE spot_id=? AND gun_id IS NOT NULL AND start_date<=? '
+                   'AND (end_date IS NULL OR end_date>?)', (spot_id, on_date, on_date)).fetchone()
+    n = r[0] or 0
+    return (r[1] if n == 1 else None), n
+
+
+def point_gun(db, model_code, spot_number, spot_id=None, on_date=None):
     """Пистолет точки: по WB, если он там один; в WB пистолет не определён (нет G / G не в
     Перечне) — действующая связка точка↔пистолет; в WB у точки несколько пистолетов —
-    None (неоднозначно, это в Сверке)."""
+    None (неоднозначно, это в Сверке).
+
+    on_date — дата дефекта в прошлом: пистолет на ТУ дату по истории связок (точку могли
+    перевесить на другой пистолет); несколько в тот день → None; история о дате молчит —
+    как сейчас."""
+    day = str(on_date)[:10] if on_date else None
+    if day and spot_id is not None and day < date.today().isoformat():
+        gid, n = gun_on_date(db, spot_id, day)
+        if n:
+            return gid
     r = None
     if model_code and spot_number not in (None, ''):
         r = db.execute('SELECT gun_id, n_guns FROM v_wb_point WHERE model_key=? AND spot_key=?',
@@ -269,12 +345,21 @@ DEFECT_FILL_SINCE = '2026-10-30'
 def fill_defects_from_wb(db):
     """Дозаполнить из WB дефекты, у которых при регистрации не определились пистолет и/или
     станция. Только ПУСТЫЕ поля — определённая станция дефекта не меняется (правило «не
-    плывёт»). Открытые дефекты + все зарегистрированные с DEFECT_FILL_SINCE. → число дефектов."""
+    плывёт»). Открытые дефекты + все зарегистрированные с DEFECT_FILL_SINCE. → число дефектов.
+
+    Всё — на ДАТУ дефекта: пистолет по истории связок (point_gun с on_date), станция по
+    истории станций (defect_station_on). История о дне дефекта молчит (до начала учёта) —
+    берётся сегодняшний WB, и снимок помечается snap_dated=0: карточка так и пишет.
+    В run_wb_sync идёт с триггерами журнала: каждое дозаполнение видно в Журнале и
+    откатывается."""
     from app.defect_flow import OPEN_STATUSES
+    from app.snapshots import SNAP_WB_FILL
     ph = ','.join('?' * len(OPEN_STATUSES))
+    now = datetime.now().isoformat(timespec='seconds')
+    today = date.today().isoformat()
     rows = db.execute(f"""
         SELECT d.UniqueID, d.gun_id, d.snap_station_id, d.snap_g_num, d.spot_id, mo.model_code,
-               COALESCE(CAST(s.spot_number AS TEXT), d.manual_spot_number)
+               COALESCE(CAST(s.spot_number AS TEXT), d.manual_spot_number), d.df_date, d.snap_dated
         FROM defects d
         LEFT JOIN spot s ON s.UniqueID = d.spot_id
         LEFT JOIN model mo ON mo.UniqueID = COALESCE(s.model_id, d.manual_model_id)
@@ -282,25 +367,31 @@ def fill_defects_from_wb(db):
           AND (COALESCE(d.status, 'registered') IN ({ph}) OR d.df_date >= ?)""",
         (*OPEN_STATUSES, DEFECT_FILL_SINCE)).fetchall()
     filled = 0
-    for did, gun_id, station_id, snap_g, spot_id, code, num in rows:
-        changed = False
+    for did, gun_id, station_id, snap_g, spot_id, code, num, df_date, was_dated in rows:
+        day = str(df_date)[:10] if df_date else today
+        changed, dated = False, was_dated != 0   # dated — всё взятое из WB — на день дефекта
         if gun_id is None:
-            gun_id = point_gun(db, code, num, spot_id)
+            gun_id = point_gun(db, code, num, spot_id, on_date=day)
             if gun_id is not None:
                 db.execute('UPDATE defects SET gun_id=? WHERE UniqueID=?', (gun_id, did))
                 changed = True
+                dated = dated and (day >= today or (spot_id is not None and gun_on_date(db, spot_id, day)[1] > 0))
         if snap_g is None and gun_id is not None:
             db.execute('UPDATE defects SET snap_g_num=(SELECT g_num FROM gun WHERE UniqueID=?), '
                        'snap_gun_type=(SELECT gun_type FROM gun WHERE UniqueID=?) WHERE UniqueID=?',
                        (gun_id, gun_id, did))
             changed = True
         if station_id is None:
-            sid = defect_station(db, did)
+            sid, st_dated = defect_station_on(db, did, day)
             if sid is not None:
                 db.execute('UPDATE defects SET snap_station_id=?, '
                            'snap_station_name=(SELECT station_name FROM station WHERE UniqueID=?) WHERE UniqueID=?',
                            (sid, sid, did))
                 changed = True
+                dated = dated and st_dated
+        if changed:
+            db.execute('UPDATE defects SET snap_source=?, snap_dated=?, snap_at=? WHERE UniqueID=?',
+                       (SNAP_WB_FILL, int(dated), now, did))
         filled += changed
     return filled
 
@@ -315,21 +406,46 @@ def gun_station(db, gun_id):
     return (r[1] if n == 1 else None), n
 
 
-def defect_station(db, defect_id):
-    """Станция дефекта строго по WB: есть точка (модель + №) — станция точки; нет точки
-    (регистрация по G-номеру) — станция пистолета. Неоднозначно / нет в WB → None."""
-    d = db.execute("""
+def _defect_point(db, defect_id):
+    """(код модели, № точки, gun_id) дефекта или None."""
+    return db.execute("""
         SELECT mo.model_code, COALESCE(CAST(s.spot_number AS TEXT), d.manual_spot_number), d.gun_id
         FROM defects d
         LEFT JOIN spot s ON s.UniqueID = d.spot_id
         LEFT JOIN model mo ON mo.UniqueID = COALESCE(s.model_id, d.manual_model_id)
         WHERE d.UniqueID=?""", (defect_id,)).fetchone()
+
+
+def defect_station(db, defect_id):
+    """Станция дефекта строго по СЕГОДНЯШНЕМУ WB: есть точка (модель + №) — станция точки;
+    нет точки (регистрация по G-номеру) — станция пистолета. Неоднозначно / нет в WB → None."""
+    d = _defect_point(db, defect_id)
     if not d:
         return None
     code, num, gun_id = d
     if code and num not in (None, ''):
         return point_station(db, code, num)[0]
     return gun_station(db, gun_id)[0]
+
+
+def defect_station_on(db, defect_id, on_date):
+    """(station_id | None, dated) — станция дефекта по WB на ДАТУ дефекта. Сегодня — текущий
+    WB; прошлая дата — история станций (record_station_history); история о дате молчит
+    (учёт начат позже) — текущий WB и dated=False: снимок так и помечается."""
+    day = str(on_date)[:10] if on_date else None
+    if not day or day >= date.today().isoformat():
+        return defect_station(db, defect_id), True
+    d = _defect_point(db, defect_id)
+    if not d:
+        return None, True
+    code, num, gun_id = d
+    if code and num not in (None, ''):
+        sid, covered = station_on_date(db, day, model_key=code_key(code), spot_key=spot_key(num))
+    elif gun_id is not None:
+        sid, covered = station_on_date(db, day, gun_id=gun_id)
+    else:
+        return None, True
+    return (sid, True) if covered else (defect_station(db, defect_id), False)
 
 
 # ── Сверка (wb_issue): запрос ИТО на рассмотрение ─────────────────────────────
@@ -447,8 +563,10 @@ def _collect_issues(db):
 
     from app.defect_flow import OPEN_STATUSES
     ph = ','.join('?' * len(OPEN_STATUSES))
-    for (did,) in db.execute(f"SELECT UniqueID FROM defects WHERE COALESCE(status,'registered') IN ({ph})",
-                             OPEN_STATUSES).fetchall():
+    # станция дефекта не зафиксирована и по WB сейчас не определяется (определяется —
+    # синхронизация её дозапишет; зафиксированную сегодняшний WB не переписывает)
+    for (did,) in db.execute(f"SELECT UniqueID FROM defects WHERE COALESCE(status,'registered') IN ({ph}) "
+                             'AND snap_station_id IS NULL', OPEN_STATUSES).fetchall():
         if defect_station(db, did) is None:
             add(f'def:{did}', 'defect_not_in_wb', defect_id=did, where_found='Дефект')
     return issues

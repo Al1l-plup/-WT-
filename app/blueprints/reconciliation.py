@@ -22,6 +22,7 @@ from app.wb_source import (
     IssueRows,
     open_issue_count,
     rebuild_issues,
+    record_station_history,
     run_wb_sync,
     wb_health,
 )
@@ -40,9 +41,11 @@ def reconciliation_page():
 
 @bp.route('/api/wb-issues')
 def list_issues():
-    """Список строк Сверки (перед выдачей — пересборка, чтобы было актуально)."""
+    """Список строк Сверки (перед выдачей — пересборка, чтобы было актуально; заодно
+    история станций WB видит изменения, внесённые мимо Редактора)."""
     db = get_db()
     try:
+        record_station_history(db)
         rebuild_issues(db)
         db.commit()
     except Exception as e:  # noqa: BLE001

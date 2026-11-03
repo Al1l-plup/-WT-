@@ -24,11 +24,13 @@ from app.db import get_db
 from app.documents import TOKEN_RE, close_removed_wb_rows, doc_list, get_documents, resolve_weld_point_links
 from app.equipment import sync_register
 from app.errors import api_error
+from app.snapshots import SNAP_CORRECTION, SNAP_MANUAL, snapshot_defect
 from app.wb_source import (
     OPEN_ISSUE_STATUSES,
     issue_doc_ids,
     open_issue_count,
     rebuild_issues,
+    record_station_history,
     relinkable_gun_rows,
 )
 
@@ -39,6 +41,21 @@ DEFAULT_LIMIT = 50
 
 def _q(ident: str) -> str:
     return '"' + ident.replace('"', '""') + '"'
+
+
+# Из чего снимок дефекта: правка этого — исправление ввода, снимок идёт за ней (доска и
+# карточка читают снимок — иначе так и висел бы старый G). Явная правка snap_* — как есть.
+_DEFECT_SNAP_INPUTS = {'gun_id', 'spot_id', 'manual_spot_number', 'manual_model_id'}
+
+
+def _resnap_defect(db, table, pk_val, cols, inserted=False):
+    """Правка (или новая строка) дефекта в Редакторе → снимок за ней: correction / manual."""
+    if table != 'defects' or any(c.startswith('snap_') for c in cols):
+        return
+    if inserted:
+        snapshot_defect(db, int(pk_val), SNAP_MANUAL)
+    elif _DEFECT_SNAP_INPUTS & set(cols):
+        snapshot_defect(db, int(pk_val), SNAP_CORRECTION)
 
 
 def _natural_order(expr: str, direction: str) -> str:
@@ -160,7 +177,10 @@ def insert_row(name):
             cur = db.execute(f'INSERT INTO {_q(name)} DEFAULT VALUES')
         if name == 'weld_point':
             resolve_weld_point_links(db, {cur.lastrowid})
+        _resnap_defect(db, name, cur.lastrowid, values, inserted=True)
         _stamp_commit(db, since, batch)
+        if name == 'weld_point':
+            _refresh_reconciliation(db)
         return jsonify({'status': 'success', 'id': cur.lastrowid})
     except ValueError as e:
         db.rollback()
@@ -192,7 +212,10 @@ def update_row(name, pk_val):
                    list(values.values()) + [pk_val])
         if name == 'weld_point':
             resolve_weld_point_links(db, {pk_val})
+        _resnap_defect(db, name, pk_val, values)
         _stamp_commit(db, since, batch)
+        if name == 'weld_point':
+            _refresh_reconciliation(db)
         return jsonify({'status': 'success'})
     except ValueError as e:
         db.rollback()
@@ -254,6 +277,7 @@ def batch_apply(name):
                 sets = ', '.join(f'{_q(k)}=?' for k in vals)
                 db.execute(f'UPDATE {_q(name)} SET {sets} WHERE {_q(pk)}=?',
                            list(vals.values()) + [ch.get('pk')])
+                _resnap_defect(db, name, ch.get('pk'), vals)
                 if name == 'weld_point':
                     wp_touched.append(ch.get('pk'))
             elif op == 'insert':
@@ -265,6 +289,7 @@ def batch_apply(name):
                                      f'VALUES ({", ".join("?" * len(keys))})', [vals[k] for k in keys])
                 else:
                     cur = db.execute(f'INSERT INTO {_q(name)} DEFAULT VALUES')
+                _resnap_defect(db, name, cur.lastrowid, vals, inserted=True)
                 if name == 'weld_point':
                     wp_touched.append(cur.lastrowid)
             elif op == 'delete':
@@ -439,9 +464,11 @@ def _validate_business(db, table, values, exclude_pk=None, allow_unknown_model=F
 
 
 def _refresh_reconciliation(db):
-    """После сохранения правок пересобрать «Сверку» (WB ↔ Перечень/ТО/дефекты).
+    """После сохранения правок пересобрать «Сверку» (WB ↔ Перечень/ТО/дефекты) и записать
+    в историю станций WB, что изменилось (на дату — для дефектов задним числом).
     Отдельно от сохранения: правка уже записана, сбой пересборки её не откатывает."""
     try:
+        record_station_history(db)
         rebuild_issues(db)
         db.commit()
     except Exception:  # noqa: BLE001
@@ -641,6 +668,7 @@ def batch_doc(doc_id):
                 else:
                     cur = db.execute(f'INSERT INTO {_q(primary)} DEFAULT VALUES')
                 newpk = cur.lastrowid
+                _resnap_defect(db, primary, newpk, vals, inserted=True)
                 if primary == 'weld_point':
                     wp_touched.append(newpk)
                 # setter-колонки новой строки (детали слоёв, raw_extra) — по свежему pk
@@ -668,6 +696,7 @@ def batch_doc(doc_id):
             pkcol, _ = table_meta(db, tbl)
             sets = ', '.join(f'{_q(k)}=?' for k in colvals)
             db.execute(f'UPDATE {_q(tbl)} SET {sets} WHERE {_q(pkcol)}=?', list(colvals.values()) + [pkval])
+            _resnap_defect(db, tbl, pkval, colvals)
         # авто-привязка созданных/изменённых точек WB к клещам и точкам (как импортёр)
         if wp_touched:
             resolve_weld_point_links(db, set(wp_touched))
