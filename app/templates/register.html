@@ -57,8 +57,8 @@
       <div id="areaBrands"></div>
       <p class="sub" style="margin:6px 0 0;opacity:.6">Отметьте участки, за которые отвечаете на каждом бренде — по ним вам будут адресоваться дефекты.</p>
     </div>
-    <div class="fld"><label>Логин — рабочая почта * <span title="На эту почту будут приходить уведомления об изменениях (рассылка)." style="cursor:help;opacity:.7">❓</span></label>
-      <input name="login" type="email" required placeholder="name@company.com" autocomplete="username" value="{{ (form or {}).get('login','') }}"></div>
+    <div class="fld"><label>Логин — ваша почта, любая (Gmail, Mail.ru…) * <span title="На эту почту будут приходить уведомления об изменениях (рассылка)." style="cursor:help;opacity:.7">❓</span></label>
+      <input name="login" type="text" inputmode="email" autocapitalize="none" spellcheck="false" required placeholder="name@mail.ru" autocomplete="username" value="{{ (form or {}).get('login','') }}"></div>
     <div class="row2">
       <div class="fld"><label>Пароль * (мин. 4)</label><input name="password" type="password" required minlength="4" autocomplete="new-password"></div>
       <div class="fld"><label>Повтор пароля *</label><input name="password2" type="password" required autocomplete="new-password"></div>

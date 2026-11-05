@@ -1,4 +1,6 @@
 """Аутентификация: регистрация, вход, выход, щит «вход обязателен»."""
+import pytest
+
 from tests.conftest import TEST_USER
 
 
@@ -44,6 +46,28 @@ def test_wrong_password_and_duplicate_login(app):
     assert 'Неверный логин или пароль'.encode() in r.data
     r = c.post('/register', data=TEST_USER)  # повторная регистрация того же логина
     assert 'уже занят'.encode() in r.data
+
+
+@pytest.mark.parametrize('login', ['ivanov@gmail.com', 'ivanov@mail.ru', 'ivanov@inbox.ru', 'ivanov@yandex.kz',
+                                   'ivanov@astana-motors.kz', 'иванов@почта.рф'])
+def test_register_accepts_any_mail_domain(app, login):
+    """Почта любая, не только рабочая: и регистрация, и вход по ней."""
+    r = app.test_client().post('/register', data={**TEST_USER, 'login': login})
+    assert r.status_code == 302 and r.headers['Location'] == '/'
+    r = app.test_client().post('/login', data={'login': login, 'password': TEST_USER['password']})
+    assert r.status_code == 302 and r.headers['Location'] == '/'
+
+
+@pytest.mark.parametrize('url', ['/register', '/login'])
+def test_browser_does_not_reject_mail_address(anon_client, url):
+    """Браузерный type="email" не пускает адрес с кириллицей — проверку делает только сервер.
+    На входе и регистрации поле одно и то же, иначе зарегистрированный не сможет войти."""
+    html = anon_client.get(url).data.decode()
+    assert 'type="email"' not in html and 'inputmode="email"' in html
+
+
+def test_register_page_does_not_ask_for_work_mail(anon_client):
+    assert 'рабочая' not in anon_client.get('/register').data.decode()
 
 
 def test_register_login_must_be_email(app):

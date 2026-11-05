@@ -186,7 +186,7 @@ NULL — не известно), на дату ли дефекта взято и
 `UniqueID` · `surname` · `name` · `father_name` · `position` · `email` · `password`
 (хеш `werkzeug`, **не** открытый) · `start_date` · `end_date` · `is_active` ·
 `department` (WeldTeam / ИТО / ОТК / Производство — определяет права, см. `app/permissions.py`) ·
-`login` (рабочая почта, уникальна) · `role` (`user`/`admin`) · `must_change_password`
+`login` (почта, любая, уникальна) · `role` (`user`/`admin`) · `must_change_password`
 (флаг обязательной смены после сброса).
 
 Роль `admin` поднимается автоматически при входе по `ADMIN_EMAIL`. Пароли не показываются:

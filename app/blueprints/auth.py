@@ -28,7 +28,8 @@ from app.db import get_db
 from app.errors import api_error
 from app.permissions import can_edit_docs, is_readonly, visible_pages
 
-# Логин — рабочая почта (планируется рассылка уведомлений об изменениях).
+# Логин — почта, любая: проверяем только форму адреса, домен не ограничен (не только рабочая;
+# планируется рассылка уведомлений об изменениях).
 EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]{2,}$')
 
 bp = Blueprint('auth', __name__)
@@ -153,7 +154,7 @@ def register():
     if dept not in DEPARTMENTS:
         return err('Выберите отдел из списка')
     if not EMAIL_RE.match(login_):
-        return err('Логин должен быть адресом почты (например, name@company.com) — на неё будут приходить уведомления')
+        return err('Логин должен быть адресом почты (например, name@mail.ru) — на неё будут приходить уведомления')
     if len(pw1) < 4:
         return err('Пароль — минимум 4 символа')
     if pw1 != pw2:

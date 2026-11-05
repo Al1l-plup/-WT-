@@ -37,7 +37,7 @@
   <p class="sub">Цех BS · вход в систему</p>
   {% if error %}<div class="err">{{ error }}</div>{% endif %}
   <form method="post">
-    <div class="fld"><label>Логин (почта)</label><input name="login" type="email" required autofocus placeholder="name@company.com" autocomplete="username"></div>
+    <div class="fld"><label>Логин (почта)</label><input name="login" type="text" inputmode="email" autocapitalize="none" spellcheck="false" required autofocus placeholder="name@mail.ru" autocomplete="username"></div>
     <div class="fld"><label>Пароль</label><input name="password" type="password" required autocomplete="current-password"></div>
     <button class="btn">Войти</button>
   </form>
