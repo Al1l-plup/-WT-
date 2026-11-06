@@ -124,6 +124,22 @@
     .skel i{display:block;height:14px;margin:10px 0;border-radius:4px;background:var(--card2)}
     .skel i:nth-child(2){width:70%}.skel i:nth-child(3){width:85%}.skel i:nth-child(4){width:55%}
 
+    /* Фото с телефона (photo-mark.js): выбор камера или галерея, редактор пометок */
+    .pm-choose{width:100%;max-width:480px;margin:auto auto 0;padding:.75rem .75rem calc(.75rem + env(safe-area-inset-bottom));
+      border:none;border-radius:12px 12px 0 0;background:var(--card);color:var(--text)}
+    .pm-choose[open]{display:flex;flex-direction:column;gap:8px}
+    .pm-choose .btn{width:100%;min-height:48px;justify-content:center;font-size:15px}
+    .pm-choose::backdrop{background:rgba(0,0,0,.5)}
+    .pm-edit{width:100%;height:100vh;height:100dvh;max-width:none;max-height:none;margin:0;padding:0;border:none;background:#000;color:#fff}
+    .pm-edit[open]{display:flex;flex-direction:column}
+    .pm-head{flex:none;display:flex;align-items:center;gap:.25rem;min-height:48px;padding:env(safe-area-inset-top) .5rem 0 .25rem}
+    .pm-x{flex:none;min-width:44px;min-height:44px;background:none;border:none;color:inherit;font-size:20px;cursor:pointer}
+    .pm-title{min-width:0;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .pm-stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden}
+    .pm-stage canvas{display:block;touch-action:none}   /* палец рисует, а не листает страницу */
+    .pm-foot{flex:none;display:flex;gap:8px;padding:.5rem max(.75rem,env(safe-area-inset-right)) calc(.5rem + env(safe-area-inset-bottom)) max(.75rem,env(safe-area-inset-left))}
+    .pm-foot .btn{flex:1;min-height:44px;justify-content:center}
+
     /* ── Телефон: доска — плотные строки; карточка дефекта, фильтры и фиксация — отдельные окна ──
        Условие то же, что compactMQ в скрипте; поворот телефона интерфейс не меняет. Кнопки и поля
        в окнах >= 44px. Строка списка ниже намеренно (32px): нужно >= 20 дефектов на экран, а лишнее
@@ -398,6 +414,7 @@
 <button type="button" id="regFab" class="fab" aria-label="Зафиксировать дефект" title="Зафиксировать дефект" hidden>＋</button>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
+<script src="/static/photo-mark.js?v=1"></script>
 <script>
 const $ = id => document.getElementById(id);
 let ME = {}, BOARD = {open:[], unresolved:[], closed:[]}, TAB = 'mine', openId = null;

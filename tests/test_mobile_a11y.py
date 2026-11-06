@@ -200,6 +200,41 @@ def test_header_is_44px_on_phone_in_any_orientation():
     assert 'flex-shrink: 0' in rule
 
 
+PHOTO_MARK = pathlib.Path('app/static/photo-mark.js').read_text(encoding='utf-8')
+
+
+def test_photo_editor_runs_before_page_back_button_handler():
+    """«Назад» в редакторе закрывает редактор: его обработчик должен сработать раньше окна карточки."""
+    assert DEFECTS.index('/static/photo-mark.js') < DEFECTS.index("window.addEventListener('popstate'")
+    assert 'e.stopImmediatePropagation()' in PHOTO_MARK[PHOTO_MARK.index("addEventListener('popstate'"):]
+
+
+def test_every_defect_photo_field_goes_through_photo_editor():
+    """Редактор подхватывает поле по accept: поле без него останется без камеры и пометок."""
+    fields = re.findall(r'<input type="file"[^>]*>', DEFECTS)
+    assert len(fields) == 4
+    assert all('accept="image/*"' in f for f in fields)
+    assert "el.accept.startsWith('image')" in PHOTO_MARK
+
+
+def test_android_gets_own_camera_or_gallery_choice():
+    """Окно выбора файла на Android может не предлагать камеру. На iPhone выбор уже встроен."""
+    assert '/Android/i.test(navigator.userAgent)' in PHOTO_MARK
+    assert "setAttribute('capture', 'environment')" in PHOTO_MARK and "removeAttribute('capture')" in PHOTO_MARK
+
+
+def test_photo_editor_only_on_touch_and_never_loses_marks_silently():
+    assert "matchMedia('(pointer: coarse)')" in PHOTO_MARK, 'компьютер должен работать как раньше'
+    assert 'canReplaceFiles' in PHOTO_MARK[PHOTO_MARK.index("addEventListener('change'"):]
+    assert '.pm-stage canvas{display:block;touch-action:none}' in DEFECTS, 'палец будет листать, а не рисовать'
+
+
+@pytest.mark.skipif(shutil.which('node') is None, reason='node недоступен')
+def test_photo_editor_script_has_no_syntax_errors():
+    r = subprocess.run([shutil.which('node'), '--check', 'app/static/photo-mark.js'], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+
+
 @pytest.mark.skipif(shutil.which('node') is None, reason='node недоступен')
 def test_defects_page_script_has_no_syntax_errors(tmp_path):
     """Скрипт страницы — без сборки: опечатка в нём ломает всю доску, а pytest её не видит."""
