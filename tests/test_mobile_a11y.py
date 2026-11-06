@@ -93,6 +93,21 @@ def test_defects_board_is_rows_not_cards():
     assert '.dtable td{height:32px' in block
 
 
+def test_defects_rows_are_numbered_by_position():
+    """№ — место строки в текущем виде, а не номер дефекта: после фильтра снова 1, 2, 3."""
+    fn = DEFECTS[DEFECTS.index('function renderRows'):DEFECTS.index('window.toggleCard')]
+    assert 'rows.map((d, i) =>' in fn and '<td class="rn" data-label="№">${i + 1}</td>' in fn
+    assert fn.count('colspan="${COLS.length + 1}"') == 2, 'колонка № не учтена в объединённых ячейках'
+
+
+def test_defects_phone_row_shows_gun_number():
+    """G-номер виден в строке на телефоне стоя, до открытия карточки."""
+    narrow = DEFECTS[DEFECTS.index('@media (max-width: 640px){'):]
+    hidden = narrow[:narrow.index('display:none')]
+    assert '[data-col=g]' not in hidden
+    assert '.dtable th[data-col=spot],.dtable th[data-col=g]{width:10%}' in narrow
+
+
 def test_defects_column_filters_reachable_without_table_header():
     """Заголовки с кнопками ▾ на телефоне скрыты — у каждой колонки должен быть другой вход
     в фильтр, в вертикальном положении телефона (раньше только поворотом)."""

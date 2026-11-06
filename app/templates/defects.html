@@ -81,6 +81,9 @@
     .dtable tr.ddetail>td{padding:0}
     .dtable tr.ddetail .dcard-body{border-top:none}
     .dtable .code{font-weight:800;font-variant-numeric:tabular-nums}
+    /* № — номер строки в текущем виде списка, не дефекта: при прокрутке вбок остаётся на месте */
+    .rn{position:sticky;left:0;z-index:1;background:var(--card)}
+    .dtable th.rn,.dtable td.rn{width:36px;color:var(--muted);text-align:center;font-variant-numeric:tabular-nums}
     /* подсказка про ограничение по зонам ответственности на вкладке «Мои входящие» */
     .zone-note{font-size:12px;color:var(--muted);background:color-mix(in srgb,var(--accent) 8%,transparent);border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin:.25rem 0 .5rem;line-height:1.35}
     .zone-note b{color:var(--text)}
@@ -163,16 +166,20 @@
          Раскладка fixed: длинное значение обрезается, а не расширяет страницу (иначе телефон уменьшает всё) */
       .tbl-wrap{overflow:visible}
       .dtable{table-layout:fixed}
-      .dtable th[data-col=code]{width:15%}
+      /* сумма ширин — ровно 100%: строка «нет дефектов» объединяет и скрытые колонки, им не должно достаться места */
+      .dtable th.rn{width:4%}
+      .dtable th[data-col=code]{width:14%}
       .dtable th[data-col=spot],.dtable th[data-col=g]{width:8%}
       .dtable th[data-col=seg]{width:11%}
-      .dtable th[data-col=station]{width:20%}
+      .dtable th[data-col=station]{width:17%}
       .dtable th[data-col=stage],.dtable th[data-col=assignee]{width:14%}
       .dtable th[data-col=date]{width:10%}
-      .dtable th,.dtable td{padding:0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .dtable thead th{position:sticky;top:89px;z-index:10;height:26px;background:var(--card);font-size:10px;letter-spacing:.02em}
+      .dtable th,.dtable td{padding:0 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .dtable thead th{position:sticky;top:89px;z-index:10;height:26px;background:var(--card);font-size:10px;letter-spacing:.02em;text-transform:none}
       .dtable td{height:32px;font-size:13px}
-      .dtable th:first-child,.dtable td:first-child{padding-left:10px}
+      /* вбок список не листается: № и так всегда на экране, а строкам нужны полоса чередования и подсветка */
+      .dtable td.rn{position:static;background:none}
+      .dtable th.rn,.dtable td.rn{padding:0 2px;font-size:11px}
       .dtable tbody tr.drow:nth-child(even){background:color-mix(in srgb,var(--text) 4%,transparent)}
       .dtable tbody tr.drow:active,.dtable tbody tr.drow.board-row-active{background:color-mix(in srgb,var(--accent) 22%,transparent) !important}
       .dtable .flag{padding:0 3px;font-size:9px}
@@ -231,12 +238,13 @@
     /* узкий телефон: колонки, которые не помещаются, — в карточке дефекта */
     @media (max-width: 640px){
       .stage-lock{display:inline}
-      .dtable [data-col=g],.dtable [data-col=seg],.dtable [data-col=assignee]{display:none}
-      .dtable th[data-col=code]{width:24%}
-      .dtable th[data-col=spot]{width:13%}
-      .dtable th[data-col=station]{width:29%}
-      .dtable th[data-col=stage]{width:21%}
-      .dtable th[data-col=date]{width:13%}
+      .dtable [data-col=seg],.dtable [data-col=assignee]{display:none}
+      .dtable th.rn{width:7%}
+      .dtable th[data-col=code]{width:17%}
+      .dtable th[data-col=spot],.dtable th[data-col=g]{width:10%}
+      .dtable th[data-col=station]{width:26%}
+      .dtable th[data-col=stage]{width:18%}
+      .dtable th[data-col=date]{width:12%}
     }
     /* телефон лёжа: высоты мало — панели прокручиваются вместе со списком */
     @media (max-width: 950px) and (max-height: 500px) and (pointer: coarse){
@@ -774,11 +782,11 @@ function renderFilterPanel(){
 }
 function renderList(){
   const host = $('defectList');
-  const head = COLS.map(c => {
+  const head = '<th class="rn" title="Номер строки в текущем списке">№</th>' + COLS.map(c => {
     const arr = SORT.col === c.k ? `<span class="sarr"> ${SORT.dir === 1 ? '▲' : '▼'}</span>` : '';
     return `<th class="sortable" data-col="${c.k}" title="Клик — сортировка (▲ возр / ▼ убыв / ещё раз — сброс)">${c.label}${arr}</th>`;
   }).join('');
-  const fbtns = COLS.map(c => `<th data-col="${c.k}"><button class="dbfbtn${FILT[c.k] ? ' on' : ''}" data-col="${c.k}" title="Фильтр: поиск + галочки">▾</button></th>`).join('');
+  const fbtns = '<th class="rn"></th>' + COLS.map(c => `<th data-col="${c.k}"><button class="dbfbtn${FILT[c.k] ? ' on' : ''}" data-col="${c.k}" title="Фильтр: поиск + галочки">▾</button></th>`).join('');
   // поиск по всем столбцам; на телефоне рядом — окно фильтров и обновление (кнопки шапки там скрыты)
   const mbar = `<div class="dfm">
     <input id="fmSearch" type="search" placeholder="🔎 поиск по столбцам" aria-label="Поиск по столбцам" autocomplete="off" value="${esc(GQ)}">
@@ -884,17 +892,18 @@ function renderRows(){
   const rows = currentRows();
   if (!rows.length){
     const filtered = Object.keys(FILT).length || GQ.trim() || $('fFrom').value || $('fTo').value;
-    tb.innerHTML = `<tr class="empty-row"><td data-label="" colspan="${COLS.length}" style="text-align:center;color:var(--muted);padding:1.25rem;white-space:normal">${filtered ? 'Ничего не найдено — измените фильтры или поиск' : 'Здесь пока нет дефектов'}</td></tr>`;
+    tb.innerHTML = `<tr class="empty-row"><td data-label="" colspan="${COLS.length + 1}" style="text-align:center;color:var(--muted);padding:1.25rem;white-space:normal">${filtered ? 'Ничего не найдено — измените фильтры или поиск' : 'Здесь пока нет дефектов'}</td></tr>`;
     return;
   }
   const compact = isCompact();   // телефон: только строка, дефект открывается отдельным окном
-  tb.innerHTML = rows.map(d => {
+  tb.innerHTML = rows.map((d, i) => {
     const active = compact ? lastId === d.UniqueID : openId === d.UniqueID;
     const cls = ['drow', d.is_b_point ? 'b-point' : '', d.is_serial ? 'serial' : '', active ? 'board-row-active' : ''].filter(Boolean).join(' ');
     const cells = COLS.map(c => `<td data-col="${c.k}" data-label="${c.label}">${c.cell ? c.cell(d) : esc(c.get(d))}</td>`).join('');
-    const row = `<tr class="${cls}" data-id="${d.UniqueID}" tabindex="0" ${compact ? 'aria-haspopup="dialog"' : `aria-expanded="${active}"`}>${cells}</tr>`;
+    // № — место в том, что показано сейчас: после фильтра и сортировки снова 1, 2, 3…
+    const row = `<tr class="${cls}" data-id="${d.UniqueID}" tabindex="0" ${compact ? 'aria-haspopup="dialog"' : `aria-expanded="${active}"`}><td class="rn" data-label="№">${i + 1}</td>${cells}</tr>`;
     return compact ? row
-         : row + `<tr class="ddetail"${active ? '' : ' hidden'}><td data-label="" colspan="${COLS.length}"><div class="dcard-body" id="body-${d.UniqueID}"></div></td></tr>`;
+         : row + `<tr class="ddetail"${active ? '' : ' hidden'}><td data-label="" colspan="${COLS.length + 1}"><div class="dcard-body" id="body-${d.UniqueID}"></div></td></tr>`;
   }).join('');
   if (openId != null){ const b = $('body-' + openId); if (b && !b.innerHTML) loadDetail(openId); }
 }
