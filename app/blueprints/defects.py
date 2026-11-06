@@ -725,6 +725,8 @@ def defect_detail(defect_id):
                COALESCE(d.manual_model_id, d.snap_model_id) as model_id,
                d.assigned_worker_id,
                (SELECT TRIM(w.surname || ' ' || substr(w.name,1,1) || '.') FROM worker w WHERE w.UniqueID=d.assigned_worker_id) as assignee_name,
+               (SELECT TRIM(w.surname || ' ' || w.name) FROM worker w WHERE w.UniqueID=d.worker_register_id) as register_name,
+               COALESCE(d.snap_brand, b.brand, '—') as brand,
                COALESCE(d.root_cause,'') as root_cause, COALESCE(d.solution,'') as solution,
                COALESCE(d.snap_spot_number, s.spot_number, d.manual_spot_number, '—') as spot_number,
                COALESCE(d.snap_model_name, m.model_name, '—') as model_name,
@@ -735,6 +737,7 @@ def defect_detail(defect_id):
         FROM defects d
         LEFT JOIN spot s ON d.spot_id=s.UniqueID
         LEFT JOIN model m ON s.model_id=m.UniqueID
+        LEFT JOIN brand b ON m.brand_id=b.UniqueID
         LEFT JOIN gun g ON d.gun_id=g.UniqueID
         WHERE d.UniqueID=?""", (defect_id,)).fetchone()
     if not d:
@@ -764,6 +767,7 @@ def defect_detail(defect_id):
                     'photos': photos,
                     'vin_required': df.vin_required(db, defect_id),
                     'station_name': station,
+                    'segment': df.defect_area(station),   # участок: на телефоне в строке его нет — показывает карточка
                     # не зафиксирована — подсказка «сейчас по WB» (не факт дефекта)
                     'station_now': None if station else df.station_now_for(db, defect_id),
                     'snap_note': snap_note(d['snap_source'], d['snap_at'], d['snap_dated']),

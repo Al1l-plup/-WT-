@@ -34,6 +34,7 @@
     .flag{font-size:10px;font-weight:800;border-radius:4px;padding:1px 6px;text-transform:uppercase;letter-spacing:.03em}
     .flag.b{background:var(--danger);color:#fff}
     .flag.s{background:var(--warn);color:#000}
+    [data-theme="light"] .flag.s{color:#fff}   /* чёрный на тёмно-жёлтом светлой темы даёт контраст 4.3 */
     .dcard-body{padding:.1rem .85rem .85rem;border-top:1px solid var(--border)}
     /* Excel-подобная доска: клик по заголовку — сортировка, поле под ним — поиск по колонке */
     .dtable th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
@@ -59,22 +60,20 @@
     #dbfilter .dbf-ok{background:var(--accent);color:#fff;border-color:var(--accent)}
     #dbfilter .dbf-clear{margin-left:auto}
     #dbfilter .dbf-empty{color:var(--muted);font-size:11.5px;padding:2px}
-    /* планшет/телефон: тач-цели >= 44px, 16px в поиске (iOS не зумит) */
-    #dbfilter.mob{width:min(92vw,340px);box-sizing:border-box}
+    /* телефон: панель у нижнего края экрана (работает и в портрете, и поверх окна фильтров);
+       тач-цели >= 44px, 16px в поиске (iOS не зумит) */
+    #dbfilter.mob{position:fixed;left:0;right:0;top:auto;bottom:0;width:auto;box-sizing:border-box;z-index:400;max-height:85vh;max-height:85dvh;
+      border-radius:12px 12px 0 0;padding:10px 10px calc(10px + env(safe-area-inset-bottom));box-shadow:none}
+    /* затемнение — отдельный слой: тень касание не ловит, и оно нажало бы то, что под панелью */
+    .dbf-back{position:fixed;inset:0;z-index:399;background:rgba(0,0,0,.5)}
     #dbfilter.mob .dbf-sort button,#dbfilter.mob .dbf-actions button{min-height:44px;font-size:14px;padding:8px 12px}
     #dbfilter.mob .dbf-search{min-height:44px;font-size:16px}
     #dbfilter.mob .dbf-all,#dbfilter.mob .dbf-item{min-height:44px}
     #dbfilter.mob .dbf-item input,#dbfilter.mob .dbf-all input{width:20px;height:20px}
-    #dbfilter.mob .dbf-list{max-height:40vh}
+    #dbfilter.mob .dbf-list{flex:1;min-height:88px;max-height:none}
     /* кнопки шапкой сверху (как в iOS) — выше поиска, клавиатура их не перекрывает */
     #dbfilter.mob .dbf-actions{order:-1;border-top:none;border-bottom:1px solid var(--border);padding:0 0 7px}
     .ph-del{position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);color:#fff;border:none;border-radius:50%;width:22px;height:22px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center}
-    @media (max-width:768px){
-      .dbfbtn{min-height:32px;min-width:36px}
-      .dfm input,.dfm select{min-height:44px;font-size:16px}
-      .dtab{min-height:44px}                                   /* вкладки доски — основные кнопки на телефоне */
-      .ph-del{width:34px;height:34px;font-size:15px;top:3px;right:3px}
-    }
     .dtable tr.drow{cursor:pointer}
     .dtable tr.drow.b-point td:first-child{box-shadow:inset 3px 0 0 var(--danger)}
     .dtable tr.drow.serial td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
@@ -85,20 +84,12 @@
     /* подсказка про ограничение по зонам ответственности на вкладке «Мои входящие» */
     .zone-note{font-size:12px;color:var(--muted);background:color-mix(in srgb,var(--accent) 8%,transparent);border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin:.25rem 0 .5rem;line-height:1.35}
     .zone-note b{color:var(--text)}
-    /* мобильная панель поиск+сортировка (на мобиле заголовки таблицы скрыты) */
-    .dfm{display:none;gap:6px;margin:.25rem 0 .55rem;align-items:center}
-    .dfm input{flex:1;min-width:0;padding:7px 9px;font-size:14px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit}
-    .dfm select{padding:7px 6px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit;max-width:45%}
-    @media (max-width:768px){
-      .dfm{display:flex}
-      .dhint{display:none}
-      .tbl-mobile tr.ddetail{border:none;background:transparent;padding:0;margin:-.35rem 0 .5rem}
-      .tbl-mobile tr.ddetail td{display:block;padding:0}
-      .tbl-mobile tr.ddetail td::before{display:none}
-      .tbl-mobile tr.drow td:first-child{box-shadow:none}
-      .tbl-mobile tr.drow.b-point{border-color:var(--danger)}
-      .tbl-mobile tr.drow.serial{border-color:var(--warn)}
-    }
+    /* поиск по всем столбцам — и на компьютере, и на телефоне */
+    .dfm{display:flex;gap:6px;margin:.25rem 0 .55rem;align-items:center}
+    .dfm input{flex:1;min-width:0;max-width:360px;padding:7px 9px;font-size:14px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit}
+    .dfilters-body{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:flex-end;margin:.5rem 0 .25rem}
+    .flt-dates{display:contents}
+    .flt-per{display:flex;gap:4px;align-self:flex-end}
     .b-ribbon{background:color-mix(in srgb,var(--danger) 14%,transparent);border:1px solid var(--danger);color:var(--danger);font-weight:700;font-size:12px;border-radius:var(--r-sm);padding:.4rem .6rem;margin:.6rem 0}
     .tl{list-style:none;margin:.6rem 0;padding:0}
     .tl li{position:relative;padding:.3rem 0 .3rem 1.1rem;border-left:2px solid var(--border);margin-left:.3rem}
@@ -110,14 +101,148 @@
     .tl-txt{font-size:12px;margin-top:2px;white-space:pre-wrap}
     .photos{display:flex;gap:.4rem;flex-wrap:wrap;margin:.5rem 0}
     .photos img{width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:pointer}
-    @media (max-width:768px){ .photos img{width:88px;height:88px} }   /* крупнее превью на телефоне → ✕ 34px не перекрывает фото */
     .act-bar{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.7rem}
     .act-form{margin-top:.6rem;padding:.6rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--r-sm)}
     .act-form textarea{min-height:52px}
     /* баннер подключения Telegram-уведомлений */
     .tg-banner{display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap;background:color-mix(in srgb,var(--accent) 8%,transparent);border:1px solid var(--border);border-radius:var(--r-sm);padding:.55rem .85rem;margin-bottom:1rem;font-size:14px}
     .tg-banner.on{background:color-mix(in srgb,var(--success,#3fb950) 12%,transparent)}
+    #regCard{margin-bottom:1rem}
+    .tg-banner[hidden]{display:none}
     .tg-banner span{min-width:0}
+    /* уведомление о результате действия и загрузка карточки — на всех экранах */
+    .toast{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:500;max-width:min(92vw,520px);width:max-content;
+      background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:var(--r);padding:10px 14px;font-size:14px;box-shadow:0 6px 24px rgba(0,0,0,.4)}
+    .is-busy .dcard-body .btn{opacity:.55;pointer-events:none}
+    .d-loading{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;padding:.75rem 0;font-size:14px}
+    .d-loading .muted{flex-basis:100%;color:var(--muted);font-size:13px}
+    .spin{width:18px;height:18px;border-radius:50%;border:2px solid var(--border);border-top-color:var(--accent);animation:dspin .8s linear infinite}
+    @keyframes dspin{to{transform:rotate(360deg)}}
+    .skel i{display:block;height:14px;margin:10px 0;border-radius:4px;background:var(--card2)}
+    .skel i:nth-child(2){width:70%}.skel i:nth-child(3){width:85%}.skel i:nth-child(4){width:55%}
+
+    /* ── Телефон: доска — плотные строки; карточка дефекта, фильтры и фиксация — отдельные окна ──
+       Условие то же, что compactMQ в скрипте; поворот телефона интерфейс не меняет. Кнопки и поля
+       в окнах >= 44px. Строка списка ниже намеренно (32px): нужно >= 20 дефектов на экран, а лишнее
+       касание безопасно — откроется окно, «назад» вернёт к списку. */
+    .sht,.stage-lock,.compact-only,.fs-head,.fs-foot,.fsheet,.fab{display:none}
+    @media (max-width: 768px), (max-width: 950px) and (max-height: 500px) and (pointer: coarse){
+      .lng,.dhint,.dtable .dftr,#boardCard .board-header,#regCard .card-title{display:none}
+      .sht{display:inline}
+      .compact-only{display:block}
+      .compact-only[hidden]{display:none}
+      .btn.compact-only{display:inline-flex}
+
+      /* шапка сайта не отнимает экран у списка: не закреплена и не выше кнопок */
+      .nav{position:static;height:45px;min-height:45px;padding-top:0;padding-bottom:0}
+      .dpage{padding:0 0 calc(5.5rem + env(safe-area-inset-bottom));max-width:none}
+      .dpage .btn,.fsheet .btn{min-height:44px;min-width:44px}
+      #tgBanner{margin:0;padding:0 .25rem 0 .5rem;min-height:45px;flex-wrap:nowrap;gap:.25rem;border-width:0 0 1px;border-radius:0;font-size:13px}
+      #tgBanner > span{flex:1}
+      #tgBanner .btn{flex:none;padding:0 10px}
+      #fTg.tg-banner{margin:0}
+      #editorCard{margin:.75rem}
+      #boardCard{border:none;border-radius:0;box-shadow:none;background:var(--bg);margin:0;
+        padding:0 env(safe-area-inset-right) 0 env(safe-area-inset-left)}
+
+      /* вкладки — одна строка с прокруткой; панель поиска и заголовки колонок всегда на виду */
+      .dtabs{position:sticky;top:0;z-index:20;height:44px;margin:0;padding:0 .25rem;gap:0;flex-wrap:nowrap;overflow-x:auto;align-items:stretch;
+        background:var(--bg);scrollbar-width:none;-webkit-overflow-scrolling:touch}
+      .dtabs::-webkit-scrollbar{display:none}
+      /* правый край гаснет: понятно, что вкладки листаются; в конце ленты затухание ложится на пустое место */
+      .dtabs::after{content:'';flex:none;width:28px;position:sticky;right:0;background:linear-gradient(to right,transparent,var(--bg));pointer-events:none}
+      .dtab{flex:none;white-space:nowrap;padding:0 10px;border:none;border-bottom:2px solid transparent;border-radius:0;font-size:13px}
+      .dtab:hover,.dtab.active{background:none}
+      .dtab.active{border-color:var(--accent)}
+      .dfm{position:sticky;top:44px;z-index:20;margin:0;padding:0 .5rem;background:var(--bg);border-bottom:1px solid var(--border)}
+      .dfm input{min-height:44px;max-width:none;font-size:16px}
+      .dfm .btn{flex:none;padding:0 10px;font-size:13px}
+      .zone-note{margin:.75rem}                           /* под списком: над ним отнимала бы строки */
+
+      /* строки как в таблице компьютера: те же данные, колонки выровнены.
+         Раскладка fixed: длинное значение обрезается, а не расширяет страницу (иначе телефон уменьшает всё) */
+      .tbl-wrap{overflow:visible}
+      .dtable{table-layout:fixed}
+      .dtable th[data-col=code]{width:15%}
+      .dtable th[data-col=spot],.dtable th[data-col=g]{width:8%}
+      .dtable th[data-col=seg]{width:11%}
+      .dtable th[data-col=station]{width:20%}
+      .dtable th[data-col=stage],.dtable th[data-col=assignee]{width:14%}
+      .dtable th[data-col=date]{width:10%}
+      .dtable th,.dtable td{padding:0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .dtable thead th{position:sticky;top:89px;z-index:10;height:26px;background:var(--card);font-size:10px;letter-spacing:.02em}
+      .dtable td{height:32px;font-size:13px}
+      .dtable th:first-child,.dtable td:first-child{padding-left:10px}
+      .dtable tbody tr.drow:nth-child(even){background:color-mix(in srgb,var(--text) 4%,transparent)}
+      .dtable tbody tr.drow:active,.dtable tbody tr.drow.board-row-active{background:color-mix(in srgb,var(--accent) 22%,transparent) !important}
+      .dtable .flag{padding:0 3px;font-size:9px}
+      .dtable .stage-chip{padding:0;border:none;background:none;font-size:12px;font-weight:600}
+      .dtable td[data-col=date]{color:var(--muted);font-size:12px}
+      .dtable [data-col=brand],.dtable [data-col=ctrl]{display:none}
+
+      /* окна на весь экран */
+      .fsheet.open,#regCard.open,#dfilters.open{display:flex;flex-direction:column;position:fixed;inset:0;z-index:300;margin:0;padding:0;
+        background:var(--bg);border:none;border-radius:0;box-shadow:none}
+      #regCard:not(.open),#dfilters:not(.open){display:none}
+      .fs-head{display:flex;flex:none;align-items:center;gap:.25rem;min-height:52px;padding:env(safe-area-inset-top) .25rem 0;background:var(--card);border-bottom:1px solid var(--border)}
+      .fs-back{min-width:44px;min-height:44px;background:none;border:none;color:var(--text);font-size:20px;cursor:pointer}
+      .fs-title{min-width:0;font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .fs-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;
+        padding:.75rem max(.75rem,env(safe-area-inset-right)) calc(1.5rem + env(safe-area-inset-bottom)) max(.75rem,env(safe-area-inset-left))}
+      .fs-foot{display:block;flex:none;padding:.5rem .75rem calc(.5rem + env(safe-area-inset-bottom));background:var(--card);border-top:1px solid var(--border)}
+      .fs-foot .btn{width:100%;min-height:44px}
+      html.sheet-open,html.sheet-open body{overflow:hidden}
+      .fsheet input:not([type=checkbox]):not([type=radio]):not([type=file]),.fsheet select,.fsheet textarea,
+      #regCard input:not([type=checkbox]):not([type=radio]):not([type=file]),#regCard select,
+      #dfilters input,#dfilters select{min-height:44px;font-size:16px}
+
+      /* карточка дефекта: сначала что за дефект и что с ним можно сделать, потом история */
+      .fsheet .dcard-body{padding:0;border:none}
+      .d-facts{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:0 0 .5rem;font-size:14px}
+      .d-facts dt{color:var(--muted);font-size:13px}
+      .d-facts dd{margin:0;min-width:0;overflow-wrap:anywhere;font-weight:600}
+      .fsheet .act-bar{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+      .fsheet .act-bar .btn{width:100%}
+      .fsheet input[type=file]{min-height:44px;width:100%}
+      .photos img{width:88px;height:88px}
+      /* ✕ у фото: на вид 34px, чтобы не закрывать снимок, а нажимается 44px */
+      .ph-del{width:34px;height:34px;font-size:15px;top:3px;right:3px}
+      .ph-del::after{content:'';position:absolute;inset:-5px}
+
+      /* окно фильтров */
+      #dfilters .dfilters-body{display:block;margin:0}
+      #dfilters .dfilters-body > *{margin-bottom:.75rem}
+      .flt-dates{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+      .flt-dates .fin{width:100%;box-sizing:border-box}
+      .flt-per{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+      .flt-per .btn{width:100%;min-height:44px}
+      .dfl-cols{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+      .dfl-cols .btn{width:100%;min-height:44px;justify-content:space-between}
+      .dfl-cols .btn.on{border-color:var(--accent);color:var(--accent)}
+      #fClearAll{width:100%;min-height:44px}
+      #fSort{width:100%}
+
+      /* кнопка фиксации дефекта — под большим пальцем, места в списке не занимает */
+      .fab:not([hidden]){display:flex;align-items:center;justify-content:center;position:fixed;z-index:100;width:56px;height:56px;
+        right:max(16px,env(safe-area-inset-right));bottom:calc(16px + env(safe-area-inset-bottom));
+        border:none;border-radius:50%;background:var(--danger);color:#fff;font-size:30px;line-height:1;box-shadow:0 4px 14px rgba(0,0,0,.45);cursor:pointer}
+      .toast{top:calc(60px + env(safe-area-inset-top));bottom:auto}     /* не под клавиатурой и не поверх кнопок формы */
+    }
+    /* узкий телефон: колонки, которые не помещаются, — в карточке дефекта */
+    @media (max-width: 640px){
+      .stage-lock{display:inline}
+      .dtable [data-col=g],.dtable [data-col=seg],.dtable [data-col=assignee]{display:none}
+      .dtable th[data-col=code]{width:24%}
+      .dtable th[data-col=spot]{width:13%}
+      .dtable th[data-col=station]{width:29%}
+      .dtable th[data-col=stage]{width:21%}
+      .dtable th[data-col=date]{width:13%}
+    }
+    /* телефон лёжа: высоты мало — панели прокручиваются вместе со списком */
+    @media (max-width: 950px) and (max-height: 500px) and (pointer: coarse){
+      .dtabs,.dfm,.dtable thead th{position:static}
+      #dbfilter.mob{max-height:100vh;max-height:100dvh;border-radius:0}
+    }
   </style>
 </head>
 <body>
@@ -137,13 +262,15 @@
   </div>
 </nav>
 
-<div class="page">
+<div class="page dpage">
 
   <!-- ── Telegram-уведомления (баннер подключения; скрыт, если бот не настроен) ── -->
   <div id="tgBanner" class="tg-banner" hidden></div>
 
-  <!-- ── РЕГИСТРАЦИЯ (только ОТК/WeldTeam) ── -->
-  <div class="card" id="regCard" style="margin-bottom:1rem" hidden>
+  <!-- ── РЕГИСТРАЦИЯ (только ОТК/WeldTeam). На телефоне — окно, открывается кнопкой «＋» ── -->
+  <div class="card" id="regCard" hidden>
+    <div class="fs-head"><button type="button" class="fs-back" aria-label="Закрыть окно">←</button><div class="fs-title">Зафиксировать дефект</div></div>
+    <div class="fs-body">
     <div class="card-title danger">Зафиксировать дефект ОТК</div>
     <div class="g3-reg">
       <div class="fgroup" style="margin:0">
@@ -195,41 +322,52 @@
       </div>
       <div id="manRegAlert" class="hidden mt-alert"></div>
     </div>
+    </div>
   </div>
 
   <!-- ── ДОСКА ДЕФЕКТОВ ── -->
-  <div class="card">
+  <div class="card" id="boardCard">
     <div class="board-header">
       <div class="board-title">Дефекты · цепочка 4M <span class="text-muted" id="whoami" style="font-size:11px;font-weight:400;text-transform:none"></span></div>
       <button class="btn btn-ghost btn-sm" id="refreshBtn">↻ Обновить</button>
     </div>
 
     <div class="dtabs" id="dtabs">
-      <button class="dtab mine active" data-tab="mine">📥 Мои входящие <span class="cnt" id="c-mine">0</span></button>
-      <button class="dtab" data-tab="all">Все открытые <span class="cnt" id="c-all">0</span></button>
-      <button class="dtab" data-tab="serial">🔁 Серийные <span class="cnt" id="c-serial">0</span></button>
-      <button class="dtab" data-tab="unresolved">⚠ Не выявленные <span class="cnt" id="c-unres">0</span></button>
-      <button class="dtab" data-tab="closed">✓ Закрытые <span class="cnt" id="c-closed">0</span></button>
-      <button class="dtab" data-tab="controller">👤 Контролёр <span class="cnt" id="c-ctrl">0</span></button>
+      <button class="dtab mine active" data-tab="mine"><span class="lng">📥 Мои входящие</span><span class="sht">Мои</span> <span class="cnt" id="c-mine">0</span></button>
+      <button class="dtab" data-tab="all"><span class="lng">Все открытые</span><span class="sht">Все</span> <span class="cnt" id="c-all">0</span></button>
+      <button class="dtab" data-tab="serial"><span class="lng">🔁 Серийные</span><span class="sht">Серийные</span> <span class="cnt" id="c-serial">0</span></button>
+      <button class="dtab" data-tab="unresolved"><span class="lng">⚠ Не выявленные</span><span class="sht">Не выявл.</span> <span class="cnt" id="c-unres">0</span></button>
+      <button class="dtab" data-tab="closed"><span class="lng">✓ Закрытые</span><span class="sht">Закрытые</span> <span class="cnt" id="c-closed">0</span></button>
+      <button class="dtab" data-tab="controller"><span class="lng">👤 Контролёр</span><span class="sht">Контролёр</span> <span class="cnt" id="c-ctrl">0</span></button>
     </div>
 
     <style>
       .flbl{font-size:11px;opacity:.65;margin-bottom:2px}
       .fin{padding:5px 7px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit;font-size:13px}
     </style>
-    <div id="dfilters" style="display:flex;flex-wrap:wrap;gap:8px 10px;align-items:flex-end;margin:.5rem 0 .25rem">
-      <div><div class="flbl">С даты</div><input type="date" id="fFrom" class="fin"></div>
-      <div><div class="flbl">По дату</div><input type="date" id="fTo" class="fin"></div>
-      <div style="display:flex;gap:4px;align-self:flex-end">
-        <button type="button" class="btn btn-ghost btn-sm fper" data-p="today">Сегодня</button>
-        <button type="button" class="btn btn-ghost btn-sm fper" data-p="week">Неделя</button>
-        <button type="button" class="btn btn-ghost btn-sm fper" data-p="month">Месяц</button>
+    <!-- На компьютере — панель над таблицей; на телефоне — окно, открывается кнопкой «Фильтры» -->
+    <div id="dfilters">
+      <div class="fs-head"><button type="button" class="fs-back" aria-label="Закрыть окно">←</button><div class="fs-title">Фильтры и сортировка</div></div>
+      <div class="dfilters-body fs-body">
+        <div class="flt-dates">
+          <div><div class="flbl">С даты</div><input type="date" id="fFrom" class="fin"></div>
+          <div><div class="flbl">По дату</div><input type="date" id="fTo" class="fin"></div>
+        </div>
+        <div class="flt-per">
+          <button type="button" class="btn btn-ghost btn-sm fper" data-p="today">Сегодня</button>
+          <button type="button" class="btn btn-ghost btn-sm fper" data-p="week">Неделя</button>
+          <button type="button" class="btn btn-ghost btn-sm fper" data-p="month">Месяц</button>
+        </div>
+        <div class="compact-only"><div class="flbl">Сортировка</div><select id="fSort"></select></div>
+        <div class="compact-only"><div class="flbl">Фильтр по колонке</div><div class="dfl-cols" id="fColBtns"></div></div>
+        <div class="compact-only" id="fTg" hidden></div>
+        <button type="button" class="btn btn-ghost btn-sm" id="fClearAll" style="align-self:flex-end">✕ Сбросить все фильтры</button>
+        <span class="flbl dhint" style="align-self:flex-end;margin-left:auto;max-width:300px;line-height:1.3">↕ клик по заголовку — сортировка (▲ возр / ▼ убыв / сброс) · ▾ — фильтр: поиск + галочки + «Применить» (как в Редакторе)</span>
       </div>
-      <button type="button" class="btn btn-ghost btn-sm" id="fClearAll" style="align-self:flex-end">✕ Сбросить все фильтры</button>
-      <span class="flbl dhint" style="align-self:flex-end;margin-left:auto;max-width:300px;line-height:1.3">↕ клик по заголовку — сортировка (▲ возр / ▼ убыв / сброс) · ▾ — фильтр: поиск + галочки + «Применить» (как в Редакторе)</span>
+      <div class="fs-foot"><button type="button" class="btn btn-primary" id="fDone">Показать</button></div>
     </div>
 
-    <div id="defectList"><div class="empty-row" style="padding:1.5rem;text-align:center;color:var(--muted)">Загрузка…</div></div>
+    <div id="defectList"><div class="d-loading" role="status" style="justify-content:center"><span class="spin" aria-hidden="true"></span>Загружаем дефекты…</div></div>
   </div>
 
   <!-- Редактор дефектов (движок «Редактора»: правка/копипаст/аудит) -->
@@ -244,19 +382,100 @@
 
 </div>
 
+<!-- Окно карточки дефекта (телефон) -->
+<div id="dsheet" class="fsheet">
+  <div class="fs-head"><button type="button" class="fs-back" aria-label="Назад к списку дефектов">←</button><div class="fs-title" id="dsheetTitle"></div></div>
+  <div class="fs-body" id="dsheetBody"></div>
+</div>
+<button type="button" id="regFab" class="fab" aria-label="Зафиксировать дефект" title="Зафиксировать дефект" hidden>＋</button>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
 <script>
 const $ = id => document.getElementById(id);
 let ME = {}, BOARD = {open:[], unresolved:[], closed:[]}, TAB = 'mine', openId = null;
+let lastId = null;   // телефон: последний открытый дефект — строка подсвечена, когда вернулись к списку
 const DEPTS = ['Производство', 'WeldTeam', 'ИТО', 'ОТО', 'ОТК'];   // ОТК — чтобы можно было вернуть на исправление данных
 const STAGE_LABEL = {closed:'закрыл (на согласование ОТК)', passed:'передал дальше', returned:'вернул на доработку',
                      to_oto:'передал в ОТО', oto_done:'контрмера ОТО', reopened:'переоткрыл',
                      otk_approved:'ОТК согласовал закрытие', otk_rejected:'ОТК не согласовал — возврат',
                      serial_repeat:'повтор на точке — переоткрыт серией'};
+const STAGE_SHORT = {'Производство':'Произв.'};   // телефон: в узкую колонку
+
+// Телефон: условие то же, что в CSS (стоя и лёжа — один интерфейс; планшет в альбомном — как компьютер)
+const compactMQ = window.matchMedia('(max-width: 768px), (max-width: 950px) and (max-height: 500px) and (pointer: coarse)');
+const isCompact = () => compactMQ.matches;
+
+// ── Окна телефона (карточка дефекта, фильтры, фиксация) ──
+// Окно лежит в истории браузера: кнопка «назад» телефона закрывает его, а не уходит со страницы.
+let SHEET = null;   // {el, opener, onclose}
+function openSheet(el, {title = '', hash = '', onclose = null} = {}){
+  if (SHEET) hideSheet();
+  SHEET = {el, opener: document.activeElement, onclose};
+  el.classList.add('open');
+  el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true'); el.setAttribute('aria-label', title);
+  document.documentElement.classList.add('sheet-open');
+  history.pushState({sheet: true}, '', hash || location.pathname + location.search);
+  const back = el.querySelector('.fs-back'); if (back) back.focus({preventScroll: true});
+}
+function hideSheet(){
+  const s = SHEET; if (!s) return;
+  SHEET = null;
+  closeColFilter();
+  s.el.classList.remove('open');
+  ['role', 'aria-modal', 'aria-label'].forEach(a => s.el.removeAttribute(a));
+  document.documentElement.classList.remove('sheet-open');
+  if (s.onclose) s.onclose();
+  else if (s.opener && document.contains(s.opener)) s.opener.focus({preventScroll: true});
+}
+function closeSheet(){
+  if (!SHEET) return;
+  if (history.state && history.state.sheet) history.back();   // popstate закроет окно
+  else { hideSheet(); history.replaceState(null, '', location.pathname + location.search); }
+}
+window.addEventListener('popstate', () => {
+  if (window._dbf && SHEET){                                  // панель значений поверх окна: «назад» закрывает только её
+    closeColFilter();
+    history.pushState({sheet: true}, '', location.pathname + location.search);
+    return;
+  }
+  // «вперёд» на запись уже закрытого окна: окна нет — и в адресе его быть не должно
+  if (!SHEET && history.state && history.state.sheet){ history.replaceState(null, '', location.pathname + location.search); return; }
+  hideSheet();
+});
+document.addEventListener('click', e => { if (e.target.closest('.fs-back')) closeSheet(); });
+document.addEventListener('keydown', e => {
+  if (!SHEET) return;
+  if (e.key === 'Escape' && !window._dbf) closeSheet();
+  if (e.key !== 'Tab') return;                                // клавиатура не уходит за окно
+  const items = [...SHEET.el.querySelectorAll('button,a[href],input,select,textarea')].filter(x => x.offsetParent);
+  if (!items.length) return;
+  const first = items[0], last = items[items.length - 1];
+  if (e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
+});
+compactMQ.addEventListener('change', () => {      // размер окна/планшет повернули — другой интерфейс
+  closeSheet(); closeColFilter(); openId = null;
+  renderTgBanner(ME);
+  renderList();
+});
+
+// Сообщение о результате действия. sticky — пока идёт операция (скрыть: toast('')).
+let toastTimer = null;
+function toast(msg, {sticky = false} = {}){
+  const t = $('toast');
+  clearTimeout(toastTimer);
+  t.textContent = msg || '';
+  t.hidden = !msg;
+  if (msg && !sticky) toastTimer = setTimeout(() => { t.hidden = true; }, 4000);
+}
 
 // Экранируем набор OWASP (& < > " ') — чтобы значение было безопасно и в тексте,
 // и внутри атрибута (value="…"): иначе кавычка в данных ломает атрибут (XSS).
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
-function showAlert(el, type, msg){ el.className = `alert alert-${type}`; el.textContent = msg; }
+function showAlert(el, type, msg){ el.className = `alert alert-${type}`; el.textContent = msg; el.scrollIntoView({block: 'nearest'}); }
+// Ответ API. Не JSON (слишком большой файл, ошибка прокси) — это ответ сервера, а не обрыв связи.
+const readJson = r => r.json().catch(() => ({status: 'error', message: `Сервер не принял запрос (код ${r.status})`}));
+const jsonReq = (method, data) => ({method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)});
 
 // Сжатие фото на КЛИЕНТЕ (canvas → JPEG): телефонное 3–8 МБ → ~200–400 КБ.
 // Сервер картинки не обрабатывает — только сохраняет файл. Экономит трафик и диск.
@@ -276,12 +495,19 @@ function compressImage(file, maxDim=1600, quality=0.82){
     img.src = URL.createObjectURL(file);
   });
 }
+// Фото не принято или связь оборвалась — исключение: действие, которому нужно фото, дальше не идёт.
+class UploadError extends Error {}
 async function uploadPhotos(id, fileList){
+  let sent = 0;
   for (const f of fileList){
     const blob = await compressImage(f);
     const fd = new FormData();
     fd.append('photo', blob, (f.name.replace(/\.[^.]+$/, '') || 'photo') + '.jpg');
-    await fetch(`/api/defects/${id}/photo`, {method:'POST', body: fd});
+    let res;
+    try { res = await fetch(`/api/defects/${id}/photo`, {method:'POST', body: fd}).then(readJson); }
+    catch { res = {message: 'Нет связи с сервером'}; }
+    if (res.status !== 'success') throw new UploadError(`${res.message || 'Сервер не принял фото'}. Загружено фото: ${sent} из ${fileList.length}`);
+    sent++;
   }
 }
 
@@ -289,17 +515,40 @@ async function uploadPhotos(id, fileList){
 fetch('/api/me').then(r=>r.json()).then(me=>{
   ME = me;
   const canReg = me.dept === 'ОТК' || me.privileged || me.is_admin || me.dept === 'WeldTeam';
-  if (canReg) { $('regCard').hidden = false; initRegistration(); }
+  if (canReg) { $('regCard').hidden = false; $('regFab').hidden = false; initRegistration(); }
   if (me.can_edit_docs) $('editorCard').hidden = false;
   $('whoami').textContent = me.dept ? `· вы: ${me.dept}` : '';
   renderTgBanner(me);
   loadBoard();
+  openFromHash();
+}).catch(() => {
+  $('defectList').innerHTML = `<div class="alert alert-danger" style="margin:.75rem">Нет связи с сервером.
+    <button class="btn btn-ghost btn-sm" onclick="location.reload()">↻ Повторить</button></div>`;
 });
+// ссылка на дефект (#d123): на телефоне сразу открываем его окно, «назад» вернёт к списку
+function openFromHash(){
+  const m = /^#d(\d+)$/.exec(location.hash);
+  if (m && isCompact()){ history.replaceState(null, '', location.pathname + location.search); openDefectSheet(+m[1]); }
+}
+window.addEventListener('hashchange', openFromHash);
+
+$('regFab').addEventListener('click', () => openSheet($('regCard'), {title: 'Зафиксировать дефект'}));
 
 // ── Telegram: баннер подключения ──
+// Телефон: над списком только приглашение подключиться, и его можно убрать — останется в окне фильтров.
+let tgDismissed = false;
+try { tgDismissed = localStorage.getItem('tgBannerDismissed') === '1'; } catch { /* нет хранилища: просто покажем снова */ }
+function tgDismiss(){
+  tgDismissed = true;
+  try { localStorage.setItem('tgBannerDismissed', '1'); } catch { /* запомним до перезагрузки страницы */ }
+  renderTgBanner(ME);
+}
 function renderTgBanner(me){
-  const b = $('tgBanner');
-  if (!me.tg_available){ b.hidden = true; return; }   // бот не настроен — баннер не показываем
+  const main = $('tgBanner'), mini = $('fTg');
+  main.hidden = mini.hidden = true; main.innerHTML = mini.innerHTML = '';
+  if (!me.tg_available) return;                       // бот не настроен — баннер не показываем
+  const compact = isCompact();
+  const b = (compact && (me.tg_connected || tgDismissed)) ? mini : main;
   b.hidden = false;
   if (me.tg_connected){
     b.className = 'tg-banner on';
@@ -308,9 +557,11 @@ function renderTgBanner(me){
     $('tgUnlinkBtn').onclick = tgUnlink;
   } else {
     b.className = 'tg-banner';
-    b.innerHTML = '<span>🔔 Получайте уведомления о своих дефектах в Telegram</span>' +
-                  '<button class="btn btn-primary btn-sm" id="tgLinkBtn">Подключить Telegram</button>';
+    b.innerHTML = '<span><span class="lng">🔔 Получайте уведомления о своих дефектах в Telegram</span><span class="sht">🔔 Уведомления в Telegram</span></span>' +
+                  '<button class="btn btn-primary btn-sm" id="tgLinkBtn"><span class="lng">Подключить Telegram</span><span class="sht">Подключить</span></button>' +
+                  (compact && b === main ? '<button class="btn btn-ghost btn-sm" id="tgHideBtn" aria-label="Убрать приглашение Telegram" title="Убрать (останется в окне фильтров)">✕</button>' : '');
     $('tgLinkBtn').onclick = tgLink;
+    if ($('tgHideBtn')) $('tgHideBtn').onclick = tgDismiss;
   }
 }
 function tgLink(){
@@ -319,11 +570,12 @@ function tgLink(){
       window.open(res.link, '_blank');            // откроется бот → Start → привязка
       pollTgConnected();                          // подхватим подключение без перезагрузки
     } else alert(res.message || 'Не удалось создать ссылку');
-  });
+  }).catch(() => toast('Нет связи с сервером — повторите'));
 }
 function tgUnlink(){
   if (!confirm('Отключить Telegram-уведомления?')) return;
-  fetch('/api/tg/unlink', {method:'POST'}).then(r=>r.json()).then(()=>{ ME.tg_connected = false; renderTgBanner(ME); });
+  fetch('/api/tg/unlink', {method:'POST'}).then(r=>r.json()).then(()=>{ ME.tg_connected = false; renderTgBanner(ME); })
+    .catch(() => toast('Нет связи с сервером — повторите'));
 }
 function pollTgConnected(tries = 10){
   if (tries <= 0) return;
@@ -340,8 +592,22 @@ $('dtabs').addEventListener('click', e => {
   const b = e.target.closest('.dtab'); if (!b) return;
   TAB = b.dataset.tab; openId = null;
   document.querySelectorAll('.dtab').forEach(t => t.classList.toggle('active', t === b));
+  b.scrollIntoView({inline: 'center', block: 'nearest'});   // телефон: вкладки прокручиваются в строку
   // вкладка «Контролёр» по умолчанию показывает МОИ зарегистрированные (см. currentRows); чтобы увидеть другого — поиск по колонке «Контролёр»
   renderList();
+});
+$('fDone').addEventListener('click', closeSheet);
+$('fSort').addEventListener('change', e => {
+  const v = e.target.value;
+  if (!v) SORT = {col: null, dir: 1};
+  else { const [k, d] = v.split(':'); SORT = {col: k, dir: +d}; }
+  renderList();
+});
+$('fColBtns').addEventListener('click', e => { const b = e.target.closest('[data-col]'); if (b) openColFilter(b.dataset.col, b); });
+// строка доски: клик, Enter или пробел открывают дефект
+$('defectList').addEventListener('click', e => { const tr = e.target.closest('tr.drow'); if (tr) toggleCard(+tr.dataset.id); });
+$('defectList').addEventListener('keydown', e => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('tr.drow')){ e.preventDefault(); toggleCard(+e.target.dataset.id); }
 });
 
 // ── панель фильтров (даты/период); сортировка и поиск — в заголовках таблицы ──
@@ -376,6 +642,9 @@ function loadBoard(){
     $('c-closed').textContent = d.closed.length;
     $('c-ctrl').textContent = d.open.filter(x => x.worker_register_id === ME.uid).length;
     renderList();
+  }).catch(() => {
+    $('defectList').innerHTML = `<div class="alert alert-danger" style="margin:.75rem">Нет связи с сервером — список не обновился.
+      <button class="btn btn-ghost btn-sm" onclick="loadBoard()">↻ Повторить</button></div>`;
   });
 }
 
@@ -390,9 +659,10 @@ function listFor(tab){
 
 // ── Excel-подобная доска: сортировка по заголовку (▲ возр / ▼ убыв / сброс) + поиск по колонке (как в Редакторе) ──
 function flagsHtml(d){
-  return (d.is_b_point ? '<span class="flag b">B</span> ' : '')
-       + (d.is_serial ? `<span class="flag s">сер${d.return_count ? '×' + d.return_count : ''}</span> ` : '')
-       + (d.photo_count ? `<span class="muted" title="фото" style="font-size:11px">📷${d.photo_count}</span> ` : '');
+  const n = d.return_count ? '×' + d.return_count : '';
+  return (d.is_b_point ? '<span class="flag b" title="Точка группы B">B</span> ' : '')
+       + (d.is_serial ? `<span class="flag s" title="Серийный"><span class="lng">сер${n}</span><span class="sht">${n || 'с'}</span></span> ` : '')
+       + (d.photo_count ? `<span class="muted lng" title="фото" style="font-size:11px">📷${d.photo_count}</span> ` : '');
 }
 function stageText(d){
   if (d.status === 'closed') return 'закрыт';
@@ -401,16 +671,25 @@ function stageText(d){
   return d.current_stage_dept || '';
 }
 function stageCell(d){
-  let chip, cls = '';
+  let chip, cls = '', short = '';
   if (d.status === 'closed'){ chip = '✓ закрыт'; cls = 'closed'; }
-  else if (d.status === 'unresolved'){ chip = '⚠ не выявлен'; cls = 'unresolved'; }
+  else if (d.status === 'unresolved'){ chip = '⚠ не выявлен'; short = 'не выявл.'; cls = 'unresolved'; }
   else if (d.status === 'at_oto'){ chip = '🔧 ОТО'; cls = 'oto'; }
-  else chip = '→ ' + esc(d.current_stage_dept || '—');
-  return `<span class="stage-chip ${cls}">${chip}</span>`;
+  else {
+    const dept = d.current_stage_dept || '—';
+    chip = '→ ' + esc(dept); short = esc(STAGE_SHORT[dept] || dept);
+  }
+  // на телефоне колонки «В работе» нет — замок в этой же ячейке
+  const lock = d.assigned_worker_id ? `<span class="stage-lock" title="В работе: ${esc(d.assignee_name || '')}">🔒</span>` : '';
+  return `<span class="stage-chip ${cls}"><span class="lng">${chip}</span><span class="sht">${short || chip}</span></span>${lock}`;
+}
+function dateCell(d){
+  const v = d.df_date || '', m = /^\d{4}-(\d{2})-(\d{2})/.exec(v);   // телефон: день и месяц, полная дата — в карточке
+  return `<span class="lng">${esc(v)}</span><span class="sht" title="${esc(v)}">${m ? m[2] + '.' + m[1] : esc(v)}</span>`;
 }
 const _norm = v => (v == null || v === '—') ? '' : String(v);   // «—» из бэка трактуем как пусто (для поиска/сорта)
 const COLS = [
-  {k:'code',    label:'Код',       num:false, get:d=>d.problem_code||'',   cell:d=>`${flagsHtml(d)}<b class="code">${esc(d.problem_code||'')}</b>`},
+  {k:'code',    label:'Код',       num:false, get:d=>d.problem_code||'',   cell:d=>`<b class="code">${esc(d.problem_code||'')}</b> ${flagsHtml(d)}`},
   {k:'spot',    label:'Точка',     num:true,  get:d=>d.spot_number||''},
   {k:'g',       label:'G-№',       num:true,  get:d=>d.g_num||''},
   {k:'seg',     label:'Участок',   num:false, get:d=>d.segment||''},
@@ -419,7 +698,7 @@ const COLS = [
   {k:'stage',   label:'Этап',      num:false, get:d=>stageText(d),         cell:stageCell},
   {k:'ctrl',    label:'Контролёр', num:false, get:d=>d.register_name||''},
   {k:'assignee',label:'В работе',  num:false, get:d=>d.assignee_name||'',   cell:d=>d.assigned_worker_id?`🔒 ${esc(d.assignee_name||'')}`:''},
-  {k:'date',    label:'Дата',      num:false, get:d=>d.df_date||''},
+  {k:'date',    label:'Дата',      num:false, get:d=>d.df_date||'',         cell:dateCell},
 ];
 let SORT = {col: null, dir: 1};   // dir: 1 — по возрастанию, -1 — по убыванию
 let FILT = {};                    // чек-фильтр: ключ колонки → Set выбранных значений (как colFilters в Редакторе)
@@ -475,9 +754,23 @@ function colValues(ck){
 }
 function updateFilterSummary(){
   const b = $('fClearAll'); if (!b) return;
-  const n = Object.keys(FILT).length;
+  const n = Object.keys(FILT).length, dated = !!($('fFrom').value || $('fTo').value);
   b.textContent = n ? `✕ Сбросить все фильтры (${n})` : '✕ Сбросить все фильтры';
-  b.disabled = !(n || SORT.col || $('fFrom').value || $('fTo').value || GQ);
+  b.disabled = !(n || SORT.col || dated || GQ);
+  // телефон: кнопка показывает, что фильтры включены; окно — сколько строк останется
+  const set = n + (dated ? 1 : 0) + (SORT.col ? 1 : 0), open = $('fOpen');
+  if (open){ open.textContent = set ? `Фильтры · ${set}` : 'Фильтры'; open.classList.toggle('btn-primary', !!set); open.classList.toggle('btn-ghost', !set); }
+  $('fDone').textContent = `Показать: ${currentRows().length}`;
+}
+function renderFilterPanel(){
+  $('fSort').innerHTML = ['<option value="">— без сортировки —</option>'].concat(COLS.flatMap(c => [
+    `<option value="${c.k}:1"${SORT.col === c.k && SORT.dir === 1 ? ' selected' : ''}>${c.label} ▲</option>`,
+    `<option value="${c.k}:-1"${SORT.col === c.k && SORT.dir === -1 ? ' selected' : ''}>${c.label} ▼</option>`,
+  ])).join('');
+  $('fColBtns').innerHTML = COLS.map(c => {
+    const set = FILT[c.k];
+    return `<button type="button" class="btn btn-ghost${set ? ' on' : ''}" data-col="${c.k}">${c.label}${set ? ' · ' + set.size : ''} <span aria-hidden="true">▾</span></button>`;
+  }).join('');
 }
 function renderList(){
   const host = $('defectList');
@@ -485,30 +778,29 @@ function renderList(){
     const arr = SORT.col === c.k ? `<span class="sarr"> ${SORT.dir === 1 ? '▲' : '▼'}</span>` : '';
     return `<th class="sortable" data-col="${c.k}" title="Клик — сортировка (▲ возр / ▼ убыв / ещё раз — сброс)">${c.label}${arr}</th>`;
   }).join('');
-  const fbtns = COLS.map(c => `<th><button class="dbfbtn${FILT[c.k] ? ' on' : ''}" data-col="${c.k}" title="Фильтр: поиск + галочки">▾</button></th>`).join('');
-  // мобильная панель (на мобиле заголовки таблицы скрыты): глобальный поиск по всем столбцам + выбор сортировки
-  const sortOpts = ['<option value="">— сортировка —</option>'].concat(COLS.flatMap(c => [
-    `<option value="${c.k}:1"${SORT.col === c.k && SORT.dir === 1 ? ' selected' : ''}>${c.label} ▲</option>`,
-    `<option value="${c.k}:-1"${SORT.col === c.k && SORT.dir === -1 ? ' selected' : ''}>${c.label} ▼</option>`,
-  ])).join('');
+  const fbtns = COLS.map(c => `<th data-col="${c.k}"><button class="dbfbtn${FILT[c.k] ? ' on' : ''}" data-col="${c.k}" title="Фильтр: поиск + галочки">▾</button></th>`).join('');
+  // поиск по всем столбцам; на телефоне рядом — окно фильтров и обновление (кнопки шапки там скрыты)
   const mbar = `<div class="dfm">
-    <input id="fmSearch" placeholder="🔎 поиск по столбцам" autocomplete="off" value="${esc(GQ)}">
-    <select id="fmSort">${sortOpts}</select></div>`;
+    <input id="fmSearch" type="search" placeholder="🔎 поиск по столбцам" aria-label="Поиск по столбцам" autocomplete="off" value="${esc(GQ)}">
+    <button type="button" class="btn btn-ghost compact-only" id="fOpen">Фильтры</button>
+    <button type="button" class="btn btn-ghost compact-only" id="fRefresh" aria-label="Обновить список" title="Обновить список">↻</button></div>`;
   // подсказка: вкладка «Мои входящие» ограничена зонами ответственности (бренд·участок)
   const zoneNote = (TAB === 'mine' && BOARD.zoned && BOARD.my_zones && BOARD.my_zones.length)
     ? `<div class="zone-note">👤 Только ваши участки: <b>${BOARD.my_zones.map(esc).join(', ')}</b> (и дефекты без участка). Остальное — во вкладке «Все открытые».</div>`
     : '';
-  host.innerHTML = zoneNote + mbar + `<div class="tbl-wrap"><table class="tbl tbl-mobile dtable">
+  // телефон: подсказка под списком — экран отдан строкам, а при коротком или пустом списке она сразу на виду
+  const compact = isCompact();
+  host.innerHTML = (compact ? '' : zoneNote) + mbar + `<div class="tbl-wrap"><table class="tbl dtable">
     <thead><tr>${head}</tr><tr class="dftr">${fbtns}</tr></thead>
-    <tbody id="dtbody"></tbody></table></div>`;
+    <tbody id="dtbody"></tbody></table></div>` + (compact ? zoneNote : '');
   host.querySelectorAll('th.sortable').forEach(th => th.addEventListener('click', () => cycleSort(th.dataset.col)));
   host.querySelectorAll('.dbfbtn').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); openColFilter(b.dataset.col, b); }));
   const fm = $('fmSearch'); if (fm) fm.addEventListener('input', () => { GQ = fm.value; openId = null; renderRows(); });
-  const fs = $('fmSort'); if (fs) fs.addEventListener('change', () => {
-    if (!fs.value) SORT = {col: null, dir: 1};
-    else { const [k, d] = fs.value.split(':'); SORT = {col: k, dir: +d}; }
-    renderList();
-  });
+  $('fOpen').addEventListener('click', () => openSheet($('dfilters'), {title: 'Фильтры и сортировка', onclose: () => {
+    const b = $('fOpen'); if (b) b.focus({preventScroll: true});   // панель перерисовывается: прежней кнопки уже нет
+  }}));
+  $('fRefresh').addEventListener('click', loadBoard);
+  renderFilterPanel();
   updateFilterSummary();
   renderRows();
 }
@@ -518,6 +810,7 @@ function closeColFilter(){
   if (window._dbf){ window._dbf.remove(); window._dbf = null; }
   if (window._dbfEsc){ document.removeEventListener('keydown', window._dbfEsc); window._dbfEsc = null; }
   if (window._dbfDown){ document.removeEventListener('mousedown', window._dbfDown); window._dbfDown = null; }
+  if (window._dbfBack){ window._dbfBack.remove(); window._dbfBack = null; }
 }
 function openColFilter(ck, btn){
   closeColFilter();
@@ -537,17 +830,18 @@ function openColFilter(ck, btn){
     (vals.length ? '' : '<div class="dbf-empty">Нет значений</div>') +
     '<div class="dbf-actions"><button class="dbf-ok">Применить</button><button class="dbf-cancel">Отмена</button><button class="dbf-clear">Сброс</button></div>';
   document.body.appendChild(p);
-  const r = btn.getBoundingClientRect();
-  // Планшет/телефон: крепим к месту на странице (absolute), без авто-клавиатуры — как в Редакторе
-  const mob = window.matchMedia('(max-width: 768px)').matches;
+  // Телефон: панель у нижнего края экрана (см. #dbfilter.mob), без авто-клавиатуры — как в Редакторе
+  const mob = isCompact();
   if (mob){
     p.classList.add('mob');
-    p.style.position = 'absolute';
-    const w = p.offsetWidth, sx = window.scrollX;
-    p.style.left = Math.max(sx + 8, Math.min(r.left + sx, sx + document.documentElement.clientWidth - w - 8)) + 'px';
-    p.style.top = (r.bottom + window.scrollY + 4) + 'px';
-    p.scrollIntoView({block: 'nearest'});   // показать попап целиком (кнопки — сверху)
+    p.style.height = p.offsetHeight + 'px';   // при поиске высота не меняется: «Применить» остаётся на месте
+    const back = document.createElement('div');
+    back.className = 'dbf-back';
+    back.addEventListener('click', closeColFilter);
+    document.body.insertBefore(back, p);
+    window._dbfBack = back;
   } else {
+    const r = btn.getBoundingClientRect();
     p.style.left = Math.max(6, Math.min(r.left, window.innerWidth - 272)) + 'px';
     p.style.top = Math.min(r.bottom + 4, window.innerHeight - p.offsetHeight - 8) + 'px';
   }
@@ -560,45 +854,105 @@ function openColFilter(ck, btn){
   search.oninput = () => { const q = search.value.trim().toLowerCase(); items().forEach((it, i) => { it.style.display = lbl(vals[i]).toLowerCase().includes(q) ? '' : 'none'; }); syncAll(); };
   allbox.onchange = () => { visible().forEach(it => it.firstChild.checked = allbox.checked); };
   listEl.onchange = syncAll;
+  // после применения окно фильтров перерисовано: фокус — на кнопку той же колонки
+  const applied = () => {
+    closeColFilter(); renderList();
+    const b = mob && SHEET && $('fColBtns').querySelector(`[data-col="${ck}"]`);
+    if (b) b.focus({preventScroll: true});
+  };
   p.querySelector('.dbf-ok').onclick = () => {
     const picked = new Set();
     items().forEach((it, i) => { if (it.firstChild.checked) picked.add(vals[i]); });
     if (picked.size === vals.length) delete FILT[ck];   // выбраны все → фильтра нет
     else FILT[ck] = picked;
-    closeColFilter(); openId = null; renderList();
+    openId = null; applied();
   };
-  p.querySelector('.dbf-cancel').onclick = closeColFilter;
-  p.querySelector('.dbf-clear').onclick = () => { delete FILT[ck]; closeColFilter(); openId = null; renderList(); };
-  p.querySelectorAll('.dbf-sort button').forEach(b => b.onclick = () => { SORT = {col: ck, dir: +b.dataset.sort}; closeColFilter(); renderList(); });
+  p.querySelector('.dbf-cancel').onclick = () => { closeColFilter(); if (mob) btn.focus({preventScroll: true}); };
+  p.querySelector('.dbf-clear').onclick = () => { delete FILT[ck]; openId = null; applied(); };
+  p.querySelectorAll('.dbf-sort button').forEach(b => b.onclick = () => { SORT = {col: ck, dir: +b.dataset.sort}; applied(); });
   window._dbfEsc = e => { if (e.key === 'Escape') closeColFilter(); };
-  window._dbfDown = e => { if (!p.contains(e.target) && !e.target.closest('.dbfbtn')) closeColFilter(); };
   document.addEventListener('keydown', window._dbfEsc);
-  document.addEventListener('mousedown', window._dbfDown);
+  if (!mob){   // на телефоне закрывает слой затемнения: иначе касание прошло бы к тому, что под панелью
+    window._dbfDown = e => { if (!p.contains(e.target) && !e.target.closest('.dbfbtn,#fColBtns')) closeColFilter(); };
+    document.addEventListener('mousedown', window._dbfDown);
+  }
   window._dbf = p;
 }
 function renderRows(){
   const tb = $('dtbody'); if (!tb) return;
   updateFilterSummary();   // при любом ре-рендере (вкл. ввод в мобильный поиск) кнопка «Сбросить все» отражает состояние
   const rows = currentRows();
-  if (!rows.length){ tb.innerHTML = `<tr class="empty-row"><td data-label="" colspan="${COLS.length}" style="text-align:center;color:var(--muted);padding:1.25rem">Пусто</td></tr>`; return; }
+  if (!rows.length){
+    const filtered = Object.keys(FILT).length || GQ.trim() || $('fFrom').value || $('fTo').value;
+    tb.innerHTML = `<tr class="empty-row"><td data-label="" colspan="${COLS.length}" style="text-align:center;color:var(--muted);padding:1.25rem;white-space:normal">${filtered ? 'Ничего не найдено — измените фильтры или поиск' : 'Здесь пока нет дефектов'}</td></tr>`;
+    return;
+  }
+  const compact = isCompact();   // телефон: только строка, дефект открывается отдельным окном
   tb.innerHTML = rows.map(d => {
-    const active = openId === d.UniqueID;
+    const active = compact ? lastId === d.UniqueID : openId === d.UniqueID;
     const cls = ['drow', d.is_b_point ? 'b-point' : '', d.is_serial ? 'serial' : '', active ? 'board-row-active' : ''].filter(Boolean).join(' ');
-    const cells = COLS.map(c => `<td data-label="${c.label}">${c.cell ? c.cell(d) : esc(c.get(d))}</td>`).join('');
-    return `<tr class="${cls}" onclick="toggleCard(${d.UniqueID})">${cells}</tr>`
-         + `<tr class="ddetail"${active ? '' : ' hidden'}><td data-label="" colspan="${COLS.length}"><div class="dcard-body" id="body-${d.UniqueID}"></div></td></tr>`;
+    const cells = COLS.map(c => `<td data-col="${c.k}" data-label="${c.label}">${c.cell ? c.cell(d) : esc(c.get(d))}</td>`).join('');
+    const row = `<tr class="${cls}" data-id="${d.UniqueID}" tabindex="0" ${compact ? 'aria-haspopup="dialog"' : `aria-expanded="${active}"`}>${cells}</tr>`;
+    return compact ? row
+         : row + `<tr class="ddetail"${active ? '' : ' hidden'}><td data-label="" colspan="${COLS.length}"><div class="dcard-body" id="body-${d.UniqueID}"></div></td></tr>`;
   }).join('');
-  if (openId != null){ const b = $('body-' + openId); if (b && !b.innerHTML){ b.innerHTML = '<div class="muted" style="padding:.6rem 0">Загрузка…</div>'; fetch('/api/defects/' + openId).then(r=>r.json()).then(renderDetail); } }
+  if (openId != null){ const b = $('body-' + openId); if (b && !b.innerHTML) loadDetail(openId); }
 }
 
 window.toggleCard = function(id){
+  if (isCompact()){ openDefectSheet(id); return; }
   openId = (openId === id) ? null : id;   // клик по строке — раскрыть/свернуть деталь (загружается в renderRows)
   renderRows();
 };
 
+// ── Окно дефекта (телефон): открывается сразу, с уведомлением о загрузке; данные приходят следом ──
+function defectTitle(d){
+  const where = (d.spot_number && d.spot_number !== '—') ? 'точка ' + d.spot_number : (d.g_num ? 'G.' + d.g_num : '');
+  return [d.problem_code || 'Дефект', where, '#' + d.UniqueID].filter(Boolean).join(' · ');
+}
+function openDefectSheet(id){
+  lastId = id;
+  const d = [...BOARD.open, ...BOARD.unresolved, ...BOARD.closed].find(x => x.UniqueID === id);
+  // сначала окно: закрытие предыдущего очищает тело карточки
+  openSheet($('dsheet'), {title: 'Карточка дефекта', hash: '#d' + id, onclose: () => {
+    $('dsheetBody').innerHTML = '';
+    renderRows();                                   // подсветить строку, откуда пришли
+    const tr = document.querySelector(`tr.drow[data-id="${id}"]`);
+    if (tr){ tr.focus({preventScroll: true}); tr.scrollIntoView({block: 'nearest'}); }
+  }});
+  $('dsheetTitle').textContent = d ? defectTitle(d) : 'Дефект #' + id;
+  $('dsheetBody').innerHTML = `<div class="dcard-body" id="body-${id}"></div>`;
+  loadDetail(id);
+}
+// Загрузить карточку. quiet — обновление уже открытой карточки: без уведомления о загрузке.
+function loadDetail(id, {quiet = false} = {}){
+  const b = $('body-' + id); if (!b) return Promise.resolve();
+  if (!quiet) b.innerHTML = `<div class="d-loading" role="status" aria-live="polite"><span class="spin" aria-hidden="true"></span><b>Загружаем карточку дефекта…</b>
+      <span class="muted d-slow" hidden>Связь медленная — подождите ещё немного.</span></div>
+    <div class="skel" aria-hidden="true"><i></i><i></i><i></i><i></i></div>`;
+  const slow = setTimeout(() => { const s = b.querySelector('.d-slow'); if (s) s.hidden = false; }, 3000);
+  return fetch('/api/defects/' + id).then(readJson).then(res => {
+    if (res.status === 'success') renderDetail(res);
+    else detailError(id, res.message || 'Не удалось загрузить карточку');
+  }).catch(() => detailError(id, 'Нет связи с сервером — карточка не загрузилась'))
+    .finally(() => clearTimeout(slow));
+}
+window.loadDetail = loadDetail;
+function detailError(id, msg){
+  const b = $('body-' + id); if (!b) return;
+  b.innerHTML = `<div class="alert alert-danger" style="margin:.5rem 0">${esc(msg)}</div>
+    <button class="btn btn-ghost btn-sm" onclick="loadDetail(${id})">↻ Повторить</button>`;
+}
+function closeDetail(){   // дефект ушёл с этапа: свернуть строку (компьютер) или закрыть окно (телефон)
+  openId = null;
+  if (SHEET && SHEET.el === $('dsheet')) closeSheet();
+}
+
 function renderDetail(res){
   if (res.status !== 'success') return;
   const d = res.defect, body = $('body-'+d.UniqueID); if (!body) return;
+  const compact = isCompact();
+  if (SHEET && SHEET.el === $('dsheet')) $('dsheetTitle').textContent = defectTitle(d);
   const canAct = priv() || (ME.dept && ME.dept === d.current_stage_dept);     // на своём этапе (или клапан)
   const claimed = !!d.assigned_worker_id;
   const mineClaim = claimed && d.assigned_worker_id === ME.uid;
@@ -739,7 +1093,21 @@ function renderDetail(res){
   // без float: плавающая кнопка «вываливалась» из карточки и на мобиле ложилась на следующую
   const delBtn = priv() ? `<div style="display:flex;justify-content:flex-end;margin-top:.6rem"><button class="btn btn-ghost btn-sm" onclick="delDefect(${d.UniqueID})">✕ Удалить</button></div>` : '';
 
-  body.innerHTML = ribbon + reg + occ + timeline + photos + actions + delBtn + `<div id="alert-${d.UniqueID}" class="hidden mt-alert"></div>`;
+  const alertBox = `<div id="alert-${d.UniqueID}" class="hidden mt-alert"></div>`;
+  if (compact){
+    // телефон: то, чего нет в строке списка, сверху; действия — раньше истории, под рукой
+    const facts = [['Статус', stageText(d) || '—'], ['Модель', d.model_name], ['Бренд', d.brand], ['Участок', res.segment],
+                   ['Пистолет', d.g_num ? 'G.' + d.g_num : ''], ['Контролёр', d.register_name], ['В работе', d.assignee_name], ['Дата', d.df_date]]
+      .filter(f => f[1] && f[1] !== '—')
+      .map(f => `<dt>${f[0]}</dt><dd>${esc(f[1])}</dd>`).join('');
+    // в строке списка метки короткие, в окне место есть — пишем словами
+    const flags = (d.is_b_point ? '<span class="flag b">Группа B</span> ' : '')
+                + (d.is_serial ? `<span class="flag s">Серийный${d.return_count ? ' ×' + d.return_count : ''}</span>` : '');
+    body.innerHTML = ribbon + (flags ? `<div style="margin-bottom:.35rem">${flags}</div>` : '')
+      + `<dl class="d-facts">${facts}</dl>` + reg + occ + actions + alertBox + timeline + photos + delBtn;
+  } else {
+    body.innerHTML = ribbon + reg + occ + timeline + photos + actions + delBtn + alertBox;
+  }
 
   // форма исправления ОТК: подгрузить модели и предвыбрать текущую
   const corSel = $('corModel-' + d.UniqueID);
@@ -751,8 +1119,37 @@ function renderDetail(res){
   }
 }
 
-window.toggleForm = function(id){ const f = $(id); if (f) f.hidden = !f.hidden; };
+window.toggleForm = function(id){
+  const f = $(id); if (!f) return;
+  f.hidden = !f.hidden;
+  if (f.hidden) return;
+  // открыта одна форма действия; она на виду и сразу готова к вводу
+  const card = f.closest('.dcard-body');
+  if (card) card.querySelectorAll('.act-form[id]').forEach(x => { if (x !== f) x.hidden = true; });
+  f.scrollIntoView({block: 'nearest'});
+  const first = f.querySelector('textarea,input:not([type=file])');
+  if (first) first.focus({preventScroll: true});
+};
 window.val = id => { const e = $(id); return e ? e.value.trim() : ''; };
+
+// Действие выполняется: кнопки не нажать второй раз, виден ход операции (на заводе связь бывает слабой)
+function setBusy(on, msg){
+  document.documentElement.classList.toggle('is-busy', on);
+  toast(on ? msg : '', {sticky: on});
+}
+const isBusy = () => document.documentElement.classList.contains('is-busy');
+// Запись из карточки: одна за раз, виден ход и результат; отказ и обрыв связи — сообщением, а не молча
+function send(id, url, opts, onOk){
+  if (isBusy()) return;
+  setBusy(true, 'Сохраняем…');
+  let done = '';
+  fetch(url, opts).then(readJson).then(res => {
+    if (res.status !== 'success'){ flash(id, 'danger', res.message); return; }
+    done = res.message;
+    onOk(res);
+  }).catch(() => flash(id, 'danger', 'Нет связи с сервером — действие не выполнено, повторите'))
+    .finally(() => { setBusy(false); if (done) toast(done); });
+}
 
 window.act = function(id, action, extra){
   if (action === 'close' && !extra.countermeasure){ return flash(id, 'warn', 'Укажите контрмеру'); }
@@ -764,23 +1161,26 @@ window.act = function(id, action, extra){
   if (action === 'delegate_oto' && !extra.reason){ return flash(id, 'warn', 'Добавьте комментарий для ОТО'); }
   if (action === 'oto' && !extra.countermeasure){ return flash(id, 'warn', 'Укажите контрмеру ОТО'); }
   if (action === 'reopen' && !extra.reason){ return flash(id, 'warn', 'Добавьте комментарий — причину переоткрытия'); }
-  fetch(`/api/defects/${id}/act`, {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(Object.assign({action}, extra))})
-    .then(r=>r.json()).then(res=>{
-      if (res.status !== 'success'){ flash(id, 'danger', res.message); return; }
-      if (action === 'claim' || action === 'release'){
-        loadBoard();   // дефект у того же отдела — обновляем доску (колонка «В работе»), карточка остаётся раскрытой (openId сохранён)
-      } else {
-        openId = null; loadBoard();   // передача/закрытие/возврат — дефект ушёл, сворачиваем
-      }
-    });
+  send(id, `/api/defects/${id}/act`, jsonReq('POST', Object.assign({action}, extra)), () => {
+    if (action === 'claim' || action === 'release'){
+      loadBoard();   // дефект у того же отдела — обновляем доску (колонка «В работе»), карточка остаётся раскрытой (openId сохранён)
+      if (SHEET) loadDetail(id, {quiet: true});
+    } else {
+      closeDetail(); loadBoard();   // передача/закрытие/возврат — дефект ушёл, сворачиваем
+    }
+  });
 };
 
 window.uploadPhoto = async function(id, input){
-  if (!input.files.length) return;
-  await uploadPhotos(id, input.files);
+  if (!input.files.length || isBusy()) return;
+  setBusy(true, 'Загружаем фото…');
+  let err = '';
+  try { await uploadPhotos(id, input.files); }
+  catch (e) { err = e.message; }
+  setBusy(false);
   input.value = '';
-  fetch('/api/defects/'+id).then(r=>r.json()).then(renderDetail);
+  await loadDetail(id, {quiet: true});   // перерисовка карточки сбрасывает сообщение — показываем после неё
+  if (err) flash(id, 'danger', err); else toast('Фото добавлено');
 };
 
 window.rejectOtk = async function(did){
@@ -788,49 +1188,47 @@ window.rejectOtk = async function(did){
   if (!reason) return flash(did, 'warn', 'Добавьте комментарий — почему не согласовано');
   const inp = $('otkrejph-'+did);
   if (!inp || !inp.files.length) return flash(did, 'warn', 'Приложите фото — подтвердите, что точка не закрыта');
-  await uploadPhotos(did, inp.files);   // фото прикрепится к этапу ОТК (текущему)
-  fetch(`/api/defects/${did}/act`, {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({action:'otk_reject', reason})})
-    .then(r=>r.json()).then(res=>{
-      if (res.status === 'success'){ openId = null; loadBoard(); }
-      else flash(did, 'danger', res.message);
-    });
+  if (isBusy()) return;
+  setBusy(true, 'Загружаем фото и сохраняем…');
+  let done = '';
+  try {
+    await uploadPhotos(did, inp.files);   // фото прикрепится к этапу ОТК (текущему); не загрузилось — отказа не будет
+    const res = await fetch(`/api/defects/${did}/act`, jsonReq('POST', {action:'otk_reject', reason})).then(readJson);
+    if (res.status === 'success'){ done = res.message; closeDetail(); loadBoard(); }
+    else flash(did, 'danger', res.message);
+  } catch (e) { flash(did, 'danger', e instanceof UploadError ? e.message : 'Нет связи с сервером — действие не выполнено, повторите'); }
+  finally { setBusy(false); if (done) toast(done); }
 };
 
 window.delPhoto = function(did, pid){
   if (!confirm('Удалить это фото?')) return;
-  fetch(`/api/defects/${did}/photo/${pid}`, {method:'DELETE'}).then(r=>r.json()).then(res=>{
-    if (res.status === 'success') fetch('/api/defects/'+did).then(r=>r.json()).then(renderDetail);
-    else alert(res.message);
-  });
+  send(did, `/api/defects/${did}/photo/${pid}`, {method:'DELETE'}, () => loadDetail(did, {quiet: true}));
 };
 
 window.correctDefect = function(did){
   const model = val('corModel-'+did), spot = val('corSpot-'+did), code = val('corCode-'+did);
   if (!model || !spot || !code) return flash(did, 'warn', 'Укажите модель, точку и код');
-  fetch(`/api/defects/${did}/correct`, {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({model_id:model, spot_number:spot, problem_code:code})})
-    .then(r=>r.json()).then(res=>{
-      if (res.status === 'success') fetch('/api/defects/'+did).then(r=>r.json()).then(renderDetail);
-      else flash(did, 'danger', res.message);
-    });
+  send(did, `/api/defects/${did}/correct`, jsonReq('POST', {model_id:model, spot_number:spot, problem_code:code}), () => {
+    loadBoard();                                 // в строке списка те же точка и код, что и в карточке
+    if (SHEET) loadDetail(did, {quiet: true});   // компьютер: карточку заново загрузит renderRows
+  });
 };
 
 window.saveStage = function(did, sid){
-  const body = {cause: val('stc-'+sid), countermeasure: val('stm-'+sid), note: val('stn-'+sid)};
-  fetch(`/api/defects/${did}/stage/${sid}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)})
-    .then(r=>r.json()).then(res=>{
-      if (res.status === 'success') fetch('/api/defects/'+did).then(r=>r.json()).then(renderDetail);
-      else alert(res.message);
-    });
+  send(did, `/api/defects/${did}/stage/${sid}`, jsonReq('PATCH', {cause: val('stc-'+sid), countermeasure: val('stm-'+sid), note: val('stn-'+sid)}),
+    () => loadDetail(did, {quiet: true}));
 };
 
 window.delDefect = function(id){
   if (!confirm(`Удалить дефект #${id}?`)) return;
-  fetch(`/api/defects/${id}`, {method:'DELETE'}).then(r=>r.json()).then(res=>{ if (res.status==='success'){ openId=null; loadBoard(); } });
+  send(id, `/api/defects/${id}`, {method:'DELETE'}, () => { closeDetail(); loadBoard(); });
 };
 
-function flash(id, type, msg){ const el = $('alert-'+id); if (el) showAlert(el, type, msg); }
+function flash(id, type, msg){
+  const el = $('alert-'+id);
+  if (el) showAlert(el, type, msg);
+  else toast(msg);   // окно уже закрыли — сообщение всё равно должны увидеть
+}
 
 // ── Регистрация (ОТК) ──
 function initRegistration(){
@@ -846,17 +1244,30 @@ function initRegistration(){
     if ($('manPhotoStar')) $('manPhotoStar').style.display = 'none';
     regPhotoName.textContent = REG_HINT; manPhotoName.textContent = MAN_HINT;
   }
+  // Отправка фиксации: одна за раз — второе нажатие записало бы ложную серию; виден ход; обрыв связи — сообщение
+  async function submitDefect(btn, alertEl, url, fields, photoInput, onAnswer){
+    if (btn.disabled) return;
+    const label = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Сохраняем…';
+    alertEl.className = 'hidden mt-alert';               // прошлая плашка — о прошлом дефекте
+    try {
+      const fd = new FormData();
+      Object.entries(fields).forEach(([k, v]) => fd.append(k, v));
+      for (const f of photoInput.files) fd.append('photo', await compressImage(f), (f.name.replace(/\.[^.]+$/, '') || 'photo') + '.jpg');
+      onAnswer(await fetch(url, {method:'POST', body: fd}).then(readJson));
+    } catch {
+      showAlert(alertEl, 'danger', 'Нет связи с сервером — неизвестно, записан ли дефект. Обновите список и проверьте: повторная фиксация запишется как серия.');
+    } finally { btn.disabled = false; btn.textContent = label; }
+  }
   regPhoto.addEventListener('change', () => { regPhotoName.textContent = regPhoto.files.length ? `выбрано фото: ${regPhoto.files.length}` : REG_HINT; });
-  $('regBtn').addEventListener('click', async () => {
+  $('regBtn').addEventListener('click', () => {
     const a = $('regAlert'), model = regModelSelect.value, spot = regSpotInput.value.trim(), code = regCodeInput.value;
     if (!model || !spot || !code){ showAlert(a, 'warn', 'Выберите модель, точку и код'); return; }
     if (reqPhoto && !regPhoto.files.length){ showAlert(a, 'warn', 'Приложите фото дефекта — при фиксации это обязательно'); return; }
-    const fd = new FormData();
-    fd.append('model_id', model); fd.append('spot_number', spot); fd.append('problem_code', code);
-    for (const f of regPhoto.files) fd.append('photo', await compressImage(f), (f.name.replace(/\.[^.]+$/, '') || 'photo') + '.jpg');
-    const res = await fetch('/api/defects/register', {method:'POST', body: fd}).then(r=>r.json());
-    showAlert(a, res.status==='success' ? (res.serial ? 'warn' : (res.found_in_db===false ? 'warn':'success')) : 'danger', res.message);
-    if (res.status==='success'){ regSpotInput.value=''; regCodeInput.value=''; regPhoto.value=''; regPhotoName.textContent=REG_HINT; loadBoard(); }
+    submitDefect($('regBtn'), a, '/api/defects/register', {model_id: model, spot_number: spot, problem_code: code}, regPhoto, res => {
+      showAlert(a, res.status==='success' ? (res.serial ? 'warn' : (res.found_in_db===false ? 'warn':'success')) : 'danger', res.message);
+      if (res.status==='success'){ regSpotInput.value=''; regCodeInput.value=''; regPhoto.value=''; regPhotoName.textContent=REG_HINT; loadBoard(); }
+    });
   });
   regSpotInput.addEventListener('keydown', e => { if (e.key==='Enter') $('regBtn').click(); });
   $('toggleManualBtn').addEventListener('click', () => {
@@ -866,16 +1277,14 @@ function initRegistration(){
       fetch('/api/brands').then(r=>r.json()).then(bs => bs.forEach(b => manBrandSelect.add(new Option(b.brand, b.UniqueID))));
   });
   manPhoto.addEventListener('change', () => { manPhotoName.textContent = manPhoto.files.length ? `выбрано фото: ${manPhoto.files.length}` : MAN_HINT; });
-  $('manRegBtn').addEventListener('click', async () => {
+  $('manRegBtn').addEventListener('click', () => {
     const a = $('manRegAlert'), gnum = manGunNum.value.trim(), code = manCodeInput.value;
     if (!gnum || !code){ showAlert(a, 'warn', 'Укажите пистолет и код'); return; }
     if (reqPhoto && !manPhoto.files.length){ showAlert(a, 'warn', 'Приложите фото дефекта — при фиксации это обязательно'); return; }
-    const fd = new FormData();
-    fd.append('g_num', gnum); fd.append('problem_code', code);
-    for (const f of manPhoto.files) fd.append('photo', await compressImage(f), (f.name.replace(/\.[^.]+$/, '') || 'photo') + '.jpg');
-    const res = await fetch('/api/defects/register_manual', {method:'POST', body: fd}).then(r=>r.json());
-    showAlert(a, res.status==='success' ? 'success' : 'danger', res.message);
-    if (res.status==='success'){ manGunNum.value=''; manCodeInput.value=''; manPhoto.value=''; manPhotoName.textContent='фото обязательно'; loadBoard(); }
+    submitDefect($('manRegBtn'), a, '/api/defects/register_manual', {g_num: gnum, problem_code: code}, manPhoto, res => {
+      showAlert(a, res.status==='success' ? 'success' : 'danger', res.message);
+      if (res.status==='success'){ manGunNum.value=''; manCodeInput.value=''; manPhoto.value=''; manPhotoName.textContent=MAN_HINT; loadBoard(); }
+    });
   });
   manGunNum.addEventListener('keydown', e => { if (e.key==='Enter') $('manRegBtn').click(); });
 }

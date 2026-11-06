@@ -116,6 +116,21 @@ def test_e2e_repeat_message_says_what_happened(register_client, app):
     assert f'#{did} (BT)' in msg and 'переоткрыт' in msg and 'Производство' in msg
 
 
+# ── 3c. Карточка отдаёт всё, чего нет в строке доски на телефоне ─────────────
+def test_e2e_detail_has_fields_hidden_from_phone_row(register_client, app):
+    db = sqlite3.connect(app.config['DB_PATH'])
+    spot, model_id, brand = db.execute("""SELECT s.spot_number, s.model_id, b.brand FROM spot s
+        JOIN model m ON m.UniqueID=s.model_id JOIN brand b ON b.UniqueID=m.brand_id
+        WHERE s.UniqueID NOT IN (SELECT spot_id FROM defects WHERE spot_id IS NOT NULL) LIMIT 1""").fetchone()
+    db.close()
+    otk = register_client(department='ОТК', login='e2e_card@x.kz', surname='Контролёв', name='Иван')
+    did = _reg_spot(otk, model_id, spot)['defect_id']
+    res = otk.get(f'/api/defects/{did}').get_json()
+    assert res['defect']['register_name'] == 'Контролёв Иван'
+    assert res['defect']['brand'] == brand and res['defect']['df_date'] and res['defect']['model_name']
+    assert 'segment' in res
+
+
 # ── 4. Серийность (та же группа) + переоткрытие только WeldTeam ──────────────
 def test_e2e_serial_and_reopen(register_client, app):
     bs = _b_spot(app)

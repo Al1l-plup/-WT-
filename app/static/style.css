@@ -384,6 +384,22 @@ strong { font-weight: 600; }
   .g3-reg { grid-template-columns: 1fr 1fr; }
 }
 
+/* Шапка не помещается: ссылки прокручиваются, страница не расширяется
+   (иначе телефон лёжа показывает всё уменьшенным, как на компьютере) */
+@media (max-width: 950px) {
+  .nav-brand { flex-shrink: 0; }
+  .nav-links { overflow-x: auto; scrollbar-width: none; flex-shrink: 1; min-width: 0; align-items: center; }
+  .nav-links::-webkit-scrollbar { display: none; }
+  .nav-link { white-space: nowrap; }
+}
+/* Телефон лёжа шире 640px: шапка нажимается пальцем так же, как стоя */
+@media (max-width: 950px) and (pointer: coarse) {
+  .nav-brand { display: flex; align-items: center; min-height: 44px; }
+  .nav-link,
+  .nav-links a[href="/logout"] { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; min-height: 44px; min-width: 44px; }
+  .btn-theme { flex-shrink: 0; min-height: 44px; min-width: 44px; }
+}
+
 /* ── PHONE ≤640px ─────────────────────────────────── */
 @media (max-width: 640px) {
 
