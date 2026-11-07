@@ -200,6 +200,40 @@ def test_header_is_44px_on_phone_in_any_orientation():
     assert 'flex-shrink: 0' in rule
 
 
+# ── Отдел «ОТК» на сайте называется «УЗК»: значение в данных и логике прежнее ─────────────────
+_OTK_KEY_USES = (
+    r"(?:===|==|!==)\s*'ОТК'",                # сравнение в логике
+    r'value="ОТК"',                            # значение поля, подпись рядом другая
+    r'data-dept="ОТК"',
+    r"const DEPTS = \[[^\]]*\]",               # список значений, подпись через deptLabel
+)
+
+
+def _visible_otk(text):
+    """Сколько раз «ОТК» попадёт на экран: без комментариев и без значений для логики."""
+    text = re.sub(r'<!--.*?-->', '', text, flags=re.S)
+    text = re.sub(r'/\*.*?\*/', '', text, flags=re.S)
+    text = re.sub(r'(?m)(^|\s)//.*$', '', text)
+    for pattern in _OTK_KEY_USES:
+        text = re.sub(pattern, '', text)
+    return text.count('ОТК')
+
+
+@pytest.mark.parametrize('path', sorted(pathlib.Path('app/templates').glob('*.html')) + [
+    pathlib.Path('app/static/photo-mark.js'), pathlib.Path('app/static/sheet.js'), pathlib.Path('app/static/editor-embed.js'),
+], ids=lambda p: p.name)
+def test_department_shown_as_uzk_on_site(path):
+    assert _visible_otk(path.read_text(encoding='utf-8')) == 0, 'новый текст на сайте: отдел называется УЗК'
+
+
+def test_department_label_is_the_same_in_python_and_browser():
+    from app.constants import DEPARTMENTS, DEPT_LABELS, dept_label
+    theme = pathlib.Path('app/static/theme.js').read_text(encoding='utf-8')
+    assert DEPT_LABELS == {'ОТК': 'УЗК'} and "d === 'ОТК' ? 'УЗК' : d" in theme
+    assert 'ОТК' in DEPARTMENTS, 'в данных и правах значение прежнее'
+    assert dept_label('ОТК') == 'УЗК' and dept_label('ИТО') == 'ИТО' and dept_label(None) is None
+
+
 PHOTO_MARK = pathlib.Path('app/static/photo-mark.js').read_text(encoding='utf-8')
 
 

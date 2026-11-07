@@ -87,7 +87,7 @@ let LBL = {fields:{}, tables:{}};
 
 const tableTitle = t => LBL.tables[t] || t;
 const fieldLabel = (t, f) => (LBL.fields[t]||{})[f] || f;
-const fmtVal = v => (v===null||v===undefined||v==='') ? '—' : String(v);
+const fmtVal = v => (v===null||v===undefined||v==='') ? '—' : String(deptLabel(v));
 // служебные поля не показываем в диффе создания/удаления
 const SKIP = new Set(['raw_extra','row_order']);
 
@@ -107,7 +107,7 @@ function diffHtml(e){
   const kv = [];
   for(const k in row){
     if(SKIP.has(k) || row[k]===null || row[k]==='') continue;
-    kv.push(`<span class="chg kv"><span class="fld">${esc(fieldLabel(e.table_name,k))}:</span> ${esc(String(row[k]).slice(0,40))}</span>`);
+    kv.push(`<span class="chg kv"><span class="fld">${esc(fieldLabel(e.table_name,k))}:</span> ${esc(String(deptLabel(row[k])).slice(0,40))}</span>`);
     if(kv.length >= 4) break;
   }
   const what = e.op==='INSERT' ? 'создана строка' : 'удалена строка';

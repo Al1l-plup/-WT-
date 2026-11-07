@@ -295,7 +295,7 @@
   <div class="card" id="regCard" hidden>
     <div class="fs-head"><button type="button" class="fs-back" aria-label="Закрыть окно">←</button><div class="fs-title">Зафиксировать дефект</div></div>
     <div class="fs-body">
-    <div class="card-title danger">Зафиксировать дефект ОТК</div>
+    <div class="card-title danger">Зафиксировать дефект УЗК</div>
     <div class="g3-reg">
       <div class="fgroup" style="margin:0">
         <label class="lbl">Модель авто</label>
@@ -420,9 +420,9 @@ const $ = id => document.getElementById(id);
 let ME = {}, BOARD = {open:[], unresolved:[], closed:[]}, TAB = 'mine', openId = null;
 let lastId = null;   // телефон: последний открытый дефект — строка подсвечена, когда вернулись к списку
 const DEPTS = ['Производство', 'WeldTeam', 'ИТО', 'ОТО', 'ОТК'];   // ОТК — чтобы можно было вернуть на исправление данных
-const STAGE_LABEL = {closed:'закрыл (на согласование ОТК)', passed:'передал дальше', returned:'вернул на доработку',
+const STAGE_LABEL = {closed:'закрыл (на согласование УЗК)', passed:'передал дальше', returned:'вернул на доработку',
                      to_oto:'передал в ОТО', oto_done:'контрмера ОТО', reopened:'переоткрыл',
-                     otk_approved:'ОТК согласовал закрытие', otk_rejected:'ОТК не согласовал — возврат',
+                     otk_approved:'УЗК согласовал закрытие', otk_rejected:'УЗК не согласовал — возврат',
                      serial_repeat:'повтор на точке — переоткрыт серией'};
 const STAGE_SHORT = {'Производство':'Произв.'};   // телефон: в узкую колонку
 
@@ -542,7 +542,7 @@ fetch('/api/me').then(r=>r.json()).then(me=>{
   const canReg = me.dept === 'ОТК' || me.privileged || me.is_admin || me.dept === 'WeldTeam';
   if (canReg) { $('regCard').hidden = false; $('regFab').hidden = false; initRegistration(); }
   if (me.can_edit_docs) $('editorCard').hidden = false;
-  $('whoami').textContent = me.dept ? `· вы: ${me.dept}` : '';
+  $('whoami').textContent = me.dept ? `· вы: ${deptLabel(me.dept)}` : '';
   renderTgBanner(me);
   loadBoard();
   openFromHash();
@@ -693,7 +693,7 @@ function stageText(d){
   if (d.status === 'closed') return 'закрыт';
   if (d.status === 'unresolved') return 'не выявлен';
   if (d.status === 'at_oto') return 'ОТО';
-  return d.current_stage_dept || '';
+  return deptLabel(d.current_stage_dept) || '';
 }
 function stageCell(d){
   let chip, cls = '', short = '';
@@ -701,7 +701,7 @@ function stageCell(d){
   else if (d.status === 'unresolved'){ chip = '⚠ не выявлен'; short = 'не выявл.'; cls = 'unresolved'; }
   else if (d.status === 'at_oto'){ chip = '🔧 ОТО'; cls = 'oto'; }
   else {
-    const dept = d.current_stage_dept || '—';
+    const dept = deptLabel(d.current_stage_dept) || '—';
     chip = '→ ' + esc(dept); short = esc(STAGE_SHORT[dept] || dept);
   }
   // на телефоне колонки «В работе» нет — замок в этой же ячейке
@@ -999,7 +999,7 @@ function renderDetail(res){
 
   // фото показываем ВНУТРИ этапа, где оно было добавлено (по stage_id)
   const photoChip = p => `<span style="position:relative;display:inline-block">
-      <img src="/api/defects/photo/${p.UniqueID}" title="${esc(p.stage_dept||'')} ${esc((p.ts||'').replace('T',' '))}" onclick="window.open('/api/defects/photo/${p.UniqueID}','_blank')">
+      <img src="/api/defects/photo/${p.UniqueID}" title="${esc(deptLabel(p.stage_dept)||'')} ${esc((p.ts||'').replace('T',' '))}" onclick="window.open('/api/defects/photo/${p.UniqueID}','_blank')">
       ${canDelPhoto(p) ? `<button class="ph-del" title="Удалить фото" aria-label="Удалить фото" onclick="delPhoto(${d.UniqueID},${p.UniqueID})">✕</button>` : ''}
     </span>`;
   const stageIds = new Set(res.stages.map(s => s.stage_id));
@@ -1015,7 +1015,7 @@ function renderDetail(res){
     const canAddHere = !s.left_at && (admin || ME.dept === 'ОТК' || ME.dept === d.current_stage_dept);  // фото цепляется к текущему (открытому) этапу
     const photosRow = (sp.length || canAddHere) ? `<div class="photos" style="margin-top:.4rem">${sp.map(photoChip).join('')}${canAddHere ? uploadCtl : ''}</div>` : '';
     return `<li class="${s.left_at ? '' : 'open'}">
-      <div class="tl-dept">${esc(s.dept)} <span class="tl-meta">— ${esc(act)}${s.actor ? ', '+esc(s.actor) : ''}</span>${ed ? ` <button class="btn btn-ghost btn-sm" style="padding:0 .35rem" title="Править запись этапа" onclick="toggleForm('stedit-${s.stage_id}')">✎</button>` : ''}</div>
+      <div class="tl-dept">${esc(deptLabel(s.dept))} <span class="tl-meta">— ${esc(act)}${s.actor ? ', '+esc(s.actor) : ''}</span>${ed ? ` <button class="btn btn-ghost btn-sm" style="padding:0 .35rem" title="Править запись этапа" onclick="toggleForm('stedit-${s.stage_id}')">✎</button>` : ''}</div>
       ${txt ? `<div class="tl-txt">${txt}</div>` : ''}
       <div class="tl-meta">${esc((s.entered_at||'').replace('T',' '))}${s.left_at ? ' → '+esc(s.left_at.replace('T',' ')) : ''}</div>
       ${photosRow}
@@ -1044,7 +1044,7 @@ function renderDetail(res){
   const otkFix = canWork && d.current_stage_dept === 'ОТК' && d.status !== 'pending_otk';   // возвращён в ОТК на исправление данных
   if (otkFix){
     actions += `
-      <div class="muted" style="margin:.4rem 0">Возвращено в ОТК на исправление. Поправьте код / точку / фото и передайте дальше.</div>
+      <div class="muted" style="margin:.4rem 0">Возвращено в УЗК на исправление. Поправьте код / точку / фото и передайте дальше.</div>
       <div class="act-form">
         <div class="fgroup"><label class="lbl">Модель</label><select id="corModel-${d.UniqueID}"></select></div>
         <div class="fgroup"><label class="lbl">Номер точки</label><input type="text" id="corSpot-${d.UniqueID}" value="${esc(d.spot_number||'')}"></div>
@@ -1070,14 +1070,14 @@ function renderDetail(res){
         ${vinReq
           ? `<div class="fgroup"><label class="lbl">VIN — на каком авто проверили и решили закрыть (обязательно, станция MB/UB)</label><input type="text" id="vin-${d.UniqueID}" placeholder="VIN или последние 4"></div>`
           : `<div class="muted" style="margin:.2rem 0">Станция «${esc(res.station_name || '—')}» — VIN не нужен, достаточно контрмеры (время фиксируется автоматически).</div>`}
-        <button class="btn btn-success btn-sm" onclick="act(${d.UniqueID},'close',{cause:val('cause-${d.UniqueID}'),countermeasure:val('cm-${d.UniqueID}'),vin:val('vin-${d.UniqueID}')})">Закрыть → на согласование ОТК</button>
+        <button class="btn btn-success btn-sm" onclick="act(${d.UniqueID},'close',{cause:val('cause-${d.UniqueID}'),countermeasure:val('cm-${d.UniqueID}'),vin:val('vin-${d.UniqueID}')})">Закрыть → на согласование УЗК</button>
       </div>
       <div class="act-form" id="pass-${d.UniqueID}" hidden>
         <div class="fgroup"><label class="lbl">Комментарий (обязательно): что проверили, почему передаёте</label><textarea id="passn-${d.UniqueID}" placeholder="напр. параметры в норме — причина не в сварке…"></textarea></div>
         <button class="btn btn-ghost btn-sm" onclick="act(${d.UniqueID},'pass',{note:val('passn-${d.UniqueID}')})">Передать дальше</button>
       </div>
       <div class="act-form" id="bounce-${d.UniqueID}" hidden>
-        <div class="fgroup"><label class="lbl">Вернуть отделу</label><select id="to-${d.UniqueID}">${DEPTS.map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('')}</select></div>
+        <div class="fgroup"><label class="lbl">Вернуть отделу</label><select id="to-${d.UniqueID}">${DEPTS.map(x=>`<option value="${esc(x)}">${esc(deptLabel(x))}</option>`).join('')}</select></div>
         <div class="fgroup"><label class="lbl">Причина возврата (обязательно)</label><textarea id="brsn-${d.UniqueID}" placeholder="почему возвращаете…"></textarea></div>
         <button class="btn btn-warn btn-sm" onclick="act(${d.UniqueID},'bounce',{to_dept:val('to-${d.UniqueID}'),reason:val('brsn-${d.UniqueID}')})">Вернуть</button>
       </div>
@@ -1088,7 +1088,7 @@ function renderDetail(res){
   }
   if (canWork && d.status === 'pending_otk'){
     actions += `
-      <div class="muted" style="margin:.4rem 0">На согласовании ОТК — перепроверьте точку${d.vin ? ` (закрыто на VIN <b>${esc(d.vin)}</b>)` : ''}.</div>
+      <div class="muted" style="margin:.4rem 0">На согласовании УЗК — перепроверьте точку${d.vin ? ` (закрыто на VIN <b>${esc(d.vin)}</b>)` : ''}.</div>
       <div class="act-bar">
         <button class="btn btn-success btn-sm" onclick="act(${d.UniqueID},'otk_approve',{})">✓ Согласовать закрытие</button>
         <button class="btn btn-warn btn-sm" onclick="toggleForm('otkrej-${d.UniqueID}')">↩ Не согласовать</button>
@@ -1114,7 +1114,7 @@ function renderDetail(res){
         <button class="btn btn-ghost btn-sm" onclick="act(${d.UniqueID},'reopen',{reason:val('reopn-${d.UniqueID}')})">Переоткрыть</button>
       </div>`;
   }
-  if (!actions && d.status !== 'closed') actions = `<div class="muted" style="margin-top:.5rem">Сейчас дефект на этапе «${esc(d.current_stage_dept||'—')}» — действия доступны этому отделу.</div>`;
+  if (!actions && d.status !== 'closed') actions = `<div class="muted" style="margin-top:.5rem">Сейчас дефект на этапе «${esc(deptLabel(d.current_stage_dept)||'—')}» — действия доступны этому отделу.</div>`;
 
   // без float: плавающая кнопка «вываливалась» из карточки и на мобиле ложилась на следующую
   const delBtn = priv() ? `<div style="display:flex;justify-content:flex-end;margin-top:.6rem"><button class="btn btn-ghost btn-sm" onclick="delDefect(${d.UniqueID})">✕ Удалить</button></div>` : '';

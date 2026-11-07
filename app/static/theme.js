@@ -14,6 +14,12 @@ function escapeHtml(s) {
   }[m]));
 }
 
+// Подпись отдела для людей. В данных и в логике значение прежнее: отдел «ОТК» на сайте
+// называется «УЗК». То же правило — DEPT_LABELS в app/constants.py.
+function deptLabel(d) {
+  return d === 'ОТК' ? 'УЗК' : d;
+}
+
 function initThemeToggle() {
   const btn = document.getElementById('themeToggle');
   if (!btn) return;
@@ -109,7 +115,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       : '';
     const span = document.createElement('span');
     span.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:12px;opacity:.85;margin-left:6px;white-space:nowrap';
-    span.innerHTML = `${ro}👤 ${escapeHtml(me.name)} · ${escapeHtml(me.dept || '—')} <a href="/logout" style="color:inherit;opacity:.7" title="Выйти">⎋</a>`;
+    span.innerHTML = `${ro}👤 ${escapeHtml(me.name)} · ${escapeHtml(deptLabel(me.dept) || '—')} <a href="/logout" style="color:inherit;opacity:.7" title="Выйти">⎋</a>`;
     nav.insertBefore(span, btn);
   } catch (e) { /* оффлайн/аноним — молча */ }
 });

@@ -23,7 +23,7 @@ from flask import (
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app import defect_flow as df
-from app.constants import DEPARTMENTS
+from app.constants import DEPARTMENTS, dept_label
 from app.db import get_db
 from app.errors import api_error
 from app.permissions import can_edit_docs, is_readonly, visible_pages
@@ -135,11 +135,12 @@ def login():
 def register():
     areas = df.brands_with_areas(get_db())   # {brands:[...], areas:{brand_id:[участки]}} — для блока «Зона ответственности»
     if request.method == 'GET':
-        return render_template('register.html', departments=DEPARTMENTS, areas_json=json.dumps(areas, ensure_ascii=False))
+        return render_template('register.html', departments=DEPARTMENTS, dept_label=dept_label,
+                               areas_json=json.dumps(areas, ensure_ascii=False))
     data = request.form
 
     def err(msg):
-        return render_template('register.html', departments=DEPARTMENTS, error=msg, form=data,
+        return render_template('register.html', departments=DEPARTMENTS, dept_label=dept_label, error=msg, form=data,
                                areas_json=json.dumps(areas, ensure_ascii=False))
 
     surname = (data.get('surname') or '').strip()

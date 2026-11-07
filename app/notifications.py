@@ -30,6 +30,7 @@ import urllib.request
 from datetime import datetime, timedelta
 from datetime import time as dtime
 
+from app.constants import dept_label
 from app.defect_flow import OPEN_STATUSES, _now, defect_area, station_name_for, worker_areas
 
 log = logging.getLogger(__name__)
@@ -45,7 +46,7 @@ def _compose_message(code, spot, seg, dept, site_url=''):
         head += f', точка {spot}'
     if seg:
         head += f' · участок {seg}'
-    msg = f'{head} — этап «{dept}». Загляните: Дефекты → Мои входящие.'
+    msg = f'{head} — этап «{dept_label(dept)}». Загляните: Дефекты → Мои входящие.'
     if site_url:
         msg += f'\n{site_url.rstrip("/")}/defects'
     return msg

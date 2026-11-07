@@ -5,6 +5,7 @@ import uuid
 from flask import Blueprint, current_app, jsonify, request, send_file, session
 
 from app import defect_flow as df
+from app.constants import dept_label
 from app.db import get_db
 from app.errors import api_error
 from app.snapshots import SNAP_CORRECTION, SNAP_REGISTRATION, snap_note, snapshot_defect
@@ -135,15 +136,15 @@ def _repeat_message(db, res, code, spot_number):
     own = db.execute('SELECT problem_code FROM defects WHERE UniqueID=?', (did,)).fetchone()[0]
     head = f'⚠ ПОВТОР (серийный)! {code} на точке №{spot_number} → дефект #{did} ({own})'
     if res['repeat'] == 'merged':
-        return f'{head} ещё на рассмотрении у отдела «{res["stage"]}» — повтор добавлен к нему.'
-    return f'{head} переоткрыт и вернулся отделу «{res["stage"]}» на перерассмотрение.'
+        return f'{head} ещё на рассмотрении у отдела «{dept_label(res["stage"])}» — повтор добавлен к нему.'
+    return f'{head} переоткрыт и вернулся отделу «{dept_label(res["stage"])}» на перерассмотрение.'
 
 
 @bp.route('/api/defects/register', methods=['POST'])
 def register_defect():
     uid, dept, _is_admin, priv = _ctx()
     if not (dept == 'ОТК' or priv):
-        return jsonify({'status': 'error', 'message': 'Регистрировать дефекты может ОТК'}), 403
+        return jsonify({'status': 'error', 'message': 'Регистрировать дефекты может УЗК'}), 403
     data, photos = _reg_input()
     model_id     = data.get('model_id', '')
     spot_number  = str(data.get('spot_number', '')).strip()
@@ -161,11 +162,11 @@ def register_defect():
         if row:
             res = df.register_occurrence(db, problem_code=problem_code, spot_id=row['spot_id'],
                                          gun_id=row['gun_id'], registered_by=uid)
-            msg = f'Дефект {problem_code} на точке №{spot_number} зафиксирован → отдел «{res["stage"]}»'
+            msg = f'Дефект {problem_code} на точке №{spot_number} зафиксирован → отдел «{dept_label(res["stage"])}»'
         else:
             res = df.register_occurrence(db, problem_code=problem_code, registered_by=uid,
                                          manual_spot_number=spot_number, manual_model_id=int(model_id))
-            msg = (f'Дефект {problem_code} зарегистрирован → отдел «{res["stage"]}». '
+            msg = (f'Дефект {problem_code} зарегистрирован → отдел «{dept_label(res["stage"])}». '
                    f'⚠ Точка №{spot_number} не найдена в БД — уточните при рассмотрении.')
         if res['serial']:
             msg = _repeat_message(db, res, problem_code, spot_number)
@@ -553,7 +554,7 @@ def enrich_defect():
 def register_defect_manual():
     uid, dept, _is_admin, priv = _ctx()
     if not (dept == 'ОТК' or priv):
-        return jsonify({'status': 'error', 'message': 'Регистрировать дефекты может ОТК'}), 403
+        return jsonify({'status': 'error', 'message': 'Регистрировать дефекты может УЗК'}), 403
     data, photos = _reg_input()
     g_num        = data.get('g_num')
     problem_code = str(data.get('problem_code', '')).strip().upper()
@@ -575,7 +576,7 @@ def register_defect_manual():
         _save_photos(db, res['defect_id'], photos, uid)   # снимок сделала регистрация (до цепочки)
         db.commit()
         return jsonify({'status': 'success', 'stage': res['stage'], 'serial': res['serial'], 'defect_id': res['defect_id'],
-                        'message': f'Дефект {problem_code} на пистолете №{g_num} зафиксирован → отдел «{res["stage"]}»'})
+                        'message': f'Дефект {problem_code} на пистолете №{g_num} зафиксирован → отдел «{dept_label(res["stage"])}»'})
     except Exception as e:
         db.rollback()
         return api_error(e)
@@ -636,15 +637,15 @@ def defect_act(defect_id):
                 return jsonify({'status': 'error',
                                 'message': 'Станция MB/UB — укажите VIN (на каком авто проверили и решили закрыть)'}), 400
             df.act_close(db, defect_id, acting, uid, (data.get('cause') or '').strip(), cm, vin)
-            msg = 'Закрыто отделом — отправлено на согласование в ОТК'
+            msg = 'Закрыто отделом — отправлено на согласование в УЗК'
         elif action == 'otk_approve':
             if status != 'pending_otk':
-                return jsonify({'status': 'error', 'message': 'Дефект не на согласовании ОТК'}), 400
+                return jsonify({'status': 'error', 'message': 'Дефект не на согласовании УЗК'}), 400
             df.act_otk_approve(db, defect_id, uid, (data.get('note') or '').strip() or None)
-            msg = 'ОТК согласовал закрытие — дефект закрыт'
+            msg = 'УЗК согласовал закрытие — дефект закрыт'
         elif action == 'otk_reject':
             if status != 'pending_otk':
-                return jsonify({'status': 'error', 'message': 'Дефект не на согласовании ОТК'}), 400
+                return jsonify({'status': 'error', 'message': 'Дефект не на согласовании УЗК'}), 400
             reason = (data.get('reason') or '').strip()
             if not reason:
                 return jsonify({'status': 'error',
@@ -657,14 +658,14 @@ def defect_act(defect_id):
                     return jsonify({'status': 'error',
                                     'message': 'Приложите фото — подтвердите, что точка не закрыта'}), 400
             back = df.act_otk_reject(db, defect_id, uid, reason)
-            msg = f'Закрытие не согласовано — возврат отделу «{back}»'
+            msg = f'Закрытие не согласовано — возврат отделу «{dept_label(back)}»'
         elif action == 'pass':
             note = (data.get('note') or '').strip()
             if not note:
                 return jsonify({'status': 'error',
                                 'message': 'Добавьте комментарий — что проверили и почему передаёте дальше'}), 400
             nxt = df.act_pass(db, defect_id, uid, note)
-            msg = (f'Передано отделу «{nxt}»' if nxt
+            msg = (f'Передано отделу «{dept_label(nxt)}»' if nxt
                    else 'Причина не выявлена — дефект в списке «не выявленные» (на недельный разбор)')
         elif action == 'bounce':
             to = (data.get('to_dept') or '').strip()
@@ -674,7 +675,7 @@ def defect_act(defect_id):
             if not reason:
                 return jsonify({'status': 'error', 'message': 'Добавьте комментарий — причину возврата'}), 400
             df.act_bounce(db, defect_id, uid, to, reason)
-            msg = f'Возвращено отделу «{to}» на доработку'
+            msg = f'Возвращено отделу «{dept_label(to)}» на доработку'
         elif action == 'delegate_oto':
             reason = (data.get('reason') or '').strip()
             if not reason:
@@ -689,7 +690,7 @@ def defect_act(defect_id):
             if not cm:
                 return jsonify({'status': 'error', 'message': 'Укажите контрмеру ОТО'}), 400
             back = df.act_oto_countermeasure(db, defect_id, uid, cm)
-            msg = f'Контрмера ОТО принята — возврат отделу «{back}»'
+            msg = f'Контрмера ОТО принята — возврат отделу «{dept_label(back)}»'
         elif action == 'reopen':
             if not priv:
                 return jsonify({'status': 'error', 'message': 'Переоткрывать дефекты может только WeldTeam'}), 403
@@ -699,7 +700,7 @@ def defect_act(defect_id):
             if not reason:
                 return jsonify({'status': 'error', 'message': 'Добавьте комментарий — причину переоткрытия'}), 400
             back = df.reopen(db, defect_id, uid, reason)
-            msg = f'Дефект переоткрыт → отдел «{back}»'
+            msg = f'Дефект переоткрыт → отдел «{dept_label(back)}»'
         else:
             return jsonify({'status': 'error', 'message': 'Неизвестное действие'}), 400
         # передача/закрытие/возврат → этап сменился, снимаем «в работе» (следующий возьмёт заново).
@@ -871,7 +872,7 @@ def defect_correct(defect_id):
         return jsonify({'status': 'error', 'message': 'Дефект не найден'}), 404
     if not (is_admin or (dept == 'ОТК' and d['current_stage_dept'] == 'ОТК')):
         return jsonify({'status': 'error',
-                        'message': 'Исправлять данные может ОТК, пока дефект возвращён на этап ОТК'}), 403
+                        'message': 'Исправлять данные может УЗК, пока дефект возвращён на этап УЗК'}), 403
     code = str(data.get('problem_code', '')).strip().upper()
     spot_number = str(data.get('spot_number', '')).strip()
     model_id = data.get('model_id')

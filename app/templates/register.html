@@ -49,7 +49,7 @@
     </div>
     <div class="fld"><label>Отдел *</label>
       <select name="department" required>
-        {% for d in departments %}<option value="{{ d }}" {{ 'selected' if (form or {}).get('department')==d }}>{{ d }}</option>{% endfor %}
+        {% for d in departments %}<option value="{{ d }}" {{ 'selected' if (form or {}).get('department')==d }}>{{ dept_label(d) }}</option>{% endfor %}
       </select>
     </div>
     <div class="fld" id="areaBlock" style="display:none">
