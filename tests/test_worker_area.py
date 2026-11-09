@@ -58,6 +58,32 @@ def test_zone_choices_offer_whole_and_sides(app):
     assert clean == {1: ['BS', 'MB']} and sorted(unknown) == ['XX', 'abc']   # стороны под «целиком» лишние
 
 
+def test_station_zones():
+    """Можно отвечать за отдельные станции: EC1-10, BS L-20. Станция сравнивается рабочим ключом."""
+    assert df.station_zone('GW-EC1-10') == 'EC1-10' and df.station_zone('gw-bs  l-10') == 'BS L-10'
+    assert df.station_zone('GW-MB-150') == 'MB-150' and df.station_zone(None) == '' and df.station_zone('—') == ''
+    assert df.is_station_zone('EC1-10') and df.is_station_zone('BS L-10')
+    assert not df.is_station_zone('EC') and not df.is_station_zone('BS-L') and not df.is_station_zone('INR+WH-R')
+    zones = {('GWM', 'EC1-10'), ('GWM', 'BS L-20')}
+    assert df.in_zones(zones, 'GWM', 'EC', 'EC1-10')
+    assert not df.in_zones(zones, 'GWM', 'EC', 'EC2-10')         # другая станция того же участка
+    assert not df.in_zones(zones, 'Chery', 'EC', 'EC1-10')       # другой бренд
+    assert df.in_zones(zones, 'GWM', 'BS-L', 'BS L-20') and not df.in_zones(zones, 'GWM', 'BS-L', 'BS L-10')
+    assert df.in_zones({('GWM', 'EC')}, 'GWM', 'EC', 'EC2-50')   # участок целиком — все его станции
+
+
+def test_zone_tree_area_side_station(app):
+    c = _db(app)
+    chery = {a['code']: a for a in df.zone_tree(c)[1]}
+    assert chery['EC']['sides'] == [] and 'EC2-10' in chery['EC']['stations']
+    sides = {s['code']: s['stations'] for s in chery['BS']['sides']}
+    assert set(sides) == {'BS-L', 'BS-R'} and sides['BS-L'] == ['BS L-20', 'BS L-40']
+    mb = chery['MB']['stations']
+    assert mb == sorted(mb, key=lambda s: int(s.split('-')[1])), 'станции по номеру: MB-20 раньше MB-100'
+    clean, unknown = df.clean_zone_map(c, {'1': ['EC', 'EC2-10', 'BS-L', 'bs l-20', 'BS R-20', 'MB-999']})
+    assert set(clean[1]) == {'EC', 'BS-L', 'BS R-20'} and unknown == ['MB-999']
+
+
 def test_registration_saves_areas(app):
     c = app.test_client()
     c.post('/register', data={'surname': 'Ц', 'name': 'Р', 'department': 'Производство',
@@ -159,3 +185,36 @@ def test_mine_by_side_and_whole_area(register_client, app):
     for did, expect in ((bs_l, set(ids.values())), (bs_r, {ids['side_all@x.kz']})):
         got = set(resolve_recipients(c, did, 'Производство', bname, df.defect_area(df.station_name_for(c, did))))
         assert expect <= got and not (set(ids.values()) - expect) & got
+
+
+def test_mine_by_station(register_client, app):
+    """Зона — станция BS L-20: дефект на BS L-20 мой, на BS L-40 того же участка — нет."""
+    from app.notifications import resolve_recipients
+    otk = register_client(department='ОТК')
+    st = register_client(department='Производство', login='st_zone@x.kz')
+    db = _db(app)
+    bname = db.execute('SELECT brand FROM brand WHERE UniqueID=1').fetchone()[0]
+    wid = db.execute("SELECT UniqueID FROM worker WHERE login='st_zone@x.kz'").fetchone()[0]
+    db.close()
+    r = st.put('/api/profile', json={'surname': 'С', 'name': 'Т', 'areas': {'1': ['BS L-20']}})
+    assert r.get_json()['status'] == 'success'
+    db = _db(app)
+    db.execute('UPDATE worker SET tg_chat_id=? WHERE UniqueID=?', ('1', wid))
+    db.commit(); db.close()
+
+    def mk(g, station):
+        did = otk.post('/api/defects/register_manual', json={'g_num': g, 'problem_code': 'CR'}).get_json()['defect_id']
+        c = _db(app)
+        c.execute('UPDATE defects SET snap_brand=?, snap_station_name=? WHERE UniqueID=?', (bname, station, did))
+        c.commit(); c.close()
+        return did
+
+    mine_st, other_st = mk(96630, 'CH-BS L-20'), mk(96631, 'CH-BS L-40')
+    board = {x['UniqueID']: x for x in st.get('/api/defects/all').get_json()['open']}
+    assert board[mine_st]['mine'] is True and board[other_st]['mine'] is False
+    c = _db(app)
+
+    def to(did):
+        name = df.station_name_for(c, did)
+        return set(resolve_recipients(c, did, 'Производство', bname, df.defect_area(name), df.station_zone(name)))
+    assert wid in to(mine_st) and wid not in to(other_st)

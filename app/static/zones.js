@@ -1,52 +1,76 @@
-/* Выбор зон ответственности: бренд → участки. Один и тот же на регистрации, в личном
-   кабинете и у администратора (страница «Пользователи»).
+/* Выбор зон ответственности: бренд → участок → (сторона) → станции. Один и тот же на
+   регистрации, в личном кабинете и у администратора (страница «Пользователи»).
 
-   Участок со сторонами показывается так: «BS целиком», «BS-L», «BS-R». «Целиком» покрывает
-   обе стороны: стороны тогда отмечены и недоступны, на сервер уходит только «BS».
-   Справочник ref = {brands: [{id, name}], areas: {brand_id: ['BS', 'BS-L', 'BS-R', 'EC', …]}}. */
+   Отвечаешь за весь участок — одна галочка «EC целиком». Не за весь — раскрываешь участок
+   и отмечаешь станции (EC1-10, EC2-10…). У участков со сторонами есть ещё «BS-L целиком».
+   Выбранное «целиком» покрывает всё внутри: вложенные галочки отмечены и недоступны, на
+   сервер уходит только сам участок или сторона.
+   Справочник ref = {brands: [{id, name}], tree: {brand_id: [{code, stations: [], sides: [{code, stations}]}]}}. */
 const ZonePicker = (function () {
   'use strict';
 
   const esc = s => (typeof escapeHtml === 'function' ? escapeHtml(s) : String(s == null ? '' : s));
   const list = (map, id) => (map && (map[id] || map[String(id)])) || [];
 
-  function chip(brandId, code, label, checked, name, extra) {
+  function chip(brandId, code, label, mine, name, level) {
     const nm = name ? ` name="${esc(name(brandId))}"` : '';
-    return `<label class="zp-chip"><input type="checkbox"${nm} data-brand="${esc(brandId)}" value="${esc(code)}"` +
-           `${checked ? ' checked' : ''}${extra || ''}><span>${esc(label)}</span></label>`;
+    return `<label class="zp-chip"><input type="checkbox"${nm} data-brand="${esc(brandId)}" data-level="${level}" ` +
+           `value="${esc(code)}"${mine.has(code) ? ' checked' : ''}><span>${esc(label)}</span></label>`;
   }
 
-  // стороны отмечены и недоступны, пока выбран участок целиком; сняли «целиком» — стороны свободны
-  function sync(group, changed) {
-    const all = group.querySelector('input[data-whole]');
-    if (!all) return;
-    group.querySelectorAll('input[data-side]').forEach(c => {
-      if (all.checked) { c.checked = true; c.disabled = true; }
-      else if (c.disabled) { c.disabled = false; if (changed === all) c.checked = false; }
+  function stationsHtml(brandId, stations, mine, name) {
+    return stations.length
+      ? `<div class="zp-list">${stations.map(s => chip(brandId, s, s, mine, name, 'station')).join('')}</div>` : '';
+  }
+
+  function areaHtml(brandId, a, mine, name) {
+    const inner = stationsHtml(brandId, a.stations, mine, name) + a.sides.map(sd =>
+      `<div class="zp-side">${chip(brandId, sd.code, sd.code + ' целиком', mine, name, 'side')}` +
+      `${stationsHtml(brandId, sd.stations, mine, name)}</div>`).join('');
+    const nested = a.stations.length + a.sides.reduce((n, sd) => n + 1 + sd.stations.length, 0);
+    const what = a.sides.length ? 'стороны и станции' : 'станции';
+    const open = [...a.stations, ...a.sides.flatMap(sd => [sd.code, ...sd.stations])].some(c => mine.has(c));
+    return `<div class="zp-area">${chip(brandId, a.code, a.code + ' целиком', mine, name, 'area')}` +
+      (nested ? `<details class="zp-more"${open ? ' open' : ''}><summary>${what} <span class="zp-count"></span></summary>${inner}</details>` : '') +
+      '</div>';
+  }
+
+  // «целиком» отмечено — всё внутри отмечено и недоступно; сняли «целиком» — внутри снова свободно
+  function lock(parent, children, changed) {
+    children.forEach(c => {
+      if (parent.checked) { c.checked = true; c.disabled = true; }
+      else if (c.disabled) { c.disabled = false; if (changed === parent) c.checked = false; }
     });
+  }
+
+  function sync(area, changed) {
+    const all = area.querySelector('input[data-level=area]');
+    lock(all, area.querySelectorAll('.zp-more input'), changed);
+    if (!all.checked) {
+      area.querySelectorAll('.zp-side').forEach(sd =>
+        lock(sd.querySelector('input[data-level=side]'), sd.querySelectorAll('input[data-level=station]'), changed));
+    }
+    const count = area.querySelector('.zp-count');
+    if (count) {
+      const n = area.querySelectorAll('.zp-more input:checked:not(:disabled)').length;
+      count.textContent = all.checked ? '· все' : (n ? `· выбрано ${n}` : '');
+    }
   }
 
   /** Нарисовать выбор. have = {brand_id: [зоны]}; name(brandId) — имя поля для обычной формы. */
   function render(host, ref, have, {name = null} = {}) {
     host.innerHTML = (ref.brands || []).map(b => {
-      const codes = list(ref.areas, b.id);
+      const areas = list(ref.tree, b.id);
       const mine = new Set(list(have, b.id));
-      const bases = codes.filter(c => !c.includes('-'));
-      const items = bases.map(base => {
-        const sides = codes.filter(c => c.startsWith(base + '-'));
-        if (!sides.length) return chip(b.id, base, base, mine.has(base), name);
-        const whole = mine.has(base);
-        return `<span class="zp-group">${chip(b.id, base, base + ' целиком', whole, name, ' data-whole')}` +
-               sides.map(s => chip(b.id, s, s, whole || mine.has(s), name, ' data-side')).join('') + '</span>';
-      }).join('');
       return `<div class="zp-brand"><div class="zp-title">${esc(b.name)}</div>` +
-             `<div class="zp-list">${items || '<span class="zp-empty">нет участков</span>'}</div></div>`;
+        (areas.length ? areas.map(a => areaHtml(b.id, a, mine, name)).join('') : '<span class="zp-empty">нет участков</span>') +
+        '</div>';
     }).join('');
-    host.querySelectorAll('.zp-group').forEach(sync);
-    host.onchange = e => { const g = e.target.closest('.zp-group'); if (g) sync(g, e.target); };
+    host.querySelectorAll('.zp-area').forEach(a => sync(a));
+    host.onchange = e => { const a = e.target.closest('.zp-area'); if (a) sync(a, e.target); };
   }
 
-  /** Выбранное: {brand_id: [зоны]}; стороны под «целиком» не входят. */
+  /** Выбранное: {brand_id: [зоны]}; то, что покрыто «целиком», не входит. */
   function read(host) {
     const out = {};
     host.querySelectorAll('input[type=checkbox]:checked:not(:disabled)').forEach(c => {

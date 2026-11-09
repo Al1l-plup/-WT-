@@ -293,7 +293,8 @@ def defects_all():
         d['segment'] = seg                               # участок (MB, BS-L, EC…) — для фильтра и зон
         at_my_stage = bool(d.get('current_stage_dept') and d['current_stage_dept'] == mydept)
         # «Мои входящие» = мой этап И (мои участки ИЛИ без участка). WeldTeam/админ и без зон — только этап.
-        d['mine'] = at_my_stage and (privileged or not has_zones or df.in_zones(my_zone_pairs, d.get('brand'), seg))
+        d['mine'] = at_my_stage and (privileged or not has_zones or df.in_zones(
+            my_zone_pairs, d.get('brand'), seg, df.station_zone(r['station_name'])))
         return d
 
     # полные справочники для фильтров (чтобы участок/бренд были доступны всегда,

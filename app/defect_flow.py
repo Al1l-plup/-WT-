@@ -20,7 +20,7 @@ BT→MN = не серия. Достаточно 2-й фиксации.
 import re
 from datetime import date, datetime
 
-from app.normalize import code_key
+from app.normalize import code_key, station_key
 from app.snapshots import SNAP_REGISTRATION, snapshot_defect
 
 OTO = 'ОТО'
@@ -157,19 +157,47 @@ def defect_area(station_name):
 
 
 def area_covered(zone, area):
-    """Зона сотрудника покрывает участок дефекта: 'BS' — обе стороны (BS-L и BS-R),
+    """Зона-участок покрывает участок дефекта: 'BS' — обе стороны (BS-L и BS-R),
     'BS-L' — только левую. 'INR' не покрывает 'INR+WH-L': это другой участок."""
     return bool(zone and area) and (area == zone or area.startswith(zone + '-'))
 
 
-def in_zones(zone_pairs, brand_txt, area):
-    """Попадает ли дефект (бренд + участок) в зоны сотрудника. zone_pairs = {(имя бренда, зона)}.
+# Зона сотрудника — одно из трёх: участок целиком ('EC', 'BS'), сторона ('BS-L') или станция —
+# рабочий ключ станции из normalize.station_key ('EC1-10', 'BS L-10', 'MB-150'). У станции
+# в конце номер через дефис, у участка и стороны — никогда: так их и различаем.
+_STATION_ZONE_RE = re.compile(r'-\d+$')
+
+
+def is_station_zone(zone):
+    return bool(zone and _STATION_ZONE_RE.search(zone))
+
+
+def station_zone(station_name):
+    """Станция дефекта как зона: 'GW-EC1-10' → 'EC1-10', 'GW-BS L-10' → 'BS L-10'; нет станции → ''."""
+    k = station_key(station_name)
+    return k if is_station_zone(k) else ''
+
+
+def area_base(area):
+    """Участок без стороны: 'BS-L' → 'BS', 'INR+WH-R' → 'INR+WH', 'EC' → 'EC'."""
+    return area[:-2] if area and area[-2:] in ('-L', '-R') else (area or '')
+
+
+def zone_covers(zone, area, station=''):
+    """Зона покрывает дефект с этим участком и станцией."""
+    if is_station_zone(zone):
+        return bool(station) and zone == station
+    return area_covered(zone, area)
+
+
+def in_zones(zone_pairs, brand_txt, area, station=''):
+    """Попадает ли дефект (бренд, участок, станция) в зоны сотрудника. zone_pairs = {(имя бренда, зона)}.
     Одна проверка для «Моих входящих» и для уведомлений. Дефект без участка виден всем;
-    бренд не известен — сравниваем только участок."""
+    бренд не известен — сравниваем только участок и станцию."""
     if not area:
         return True
     unknown_brand = not brand_txt or brand_txt == '—'
-    return any((unknown_brand or b == brand_txt) and area_covered(z, area) for b, z in zone_pairs)
+    return any((unknown_brand or b == brand_txt) and zone_covers(z, area, station) for b, z in zone_pairs)
 
 
 def segments_by_brand(conn):
@@ -182,17 +210,57 @@ def segments_by_brand(conn):
     return {bid: sorted(v) for bid, v in out.items()}
 
 
+def _natural(s):
+    return [int(t) if t.isdigit() else t for t in re.split(r'(\d+)', s)]
+
+
+def zone_tree(conn):
+    """Выбор зон по брендам: участок → стороны → станции (из справочника станций).
+    {brand_id: [{'code': 'EC', 'stations': ['EC1-10', …], 'sides': []},
+                {'code': 'BS', 'stations': [], 'sides': [{'code': 'BS-L', 'stations': ['BS L-10', …]}, …]}]}"""
+    raw = {}
+    for bid, name in conn.execute('SELECT brand_id, station_name FROM station'):
+        area = defect_area(name)
+        if not area:
+            continue
+        node = raw.setdefault(bid, {}).setdefault(area_base(area), {'stations': set(), 'sides': {}})
+        bucket = node['stations'] if area == area_base(area) else node['sides'].setdefault(area, set())
+        st = station_zone(name)
+        if st:
+            bucket.add(st)
+    return {bid: [{'code': base,
+                   'stations': sorted(n['stations'], key=_natural),
+                   'sides': [{'code': s, 'stations': sorted(n['sides'][s], key=_natural)} for s in sorted(n['sides'])]}
+                  for base, n in sorted(areas.items())]
+            for bid, areas in raw.items()}
+
+
+def _zone_parents(tree):
+    """{brand_id: {зона: родитель}}: станция → сторона или участок, сторона → участок."""
+    out = {}
+    for bid, areas in tree.items():
+        p = out.setdefault(bid, {})
+        for a in areas:
+            p[a['code']] = None
+            for st in a['stations']:
+                p[st] = a['code']
+            for side in a['sides']:
+                p[side['code']] = a['code']
+                for st in side['stations']:
+                    p[st] = side['code']
+    return out
+
+
 def zone_choices(conn):
-    """{brand_id: [варианты зоны]}: участки и, у кого есть стороны, участок целиком —
-    'BS', 'BS-L', 'BS-R', 'EC', …"""
-    return {bid: sorted(set(segs) | {s.split('-')[0] for s in segs})
-            for bid, segs in segments_by_brand(conn).items()}
+    """{brand_id: [все допустимые зоны]}: участки, стороны и станции."""
+    return {bid: sorted(p, key=_natural) for bid, p in _zone_parents(zone_tree(conn)).items()}
 
 
 def clean_zone_map(conn, areas_map):
     """Проверить и упростить выбор зон {brand_id: [зоны]} → (map, неизвестные).
-    Если выбран участок целиком, его стороны лишние. Неизвестный бренд или участок — в список ошибок."""
-    choices = zone_choices(conn)
+    Выбран участок или сторона целиком — станции внутри лишние. Неизвестный бренд или зона — в ошибки.
+    Ввод приводится рабочим ключом; старая запись вида 'EC2' понимается как участок 'EC'."""
+    parents = _zone_parents(zone_tree(conn))
     out, unknown = {}, []
     for bid, segs in (areas_map or {}).items():
         try:
@@ -200,19 +268,29 @@ def clean_zone_map(conn, areas_map):
         except (TypeError, ValueError):
             unknown.append(str(bid))
             continue
-        allowed = set(choices.get(bid, []))
+        par = parents.get(bid, {})
         codes = set()
         for s in segs or []:
-            c = base_segment(str(s).strip().upper())
+            c = code_key(s)
             if not c:
                 continue
-            if c in allowed:
+            if c not in par and base_segment(c) in par and not is_station_zone(c):
+                c = base_segment(c)
+            if c in par:
                 codes.add(c)
             else:
                 unknown.append(c)
-        codes = {c for c in codes if not any(p != c and area_covered(p, c) for p in codes)}
+
+        def covered(c):
+            p = par.get(c)
+            while p:
+                if p in codes:
+                    return True
+                p = par.get(p)
+            return False
+        codes = {c for c in codes if not covered(c)}
         if codes:
-            out[bid] = sorted(codes)
+            out[bid] = sorted(codes, key=_natural)
     return out, unknown
 
 
@@ -223,9 +301,12 @@ def worker_areas(conn, worker_id):
 
 
 def brands_with_areas(conn):
-    """Для формы выбора зон: {'brands': [{id, name}], 'areas': {brand_id: [варианты зоны]}}."""
+    """Для формы выбора зон: {'brands': [{id, name}], 'tree': участок → стороны → станции,
+    'areas': {brand_id: [все допустимые зоны]}}."""
     brands = [{'id': r[0], 'name': r[1]} for r in conn.execute('SELECT UniqueID, brand FROM brand ORDER BY UniqueID')]
-    return {'brands': brands, 'areas': zone_choices(conn)}
+    tree = zone_tree(conn)
+    return {'brands': brands, 'tree': tree,
+            'areas': {bid: sorted(p, key=_natural) for bid, p in _zone_parents(tree).items()}}
 
 
 def worker_areas_map(conn, worker_id):

@@ -31,7 +31,15 @@ from datetime import datetime, timedelta
 from datetime import time as dtime
 
 from app.constants import dept_label
-from app.defect_flow import OPEN_STATUSES, _now, defect_area, in_zones, station_name_for, worker_areas
+from app.defect_flow import (
+    OPEN_STATUSES,
+    _now,
+    defect_area,
+    in_zones,
+    station_name_for,
+    station_zone,
+    worker_areas,
+)
 
 log = logging.getLogger(__name__)
 
@@ -52,7 +60,7 @@ def _compose_message(code, spot, seg, dept, site_url=''):
     return msg
 
 
-def resolve_recipients(conn, defect_id, dept, brand_txt, seg):
+def resolve_recipients(conn, defect_id, dept, brand_txt, seg, station=''):
     """{worker_id: chat_id} — кому слать уведомление о попадании дефекта на этап dept.
     = ровно те, у кого дефект сейчас в «Мои входящие» (та же логика, что mine на доске):
     работники этапа, у кого дефект попадает в их участок, или у кого зоны не заданы."""
@@ -65,7 +73,7 @@ def resolve_recipients(conn, defect_id, dept, brand_txt, seg):
             recipients[wid] = chat                    # зоны не заданы → весь отдел по всем станциям
         else:
             pairs = {(brand_name.get(b), s) for (b, s) in zones}
-            if in_zones(pairs, brand_txt, seg):          # та же проверка, что «Мои входящие» на доске
+            if in_zones(pairs, brand_txt, seg, station):   # та же проверка, что «Мои входящие» на доске
                 recipients[wid] = chat
     return recipients
 
@@ -89,12 +97,13 @@ def enqueue_stage_arrival(conn, defect_id, dept):
     if not info:
         return 0
     code, brand_txt, spot = info
-    seg = defect_area(station_name_for(conn, defect_id))
+    station_name = station_name_for(conn, defect_id)
+    seg = defect_area(station_name)
     # анкор часового ритма напоминаний на текущем открытом этапе (ставится и при первом
     # пинге, и при каждом повторном — даже если подключённых получателей сейчас нет)
     conn.execute('UPDATE defect_stage SET last_notified_at=? WHERE defect_id=? AND left_at IS NULL',
                  (_now(), defect_id))
-    recipients = resolve_recipients(conn, defect_id, dept, brand_txt, seg)
+    recipients = resolve_recipients(conn, defect_id, dept, brand_txt, seg, station_zone(station_name))
     if not recipients:
         return 0
     text = _compose_message(code, spot, seg, dept, os.environ.get('WELDTEAM_SITE_URL', ''))
