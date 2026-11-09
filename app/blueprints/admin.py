@@ -13,10 +13,12 @@ from app.audit import (
     create_restore_point,
     editable_tables,
     max_change_id,
+    public_columns,
     revert_batch,
     revert_change,
     rollback_to,
     stamp_audit,
+    strip_secrets,
     table_meta,
 )
 from app.data_map import ABOUT, GROUPS, about_key, site_map
@@ -77,10 +79,12 @@ def _author() -> str:
 
 
 def _require_table(db, name: str):
-    """Вернуть (pk, columns) или None, если таблица недоступна для редактирования."""
+    """Вернуть (pk, columns) или None, если таблица недоступна для редактирования.
+    Секретных колонок (хеш пароля) в списке нет: их не прочитать и не записать через Редактор."""
     if name not in editable_tables(db):
         return None
-    return table_meta(db, name)
+    pk, cols = table_meta(db, name)
+    return pk, public_columns(name, cols)
 
 
 def _fk_map(db, table: str) -> dict:
@@ -139,8 +143,9 @@ def read_table(name):
 
     order = ' ' + _natural_order(_q(sort), direction) if sort in cols else ''
     total = db.execute(f'SELECT COUNT(*) FROM {_q(name)}{where}', params).fetchone()[0]
+    select = ', '.join(_q(c) for c in cols)
     rows = db.execute(
-        f'SELECT * FROM {_q(name)}{where}{order} LIMIT ? OFFSET ?', params + [limit, offset]
+        f'SELECT {select} FROM {_q(name)}{where}{order} LIMIT ? OFFSET ?', params + [limit, offset]
     ).fetchall()
     columns = [{'name': c, 'pk': c == pk, 'fk': fks.get(c)} for c in cols]
     return jsonify({'table': name, 'pk': pk, 'columns': columns,
@@ -774,7 +779,13 @@ def history():
         f'SELECT id, ts, table_name, row_pk, op, before_json, after_json, author, is_revert, batch_id '
         f'FROM change_log{cond} ORDER BY id DESC LIMIT ? OFFSET ?', params + [limit, offset]
     ).fetchall()
-    return jsonify({'total': total, 'entries': [dict(r) for r in rows]})
+    entries = []
+    for r in rows:
+        e = dict(r)
+        e['before_json'] = strip_secrets(e['table_name'], e['before_json'])
+        e['after_json'] = strip_secrets(e['table_name'], e['after_json'])
+        entries.append(e)
+    return jsonify({'total': total, 'entries': entries})
 
 
 @bp.route('/api/admin/history/<int:change_id>/revert', methods=['POST'])

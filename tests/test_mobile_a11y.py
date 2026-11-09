@@ -274,9 +274,17 @@ def test_photo_editor_only_on_touch_and_never_loses_marks_silently():
 
 
 @pytest.mark.skipif(shutil.which('node') is None, reason='node недоступен')
-def test_photo_editor_script_has_no_syntax_errors():
-    r = subprocess.run([shutil.which('node'), '--check', 'app/static/photo-mark.js'], capture_output=True, text=True)
+@pytest.mark.parametrize('script', ['app/static/photo-mark.js', 'app/static/zones.js'])
+def test_static_script_has_no_syntax_errors(script):
+    r = subprocess.run([shutil.which('node'), '--check', script], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
+
+
+def test_zone_picker_is_shared_by_every_zone_form():
+    """Регистрация, личный кабинет и «Пользователи» выбирают зоны одинаково: «целиком» и стороны."""
+    for page in ('register.html', 'profile.html', 'users.html'):
+        html = pathlib.Path('app/templates', page).read_text(encoding='utf-8')
+        assert '/static/zones.js' in html and 'ZonePicker.render(' in html, page
 
 
 @pytest.mark.skipif(shutil.which('node') is None, reason='node недоступен')

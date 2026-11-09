@@ -115,7 +115,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       : '';
     const span = document.createElement('span');
     span.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:12px;opacity:.85;margin-left:6px;white-space:nowrap';
-    span.innerHTML = `${ro}👤 ${escapeHtml(me.name)} · ${escapeHtml(deptLabel(me.dept) || '—')} <a href="/logout" style="color:inherit;opacity:.7" title="Выйти">⎋</a>`;
+    const here = location.pathname === '/profile' ? ' active' : '';
+    span.innerHTML = `${ro}<a href="/profile" class="nav-user${here}" title="Личный кабинет">👤 ${escapeHtml(me.name)} · ${escapeHtml(deptLabel(me.dept) || '—')}</a> <a href="/logout" style="color:inherit;opacity:.7" title="Выйти">⎋</a>`;
     nav.insertBefore(span, btn);
   } catch (e) { /* оффлайн/аноним — молча */ }
 });

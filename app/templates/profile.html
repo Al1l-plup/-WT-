@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#161b22">
+  <meta name="description" content="WeldTeam MES — личный кабинет сотрудника">
+  <title>Личный кабинет · WeldTeam MES</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/theme.js"></script>
+  <script src="/static/zones.js?v=1"></script>
+  <style>
+    .pf{max-width:720px}
+    .pf .note{color:var(--muted);font-size:12px;margin-top:4px}
+    .pf .row-btn{display:flex;justify-content:flex-end;margin-top:.75rem}
+    .pf .ro{padding:6px 0 0;font-weight:600}
+    .pf span.lbl{display:block;font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em}
+    .pf .g2{margin-bottom:.75rem}
+    @media (max-width:640px){ .pf .row-btn .btn{width:100%} }
+  </style>
+</head>
+<body>
+
+<nav class="nav">
+  <a class="nav-brand" href="/">WeldTeam <span>/ цех BS</span></a>
+  <div class="nav-links">
+    <a class="nav-link" href="/">Главная</a>
+    <a class="nav-link" href="/maintenance">ТО</a>
+    <a class="nav-link" href="/defects">Дефекты</a>
+    <a class="nav-link" href="/analytics">Аналитика</a>
+    <a class="nav-link" href="/workers">Сотрудники</a>
+    <a class="nav-link" href="/explorer">Обзор</a>
+    <a class="nav-link" href="/admin">Редактор</a>
+    <a class="nav-link" href="/history">Журнал</a>
+    <button class="btn-theme" id="themeToggle" type="button" aria-label="Переключить тему">☀</button>
+  </div>
+</nav>
+
+<div class="page pf">
+  <div class="page-head">
+    <h1>Личный кабинет</h1>
+    <p id="who">Загрузка…</p>
+  </div>
+
+  <div id="loadAlert"></div>
+
+  <form class="card" id="dataForm" novalidate hidden>
+    <div class="card-title accent">Личные данные</div>
+    <div class="g2">
+      <div class="fgroup"><label class="lbl" for="f_surname">Фамилия *</label><input type="text" id="f_surname" autocomplete="family-name" maxlength="100" required></div>
+      <div class="fgroup"><label class="lbl" for="f_name">Имя *</label><input type="text" id="f_name" autocomplete="given-name" maxlength="100" required></div>
+      <div class="fgroup"><label class="lbl" for="f_father">Отчество</label><input type="text" id="f_father" autocomplete="additional-name" maxlength="100"></div>
+      <div class="fgroup"><label class="lbl" for="f_position">Должность</label><input type="text" id="f_position" autocomplete="organization-title" maxlength="100"></div>
+    </div>
+    <div class="fgroup">
+      <span class="lbl">Отдел</span>
+      <div class="ro" id="f_dept"></div>
+      <div class="note">Отдел меняет администратор: от него зависят права на сайте.</div>
+    </div>
+    <div class="fgroup" id="zoneBlock" hidden>
+      <span class="lbl">Зоны ответственности</span>
+      <div id="zoneHost"></div>
+      <div class="note">Дефекты ваших участков попадают в «Мои входящие» и в уведомления. «Целиком» — обе стороны участка.
+        Ничего не отмечено — видите все дефекты на этапе отдела.</div>
+    </div>
+    <div id="dataAlert" class="hidden mt-alert" role="status"></div>
+    <div class="row-btn"><button class="btn btn-primary" type="submit">Сохранить</button></div>
+  </form>
+
+  <form class="card" id="emailForm" novalidate hidden>
+    <div class="card-title accent">Почта (логин)</div>
+    <div class="fgroup"><span class="lbl">Сейчас</span><div class="ro" id="curEmail"></div></div>
+    <div class="g2">
+      <div class="fgroup"><label class="lbl" for="e_new">Новая почта</label>
+        <input type="text" id="e_new" inputmode="email" autocapitalize="none" spellcheck="false" autocomplete="email" placeholder="name@mail.ru"></div>
+      <div class="fgroup"><label class="lbl" for="e_pw">Текущий пароль</label>
+        <input type="password" id="e_pw" autocomplete="current-password"></div>
+    </div>
+    <div class="note" id="emailNote">После смены входите с новой почтой.</div>
+    <div id="emailAlert" class="hidden mt-alert" role="status"></div>
+    <div class="row-btn"><button class="btn btn-primary" type="submit" id="emailBtn">Сменить почту</button></div>
+  </form>
+
+  <form class="card" id="pwForm" novalidate hidden>
+    <div class="card-title accent">Пароль</div>
+    <input type="text" id="pw_user" autocomplete="username" hidden>
+    <div class="fgroup"><label class="lbl" for="p_cur">Текущий пароль</label><input type="password" id="p_cur" autocomplete="current-password"></div>
+    <div class="g2">
+      <div class="fgroup"><label class="lbl" for="p_new">Новый пароль (мин. 4)</label><input type="password" id="p_new" autocomplete="new-password" minlength="4"></div>
+      <div class="fgroup"><label class="lbl" for="p_new2">Повтор нового</label><input type="password" id="p_new2" autocomplete="new-password"></div>
+    </div>
+    <div id="pwAlert" class="hidden mt-alert" role="status"></div>
+    <div class="row-btn"><button class="btn btn-primary" type="submit">Сменить пароль</button></div>
+  </form>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let P = null;   // данные кабинета с сервера
+
+function say(el, type, msg){ el.className = `alert alert-${type} mt-alert`; el.textContent = msg; el.scrollIntoView({block: 'nearest'}); }
+const readJson = r => r.json().catch(() => ({status: 'error', message: `Сервер не принял запрос (код ${r.status})`}));
+
+// Одна отправка за раз: кнопка «Сохраняем…», обрыв связи — сообщение, а не тишина
+async function send(form, alertEl, method, url, body){
+  const btn = form.querySelector('button[type=submit]');
+  if (btn.disabled) return null;
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Сохраняем…';
+  alertEl.className = 'hidden mt-alert';
+  try {
+    const res = await fetch(url, {method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)}).then(readJson);
+    say(alertEl, res.status === 'success' ? 'success' : 'danger', res.message || 'Ошибка');
+    return res.status === 'success' ? res : null;
+  } catch {
+    say(alertEl, 'danger', 'Нет связи с сервером — изменения не сохранены, повторите');
+    return null;
+  } finally { btn.disabled = false; btn.textContent = label; }
+}
+
+function fill(p){
+  P = p;
+  $('who').textContent = [p.surname, p.name, p.father_name].filter(Boolean).join(' ') + ' · ' + p.department_label;
+  $('f_surname').value = p.surname; $('f_name').value = p.name;
+  $('f_father').value = p.father_name; $('f_position').value = p.position;
+  $('f_dept').textContent = p.department_label;
+  $('curEmail').textContent = p.email; $('pw_user').value = p.email;
+  $('zoneBlock').hidden = !p.has_zones;
+  if (p.has_zones) ZonePicker.render($('zoneHost'), p.areas_ref, p.areas);
+  if (p.is_root){                                   // почта корневого админа задаётся на сервере
+    $('e_new').disabled = $('e_pw').disabled = $('emailBtn').disabled = true;
+    $('emailNote').textContent = 'Почта администратора задаётся в настройках сервера (ADMIN_EMAIL).';
+  }
+  ['dataForm', 'emailForm', 'pwForm'].forEach(id => { $(id).hidden = false; });
+}
+
+fetch('/api/profile').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }).then(fill).catch(() => {
+  $('who').textContent = '';
+  $('loadAlert').innerHTML = '<div class="alert alert-danger">Не удалось загрузить данные. <button class="btn btn-ghost btn-sm" onclick="location.reload()">↻ Повторить</button></div>';
+});
+
+$('dataForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const body = {surname: $('f_surname').value, name: $('f_name').value,
+                father_name: $('f_father').value, position: $('f_position').value};
+  if (!body.surname.trim() || !body.name.trim()) return say($('dataAlert'), 'warn', 'Укажите фамилию и имя');
+  if (P.has_zones) body.areas = ZonePicker.read($('zoneHost'));
+  const res = await send($('dataForm'), $('dataAlert'), 'PUT', '/api/profile', body);
+  if (res){
+    $('who').textContent = [body.surname.trim(), body.name.trim(), body.father_name.trim()].filter(Boolean).join(' ') + ' · ' + P.department_label;
+    const user = document.querySelector('.nav-user');            // имя в шапке — сразу новое
+    if (user) user.textContent = `👤 ${res.name} · ${P.department_label}`;
+    if (P.has_zones){ P.areas = res.areas; ZonePicker.render($('zoneHost'), P.areas_ref, P.areas); }
+  }
+});
+
+$('emailForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const email = $('e_new').value.trim();
+  if (!email) return say($('emailAlert'), 'warn', 'Укажите новую почту');
+  if (!$('e_pw').value) return say($('emailAlert'), 'warn', 'Введите текущий пароль');
+  const res = await send($('emailForm'), $('emailAlert'), 'POST', '/api/profile/email', {email, current_password: $('e_pw').value});
+  $('e_pw').value = '';
+  if (res){ P.email = res.email; $('curEmail').textContent = res.email; $('pw_user').value = res.email; $('e_new').value = ''; }
+});
+
+$('pwForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  if (!$('p_cur').value) return say($('pwAlert'), 'warn', 'Введите текущий пароль');
+  if ($('p_new').value.length < 4) return say($('pwAlert'), 'warn', 'Новый пароль — минимум 4 символа');
+  if ($('p_new').value !== $('p_new2').value) return say($('pwAlert'), 'warn', 'Новые пароли не совпадают');
+  const res = await send($('pwForm'), $('pwAlert'), 'POST', '/api/profile/password',
+    {current_password: $('p_cur').value, password: $('p_new').value, password2: $('p_new2').value});
+  $('p_cur').value = '';
+  if (res){ $('p_new').value = ''; $('p_new2').value = ''; }
+});
+</script>
+</body>
+</html>

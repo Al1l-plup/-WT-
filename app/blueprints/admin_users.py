@@ -68,7 +68,9 @@ def set_user_areas(uid):
     db = get_db()
     if not _get_user(db, uid):
         return jsonify({'status': 'error', 'message': 'Пользователь не найден'}), 404
-    amap = (request.json or {}).get('areas') or {}
+    amap, unknown = df.clean_zone_map(db, (request.get_json(silent=True) or {}).get('areas') or {})
+    if unknown:
+        return jsonify({'status': 'error', 'message': 'Неизвестные участки: ' + ', '.join(unknown)}), 400
     try:
         df.set_worker_areas(db, uid, amap)
         db.commit()

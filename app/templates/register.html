@@ -7,6 +7,7 @@
   <meta name="description" content="WeldTeam MES — система управления точечной сваркой цеха BS">
   <title>Регистрация · WeldTeam MES</title>
   <script src="/static/theme.js"></script>
+  <script src="/static/zones.js?v=1"></script>
   <link rel="stylesheet" href="/static/style.css">
   <style>
     .authbox{max-width:420px;margin:6vh auto;border:1px solid var(--border);border-radius:14px;padding:26px;background:var(--card)}
@@ -55,7 +56,8 @@
     <div class="fld" id="areaBlock" style="display:none">
       <label>Зона ответственности (участки по брендам)</label>
       <div id="areaBrands"></div>
-      <p class="sub" style="margin:6px 0 0;opacity:.6">Отметьте участки, за которые отвечаете на каждом бренде — по ним вам будут адресоваться дефекты.</p>
+      <p class="sub" style="margin:6px 0 0;opacity:.6">Отметьте участки, за которые отвечаете на каждом бренде — по ним вам будут адресоваться дефекты.
+        «Целиком» — обе стороны участка. Изменить можно потом в личном кабинете.</p>
     </div>
     <div class="fld"><label>Логин — ваша почта, любая (Gmail, Mail.ru…) * <span title="На эту почту будут приходить уведомления об изменениях (рассылка)." style="cursor:help;opacity:.7">❓</span></label>
       <input name="login" type="text" inputmode="email" autocapitalize="none" spellcheck="false" required placeholder="name@mail.ru" autocomplete="username" value="{{ (form or {}).get('login','') }}"></div>
@@ -76,14 +78,9 @@
   function render(){
     const d = dept.value;
     if (d !== 'Производство' && d !== 'ИТО'){ block.style.display='none'; host.innerHTML=''; return; }
+    if (block.style.display !== 'none' && host.innerHTML) return;   // выбор уже на экране — не сбрасываем
     block.style.display='';
-    host.innerHTML = (AREAS.brands||[]).map(b=>{
-      const segs = AREAS.areas[b.id] || [];
-      return `<div style="margin:6px 0"><div style="font-weight:600;font-size:13px">${b.name}</div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">${segs.map(s=>
-          `<label style="display:inline-flex;align-items:center;gap:4px;font-size:13px;border:1px solid var(--border);border-radius:6px;padding:3px 7px;cursor:pointer">
-            <input type="checkbox" name="area_${b.id}" value="${s}" style="width:auto;min-height:0">${s}</label>`).join('')}</div></div>`;
-    }).join('');
+    ZonePicker.render(host, AREAS, {}, {name: id => `area_${id}`});
   }
   dept.addEventListener('change', render);
   render();

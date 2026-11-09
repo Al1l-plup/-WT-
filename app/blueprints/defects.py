@@ -284,26 +284,16 @@ def defects_all():
     # (snap_brand_id у незакрытых часто NULL, а текстовый бренд в выборке разрешён всегда).
     my_zones = df.worker_areas(db, myuid) if myuid else set()
     brand_name = {r[0]: r[1] for r in db.execute('SELECT UniqueID, brand FROM brand')}
-    my_zone_pairs = {(brand_name.get(bid), seg) for (bid, seg) in my_zones}   # {(имя бренда, участок)}
-    my_segments = {seg for (_bid, seg) in my_zones}
+    my_zone_pairs = {(brand_name.get(bid), seg) for (bid, seg) in my_zones}   # {(имя бренда, зона)}
     has_zones = bool(my_zones)
-
-    def in_my_zone(brand_txt, seg):
-        if not seg:                                      # дефект без участка — виден всем (не прячем)
-            return True
-        if (brand_txt, seg) in my_zone_pairs:            # совпали бренд и участок
-            return True
-        if (not brand_txt or brand_txt == '—') and seg in my_segments:   # бренд неизвестен, но участок мой
-            return True
-        return False
 
     def row(r):
         d = dict(r)
         seg = df.defect_area(r['station_name'])
-        d['segment'] = seg                               # участок (MB/UB/EC…) — для фильтра и зон
+        d['segment'] = seg                               # участок (MB, BS-L, EC…) — для фильтра и зон
         at_my_stage = bool(d.get('current_stage_dept') and d['current_stage_dept'] == mydept)
         # «Мои входящие» = мой этап И (мои участки ИЛИ без участка). WeldTeam/админ и без зон — только этап.
-        d['mine'] = at_my_stage and (privileged or not has_zones or in_my_zone(d.get('brand'), seg))
+        d['mine'] = at_my_stage and (privileged or not has_zones or df.in_zones(my_zone_pairs, d.get('brand'), seg))
         return d
 
     # полные справочники для фильтров (чтобы участок/бренд были доступны всегда,

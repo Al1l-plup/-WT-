@@ -7,6 +7,7 @@
   <meta name="description" content="WeldTeam MES — управление учётными записями">
   <title>Пользователи · WeldTeam MES</title>
   <script src="/static/theme.js"></script>
+  <script src="/static/zones.js?v=1"></script>
   <link rel="stylesheet" href="/static/style.css">
   <style>
     .role-badge{font-size:11px;padding:1px 7px;border-radius:5px;border:1px solid var(--border)}
@@ -160,15 +161,7 @@ let areaEditId = null;
 function openAreas(u){
   areaEditId = u.UniqueID;
   $('#areaWho').textContent = [u.surname, u.name].filter(Boolean).join(' ') + ' · ' + deptLabel(u.department);
-  const am = u.areas || {};
-  $('#areaBody').innerHTML = (AREAS_REF.brands || []).map(b => {
-    const have = new Set(am[b.id] || am[String(b.id)] || []);
-    const segs = AREAS_REF.areas[b.id] || AREAS_REF.areas[String(b.id)] || [];
-    return `<div style="margin:8px 0"><div style="font-weight:600;font-size:13px">${escapeHtml(b.name)}</div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">${segs.map(s =>
-        `<label style="display:inline-flex;align-items:center;gap:4px;font-size:13px;border:1px solid var(--border);border-radius:6px;padding:3px 7px;cursor:pointer">
-          <input type="checkbox" data-brand="${escapeHtml(b.id)}" value="${escapeHtml(s)}" ${have.has(s) ? 'checked' : ''}>${escapeHtml(s)}</label>`).join('') || '<span style="opacity:.5;font-size:13px">нет участков</span>'}</div></div>`;
-  }).join('');
+  ZonePicker.render($('#areaBody'), AREAS_REF, u.areas || {});
   $('#areaDlg').showModal();
 }
 
@@ -210,10 +203,7 @@ async function resetPw(id){
 
 $('#areaCancel').onclick = () => $('#areaDlg').close();
 $('#areaSave').onclick = async () => {
-  const map = {};
-  $('#areaBody').querySelectorAll('input[type=checkbox]:checked').forEach(c => {
-    (map[c.dataset.brand] = map[c.dataset.brand] || []).push(c.value);
-  });
+  const map = ZonePicker.read($('#areaBody'));
   const r = await fetch(`/api/admin/users/${areaEditId}/areas`, {method:'PUT', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({areas: map})});
   const d = await r.json();

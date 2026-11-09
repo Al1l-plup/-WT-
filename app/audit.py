@@ -19,6 +19,32 @@ AUDIT_EXCLUDE = {'change_log', 'restore_point', 'alembic_version', 'sqlite_seque
                  'wb_station_history'}  # история станций WB — ведёт приложение (wb_source.record_station_history)
 
 
+# Секреты не пишем в журнал и не отдаём Редактору: Журнал и сырые таблицы видят все отделы,
+# а хеш пароля длиной от 4 символов подбирается перебором. Пароль меняют только «Личный
+# кабинет», регистрация и сброс админом.
+SECRET_COLUMNS = {'worker': frozenset({'password', 'tg_link_code'})}
+
+
+def public_columns(table: str, cols: list[str]) -> list[str]:
+    """Колонки таблицы без секретных."""
+    secret = SECRET_COLUMNS.get(table, frozenset())
+    return [c for c in cols if c not in secret]
+
+
+def strip_secrets(table: str, raw_json: str | None) -> str | None:
+    """Снимок строки из журнала без секретных полей (старые записи до этого правила их содержат)."""
+    secret = SECRET_COLUMNS.get(table)
+    if not raw_json or not secret:
+        return raw_json
+    try:
+        row = json.loads(raw_json)
+    except ValueError:
+        return raw_json
+    if not isinstance(row, dict) or not secret & row.keys():
+        return raw_json
+    return json.dumps({k: v for k, v in row.items() if k not in secret}, ensure_ascii=False)
+
+
 def _q(ident: str) -> str:
     return '"' + ident.replace('"', '""') + '"'
 
@@ -46,11 +72,13 @@ def _json_object(prefix: str, cols: list[str]) -> str:
 def _triggers_for(table: str, pk: str, cols: list[str]) -> list[str]:
     q, pkq = _q(table), _q(pk)
     newj, oldj = _json_object('NEW', cols), _json_object('OLD', cols)
+    # смена только секретной колонки (пароля) не оставляет в журнале пустую запись
+    when = f' WHEN {oldj} IS NOT {newj}' if table in SECRET_COLUMNS else ''
     return [
         f'CREATE TRIGGER {_q("audit_" + table + "_ins")} AFTER INSERT ON {q} BEGIN '
         f"INSERT INTO change_log(table_name,row_pk,op,before_json,after_json) "
         f"VALUES ('{table}', NEW.{pkq}, 'INSERT', NULL, {newj}); END",
-        f'CREATE TRIGGER {_q("audit_" + table + "_upd")} AFTER UPDATE ON {q} BEGIN '
+        f'CREATE TRIGGER {_q("audit_" + table + "_upd")} AFTER UPDATE ON {q}{when} BEGIN '
         f"INSERT INTO change_log(table_name,row_pk,op,before_json,after_json) "
         f"VALUES ('{table}', OLD.{pkq}, 'UPDATE', {oldj}, {newj}); END",
         f'CREATE TRIGGER {_q("audit_" + table + "_del")} AFTER DELETE ON {q} BEGIN '
@@ -77,7 +105,7 @@ def ensure_audit_triggers(db: sqlite3.Connection, commit: bool = True) -> None:
         pk, cols = table_meta(db, t)
         if not pk:
             continue
-        for stmt in _triggers_for(t, pk, cols):
+        for stmt in _triggers_for(t, pk, public_columns(t, cols)):
             db.execute(stmt)
     if commit:
         db.commit()

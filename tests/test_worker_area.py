@@ -22,6 +22,42 @@ def test_base_segment_and_segments_by_brand(app):
     assert all(not any(ch.isdigit() for ch in s) for segs in by_brand.values() for s in segs if s != 'INR+WH')
 
 
+def test_left_and_right_are_different_areas():
+    """Решение 2026-11-09: BS-L и BS-R — разные участки, и так у всех участков со сторонами."""
+    assert df.defect_area('GW-BS L-10') == 'BS-L' and df.defect_area('CH-BS R-40') == 'BS-R'
+    assert df.defect_area('CH-WH2 R-20') == 'WH-R'            # номер участка отбрасываем, сторону — нет
+    assert df.defect_area('GW-INR+WH L-10') == 'INR+WH-L'
+    assert df.defect_area('CA-HL L-10') == 'HL-L' and df.defect_area('GW-HL-10') == 'HL'
+    assert df.defect_area('GW-FR WH 1-10') == 'FR'            # «WH» здесь не сторона
+    assert df.defect_area('GW-EC2-10') == 'EC' and df.defect_area('GW-MB-150') == 'MB'
+    # рабочий ключ: регистр, двойные пробелы, кириллические двойники и тире на результат не влияют
+    assert df.defect_area('gw-bs  l-10') == 'BS-L' and df.defect_area('GW–ВS R–10') == 'BS-R'
+    assert df.defect_area('GW-BS-R-10') == 'BS-R'
+    assert df.defect_area(None) == '' and df.defect_area('—') == '' and df.defect_area('') == ''
+    assert df.station_segment('GW-BS R-40') == 'BS'           # для VIN станция по-прежнему «BS»
+
+
+def test_whole_area_covers_both_sides():
+    assert df.area_covered('BS', 'BS-L') and df.area_covered('BS', 'BS-R') and df.area_covered('BS', 'BS')
+    assert not df.area_covered('BS-L', 'BS-R') and not df.area_covered('BS-L', 'BS')
+    assert not df.area_covered('INR', 'INR+WH-L')              # другой участок, не сторона
+    zones = {('GWM', 'BS'), ('Chery', 'WH-L')}
+    assert df.in_zones(zones, 'GWM', 'BS-R') and df.in_zones(zones, 'Chery', 'WH-L')
+    assert not df.in_zones(zones, 'Chery', 'WH-R') and not df.in_zones(zones, 'Chery', 'BS-L')
+    assert df.in_zones(zones, None, 'BS-L')                    # бренд не известен — только участок
+    assert df.in_zones(zones, 'Chery', '')                     # без участка — виден всем
+
+
+def test_zone_choices_offer_whole_and_sides(app):
+    c = _db(app)
+    choices = df.zone_choices(c)
+    chery = choices[1]
+    assert {'BS', 'BS-L', 'BS-R', 'MB'} <= set(chery)
+    assert 'BS' not in df.segments_by_brand(c)[1], 'у дефекта всегда сторона: BS-L или BS-R'
+    clean, unknown = df.clean_zone_map(c, {'1': ['BS', 'BS-L', 'mb'], '2': ['XX'], 'abc': ['MB']})
+    assert clean == {1: ['BS', 'MB']} and sorted(unknown) == ['XX', 'abc']   # стороны под «целиком» лишние
+
+
 def test_registration_saves_areas(app):
     c = app.test_client()
     c.post('/register', data={'surname': 'Ц', 'name': 'Р', 'department': 'Производство',
@@ -86,3 +122,40 @@ def test_mine_filtered_by_zones(register_client, app):
     ob = otk.get('/api/defects/all').get_json()
     assert ob['zoned'] is False
     assert next(x for x in ob['open'] if x['UniqueID'] == in_zone)['mine'] is False
+
+
+def test_mine_by_side_and_whole_area(register_client, app):
+    """Зона BS-L — только левая сторона; зона BS (целиком) — обе. Уведомления — по тому же правилу."""
+    from app.notifications import resolve_recipients
+    otk = register_client(department='ОТК')
+    left = register_client(department='Производство', login='side_l@x.kz')
+    whole = register_client(department='Производство', login='side_all@x.kz')
+    db = _db(app)
+    bname = db.execute('SELECT brand FROM brand WHERE UniqueID=1').fetchone()[0]
+    ids = {lg: db.execute('SELECT UniqueID FROM worker WHERE login=?', (lg,)).fetchone()[0]
+           for lg in ('side_l@x.kz', 'side_all@x.kz')}
+    db.execute("INSERT INTO worker_area (worker_id,brand_id,segment) VALUES (?,1,'BS-L')", (ids['side_l@x.kz'],))
+    db.execute("INSERT INTO worker_area (worker_id,brand_id,segment) VALUES (?,1,'BS')", (ids['side_all@x.kz'],))
+    db.execute('UPDATE worker SET tg_chat_id=? WHERE UniqueID IN (?,?)', ('1', *ids.values()))
+    db.commit()
+    db.close()
+
+    def mk(g, station):
+        did = otk.post('/api/defects/register_manual', json={'g_num': g, 'problem_code': 'CR'}).get_json()['defect_id']
+        c = _db(app)
+        c.execute('UPDATE defects SET snap_brand=?, snap_station_name=? WHERE UniqueID=?', (bname, station, did))
+        c.commit(); c.close()
+        return did
+
+    bs_l, bs_r = mk(96620, 'CH-BS L-20'), mk(96621, 'CH-BS R-20')
+
+    def mine(cl, did):
+        return next(x for x in cl.get('/api/defects/all').get_json()['open'] if x['UniqueID'] == did)
+
+    assert mine(left, bs_l)['segment'] == 'BS-L' and mine(left, bs_r)['segment'] == 'BS-R'
+    assert mine(left, bs_l)['mine'] is True and mine(left, bs_r)['mine'] is False
+    assert mine(whole, bs_l)['mine'] is True and mine(whole, bs_r)['mine'] is True
+    c = _db(app)
+    for did, expect in ((bs_l, set(ids.values())), (bs_r, {ids['side_all@x.kz']})):
+        got = set(resolve_recipients(c, did, 'Производство', bname, df.defect_area(df.station_name_for(c, did))))
+        assert expect <= got and not (set(ids.values()) - expect) & got

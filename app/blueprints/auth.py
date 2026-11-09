@@ -164,6 +164,13 @@ def register():
     db = get_db()
     if db.execute('SELECT 1 FROM worker WHERE login=?', (login_,)).fetchone():
         return err('Такой логин уже занят')
+    # зоны ответственности (бренд + участок) — только у Производства/ИТО
+    zones = {}
+    if dept in ZONE_DEPTS:
+        picked = {b['id']: data.getlist(f"area_{b['id']}") for b in areas['brands']}
+        zones, unknown = df.clean_zone_map(db, {k: v for k, v in picked.items() if v})
+        if unknown:
+            return err('Неизвестные участки: ' + ', '.join(unknown))
     role = 'admin' if login_ == _admin_email() else 'user'
     try:
         cur = db.execute(
@@ -174,14 +181,8 @@ def register():
              login_,  # почта дублируется в email — для будущей рассылки
              generate_password_hash(pw1), login_, role))
         wid = cur.lastrowid
-        # зоны ответственности (бренд+участок) — для Производства/ИТО
-        amap = {}
-        for b in areas['brands']:
-            segs = data.getlist(f"area_{b['id']}")
-            if segs:
-                amap[b['id']] = segs
-        if amap:
-            df.set_worker_areas(db, wid, amap)
+        if zones:
+            df.set_worker_areas(db, wid, zones)
         db.commit()
     except Exception as e:
         db.rollback()
@@ -219,6 +220,130 @@ def change_password():
         return api_error(e)
     session['must_change'] = False
     return redirect('/')
+
+
+# ── Личный кабинет: свои данные, зоны, почта, пароль ─────────────────────────
+# Отдел здесь не меняется: от него зависят права, его меняет администратор.
+ZONE_DEPTS = ('Производство', 'ИТО')     # у этих отделов «Мои входящие» и уведомления идут по зонам
+_MAX_TEXT = 100
+
+
+def _profile_row(db):
+    return db.execute('SELECT * FROM worker WHERE UniqueID=?', (session['uid'],)).fetchone()
+
+
+def _fail(msg, code=400):
+    return jsonify({'status': 'error', 'message': msg}), code
+
+
+@bp.route('/profile')
+def profile_page():
+    return render_template('profile.html')
+
+
+@bp.route('/api/profile')
+def profile_get():
+    db = get_db()
+    r = _profile_row(db)
+    return jsonify({
+        'surname': r['surname'] or '', 'name': r['name'] or '', 'father_name': r['father_name'] or '',
+        'position': r['position'] or '', 'email': r['login'] or '',
+        'department': r['department'], 'department_label': dept_label(r['department']),
+        'has_zones': r['department'] in ZONE_DEPTS,
+        'areas': df.worker_areas_map(db, r['UniqueID']),
+        'areas_ref': df.brands_with_areas(db),
+        'is_root': (r['login'] or '').lower() == _admin_email(),
+    })
+
+
+@bp.route('/api/profile', methods=['PUT'])
+def profile_update():
+    """Свои ФИО, должность и (Производство/ИТО) зоны ответственности. Текст хранится как введён."""
+    data = request.get_json(silent=True) or {}
+    surname, name = (data.get('surname') or '').strip(), (data.get('name') or '').strip()
+    father, position = (data.get('father_name') or '').strip(), (data.get('position') or '').strip()
+    if not surname or not name:
+        return _fail('Укажите фамилию и имя')
+    if max(len(surname), len(name), len(father), len(position)) > _MAX_TEXT:
+        return _fail(f'Слишком длинное значение: не больше {_MAX_TEXT} символов')
+    db = get_db()
+    r = _profile_row(db)
+    zones = None
+    if 'areas' in data:
+        if r['department'] not in ZONE_DEPTS:
+            return _fail(f'У отдела «{dept_label(r["department"])}» зон ответственности нет: '
+                         'вам видны все дефекты на этапе отдела')
+        zones, unknown = df.clean_zone_map(db, data.get('areas') or {})
+        if unknown:
+            return _fail('Неизвестные участки: ' + ', '.join(unknown))
+    try:
+        db.execute('UPDATE worker SET surname=?, name=?, father_name=?, position=? WHERE UniqueID=?',
+                   (surname, name, father, position, r['UniqueID']))
+        if zones is not None:
+            df.set_worker_areas(db, r['UniqueID'], zones)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        return api_error(e)
+    _set_session(_profile_row(db))
+    return jsonify({'status': 'success', 'message': 'Данные сохранены', 'name': session['uname'],
+                    'areas': df.worker_areas_map(db, r['UniqueID'])})
+
+
+def _check_current_password(row, data):
+    return bool(row['password']) and check_password_hash(row['password'], data.get('current_password') or '')
+
+
+@bp.route('/api/profile/email', methods=['POST'])
+def profile_email():
+    """Сменить почту = логин. Нужен текущий пароль: иначе чужой, оставшийся в браузере, уведёт учётку."""
+    data = request.get_json(silent=True) or {}
+    email = (data.get('email') or '').strip().lower()
+    db = get_db()
+    r = _profile_row(db)
+    if not _check_current_password(r, data):
+        return _fail('Неверный текущий пароль')
+    if (r['login'] or '').lower() == _admin_email():
+        return _fail('Почта администратора задаётся в настройках сервера (ADMIN_EMAIL)')
+    if not EMAIL_RE.match(email):
+        return _fail('Укажите адрес почты, например name@mail.ru')
+    if email == (r['login'] or '').lower():
+        return _fail('Это уже ваша почта')
+    if email == _admin_email():
+        return _fail('Эта почта закреплена за администратором')
+    if db.execute('SELECT 1 FROM worker WHERE login=? AND UniqueID<>?', (email, r['UniqueID'])).fetchone():
+        return _fail('Эта почта уже занята')
+    try:
+        db.execute('UPDATE worker SET login=?, email=? WHERE UniqueID=?', (email, email, r['UniqueID']))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        return api_error(e)
+    _set_session(_profile_row(db))
+    return jsonify({'status': 'success', 'message': 'Почта изменена: входите с новой', 'email': email})
+
+
+@bp.route('/api/profile/password', methods=['POST'])
+def profile_password():
+    data = request.get_json(silent=True) or {}
+    pw1, pw2 = data.get('password') or '', data.get('password2') or ''
+    db = get_db()
+    r = _profile_row(db)
+    if not _check_current_password(r, data):
+        return _fail('Неверный текущий пароль')
+    if len(pw1) < 4:
+        return _fail('Новый пароль — минимум 4 символа')
+    if pw1 != pw2:
+        return _fail('Новые пароли не совпадают')
+    try:
+        db.execute('UPDATE worker SET password=?, must_change_password=0 WHERE UniqueID=?',
+                   (generate_password_hash(pw1), r['UniqueID']))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        return api_error(e)
+    session['must_change'] = False
+    return jsonify({'status': 'success', 'message': 'Пароль изменён'})
 
 
 @bp.route('/api/tg/link', methods=['POST'])

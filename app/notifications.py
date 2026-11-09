@@ -31,7 +31,7 @@ from datetime import datetime, timedelta
 from datetime import time as dtime
 
 from app.constants import dept_label
-from app.defect_flow import OPEN_STATUSES, _now, defect_area, station_name_for, worker_areas
+from app.defect_flow import OPEN_STATUSES, _now, defect_area, in_zones, station_name_for, worker_areas
 
 log = logging.getLogger(__name__)
 
@@ -52,17 +52,6 @@ def _compose_message(code, spot, seg, dept, site_url=''):
     return msg
 
 
-def _in_zone(zone_pairs, zone_segs, brand_txt, seg):
-    """True, если дефект (бренд+участок) попадает в зоны работника — как на доске."""
-    if not seg:
-        return True                                   # дефект без участка виден всем
-    if (brand_txt, seg) in zone_pairs:
-        return True
-    if (not brand_txt or brand_txt == '—') and seg in zone_segs:
-        return True
-    return False
-
-
 def resolve_recipients(conn, defect_id, dept, brand_txt, seg):
     """{worker_id: chat_id} — кому слать уведомление о попадании дефекта на этап dept.
     = ровно те, у кого дефект сейчас в «Мои входящие» (та же логика, что mine на доске):
@@ -76,8 +65,7 @@ def resolve_recipients(conn, defect_id, dept, brand_txt, seg):
             recipients[wid] = chat                    # зоны не заданы → весь отдел по всем станциям
         else:
             pairs = {(brand_name.get(b), s) for (b, s) in zones}
-            segs = {s for (_b, s) in zones}
-            if _in_zone(pairs, segs, brand_txt, seg):
+            if in_zones(pairs, brand_txt, seg):          # та же проверка, что «Мои входящие» на доске
                 recipients[wid] = chat
     return recipients
 

@@ -20,6 +20,7 @@ BT→MN = не серия. Достаточно 2-й фиксации.
 import re
 from datetime import date, datetime
 
+from app.normalize import code_key
 from app.snapshots import SNAP_REGISTRATION, snapshot_defect
 
 OTO = 'ОТО'
@@ -77,7 +78,8 @@ def station_segment(name):
     parts = str(name).split('-')
     if len(parts) < 2:
         return ''
-    return parts[1].split()[0].strip().upper()
+    toks = parts[1].split()
+    return toks[0].strip().upper() if toks else ''          # 'GW--10' / 'GW- -10' — участка нет
 
 
 def vin_required_segments(conn):
@@ -124,19 +126,94 @@ def base_segment(seg):
     return re.sub(r'\d+$', '', seg or '').strip()
 
 
+_SIDES = ('L', 'R')
+
+
+def station_side(name):
+    """Сторона станции: 'GW-BS L-10' → 'L', 'GW-BS-R-10' → 'R', 'GW-MB-150' → ''.
+    Имя сначала приводится рабочим ключом (normalize.code_key): регистр, двойные пробелы,
+    кириллические двойники и разные тире не влияют."""
+    k = code_key(name)
+    if not k:
+        return ''
+    parts = k.split('-')
+    if len(parts) < 2:
+        return ''
+    toks = parts[1].split()
+    if len(toks) > 1 and toks[1] in _SIDES:
+        return toks[1]
+    if len(toks) == 1 and len(parts) > 3 and parts[2] in _SIDES:
+        return parts[2]
+    return ''
+
+
 def defect_area(station_name):
-    """Участок дефекта (базовый код) по имени станции."""
-    return base_segment(station_segment(station_name))
+    """Участок дефекта по имени станции: базовый код и сторона, если она есть.
+    'GW-BS L-10'→'BS-L', 'CH-WH2 R-20'→'WH-R', 'GW-EC2-10'→'EC', 'GW-MB-150'→'MB'.
+    Левая и правая стороны — разные участки (решение 2026-11-09)."""
+    base = base_segment(station_segment(code_key(station_name) or ''))
+    side = station_side(station_name)
+    return f'{base}-{side}' if base and side else base
+
+
+def area_covered(zone, area):
+    """Зона сотрудника покрывает участок дефекта: 'BS' — обе стороны (BS-L и BS-R),
+    'BS-L' — только левую. 'INR' не покрывает 'INR+WH-L': это другой участок."""
+    return bool(zone and area) and (area == zone or area.startswith(zone + '-'))
+
+
+def in_zones(zone_pairs, brand_txt, area):
+    """Попадает ли дефект (бренд + участок) в зоны сотрудника. zone_pairs = {(имя бренда, зона)}.
+    Одна проверка для «Моих входящих» и для уведомлений. Дефект без участка виден всем;
+    бренд не известен — сравниваем только участок."""
+    if not area:
+        return True
+    unknown_brand = not brand_txt or brand_txt == '—'
+    return any((unknown_brand or b == brand_txt) and area_covered(z, area) for b, z in zone_pairs)
 
 
 def segments_by_brand(conn):
-    """{brand_id: [базовые коды участков]} — строится из станций (data-driven)."""
+    """{brand_id: [участки дефектов]} — из станций: 'BS-L', 'BS-R', 'EC', …"""
     out = {}
     for bid, name in conn.execute('SELECT brand_id, station_name FROM station'):
-        seg = base_segment(station_segment(name))
+        seg = defect_area(name)
         if seg:
             out.setdefault(bid, set()).add(seg)
     return {bid: sorted(v) for bid, v in out.items()}
+
+
+def zone_choices(conn):
+    """{brand_id: [варианты зоны]}: участки и, у кого есть стороны, участок целиком —
+    'BS', 'BS-L', 'BS-R', 'EC', …"""
+    return {bid: sorted(set(segs) | {s.split('-')[0] for s in segs})
+            for bid, segs in segments_by_brand(conn).items()}
+
+
+def clean_zone_map(conn, areas_map):
+    """Проверить и упростить выбор зон {brand_id: [зоны]} → (map, неизвестные).
+    Если выбран участок целиком, его стороны лишние. Неизвестный бренд или участок — в список ошибок."""
+    choices = zone_choices(conn)
+    out, unknown = {}, []
+    for bid, segs in (areas_map or {}).items():
+        try:
+            bid = int(bid)
+        except (TypeError, ValueError):
+            unknown.append(str(bid))
+            continue
+        allowed = set(choices.get(bid, []))
+        codes = set()
+        for s in segs or []:
+            c = base_segment(str(s).strip().upper())
+            if not c:
+                continue
+            if c in allowed:
+                codes.add(c)
+            else:
+                unknown.append(c)
+        codes = {c for c in codes if not any(p != c and area_covered(p, c) for p in codes)}
+        if codes:
+            out[bid] = sorted(codes)
+    return out, unknown
 
 
 def worker_areas(conn, worker_id):
@@ -146,9 +223,9 @@ def worker_areas(conn, worker_id):
 
 
 def brands_with_areas(conn):
-    """Для формы выбора зон: {'brands': [{id, name}], 'areas': {brand_id: [участки]}}."""
+    """Для формы выбора зон: {'brands': [{id, name}], 'areas': {brand_id: [варианты зоны]}}."""
     brands = [{'id': r[0], 'name': r[1]} for r in conn.execute('SELECT UniqueID, brand FROM brand ORDER BY UniqueID')]
-    return {'brands': brands, 'areas': segments_by_brand(conn)}
+    return {'brands': brands, 'areas': zone_choices(conn)}
 
 
 def worker_areas_map(conn, worker_id):
@@ -160,14 +237,14 @@ def worker_areas_map(conn, worker_id):
 
 
 def set_worker_areas(conn, worker_id, areas_map):
-    """Переписать зоны сотрудника: areas_map = {brand_id: [участки]}. Удаляет старые, вставляет новые."""
+    """Переписать зоны сотрудника: areas_map = {brand_id: [зоны]}. Удаляет старые, вставляет новые.
+    Неизвестные участки не сохраняет; проверить выбор заранее — clean_zone_map."""
+    clean, _unknown = clean_zone_map(conn, areas_map)
     conn.execute('DELETE FROM worker_area WHERE worker_id=?', (worker_id,))
-    for bid, segs in (areas_map or {}).items():
+    for bid, segs in clean.items():
         for seg in segs:
-            seg = base_segment(str(seg).strip().upper())
-            if seg:
-                conn.execute('INSERT OR IGNORE INTO worker_area (worker_id, brand_id, segment) VALUES (?,?,?)',
-                             (worker_id, int(bid), seg))
+            conn.execute('INSERT OR IGNORE INTO worker_area (worker_id, brand_id, segment) VALUES (?,?,?)',
+                         (worker_id, bid, seg))
 
 
 # ── этапы (defect_stage) ─────────────────────────────────────────────────────
