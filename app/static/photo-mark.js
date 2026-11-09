@@ -1,12 +1,12 @@
-/* Фото дефекта с телефона: выбор «камера / галерея» на Android и простой редактор пометок.
+/* Фото дефекта с телефона: выбор «камера / галерея» (все сенсорные, кроме iPhone) и простой редактор пометок.
 
    Работает с любым <input type="file" accept="image/*"> на странице. Код страницы видит обычный
    выбранный файл: с пометками, если их нарисовали, иначе исходный. Подключать ДО основного скрипта
    страницы: обработчик кнопки «назад» здесь должен сработать раньше, чем у окна карточки.
 
    - Встроенный редактор телефона браузер открыть не может, поэтому редактор свой.
-   - На Android окно выбора файла может не предлагать камеру, поэтому выбор источника свой.
-     На iPhone такой выбор уже встроен в браузер, второй не нужен.
+   - На Android окно выбора файла может не предлагать камеру (Android 14+ открывает галерею),
+     поэтому выбор источника свой. На iPhone такой выбор уже встроен в браузер, второй не нужен.
    - Сайт работает по HTTP, поэтому камера открывается через capture: это не требует HTTPS. */
 (function () {
   'use strict';
@@ -17,7 +17,12 @@
   const INK_CSS_PX = 4;        // толщина линии на экране
 
   const coarse = window.matchMedia('(pointer: coarse)');
-  const isAndroid = /Android/i.test(navigator.userAgent);
+  // iPhone и iPad: выбор «снять / медиатека» встроен в браузер, второй не нужен. iPad в режиме
+  // «как на компьютере» называет себя Mac, но выдаёт себя касаниями. Остальные сенсорные — свой
+  // выбор: по названию браузера Android не узнать (версия для ПК в Chrome называет себя Linux).
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+  // без окон dialog кнопка работает по-старому: иначе нажатие ничего бы не открыло
+  const hasDialog = typeof HTMLDialogElement === 'function' && typeof HTMLDialogElement.prototype.showModal === 'function';
   // без этого нельзя подменить файл в поле: редактор не открываем, иначе пометки пропадут молча
   const canReplaceFiles = (() => { try { new DataTransfer(); return true; } catch { return false; } })();
   const isPhotoInput = el => el instanceof HTMLInputElement && el.type === 'file' && el.accept.startsWith('image');
@@ -64,7 +69,7 @@
     return el;
   }
 
-  // ── Android: одна кнопка, дальше выбор источника ──
+  // ── Телефон (кроме iPhone): одна кнопка, дальше выбор источника ──
   let chooser = null, chooserInput = null, passClick = false;
 
   function onChooserClick(e) {
@@ -94,7 +99,7 @@
     show(chooser, () => {});
   }
   document.addEventListener('click', e => {
-    if (!isAndroid || passClick || !isPhotoInput(e.target)) return;
+    if (passClick || !hasDialog || !coarse.matches || isIOS || !isPhotoInput(e.target)) return;
     e.preventDefault();
     openChooser(e.target);
   }, true);
@@ -242,7 +247,7 @@
   }
   document.addEventListener('change', e => {
     const input = e.target;
-    if (passChange || !canReplaceFiles || !coarse.matches || !isPhotoInput(input) || !input.files.length) return;
+    if (passChange || !canReplaceFiles || !hasDialog || !coarse.matches || !isPhotoInput(input) || !input.files.length) return;
     e.stopImmediatePropagation();                // страница получит событие после редактора
     markAll(input, [...input.files]);
   }, true);

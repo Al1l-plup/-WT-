@@ -251,10 +251,20 @@ def test_every_defect_photo_field_goes_through_photo_editor():
     assert "el.accept.startsWith('image')" in PHOTO_MARK
 
 
-def test_android_gets_own_camera_or_gallery_choice():
-    """Окно выбора файла на Android может не предлагать камеру. На iPhone выбор уже встроен."""
-    assert '/Android/i.test(navigator.userAgent)' in PHOTO_MARK
+def test_phones_get_own_camera_or_gallery_choice():
+    """Окно выбора файла на Android может не предлагать камеру. На iPhone выбор уже встроен.
+    Android по названию браузера не узнать: версия для ПК в Chrome называет себя Linux —
+    у коллег открывалась сразу галерея."""
+    assert '/Android' not in PHOTO_MARK, 'выбор не должен зависеть от названия браузера'
+    click = PHOTO_MARK[PHOTO_MARK.index("document.addEventListener('click'"):]
+    assert 'coarse.matches' in click[:300] and 'isIOS' in click[:300] and 'hasDialog' in click[:300]
     assert "setAttribute('capture', 'environment')" in PHOTO_MARK and "removeAttribute('capture')" in PHOTO_MARK
+
+
+def test_photo_button_works_the_old_way_without_dialog_support():
+    """Без окон dialog перехват не включается: иначе нажатие ничего бы не открыло, а фото не дошло бы до страницы."""
+    for listener in ("document.addEventListener('click'", "document.addEventListener('change'"):
+        assert '!hasDialog' in PHOTO_MARK[PHOTO_MARK.index(listener):][:300], listener
 
 
 def test_photo_editor_only_on_touch_and_never_loses_marks_silently():
