@@ -261,6 +261,19 @@ def test_phones_get_own_camera_or_gallery_choice():
     assert "setAttribute('capture', 'environment')" in PHOTO_MARK and "removeAttribute('capture')" in PHOTO_MARK
 
 
+def test_camera_low_memory_is_explained():
+    """Пока открыта камера, Android выгружает Chrome, и снимок теряется («недостаточно памяти»).
+    Запуск камеры помечается до открытия; страница открылась заново с пометкой — объяснение
+    и подсказка в окне выбора; снимок дошёл или страница жива — пометка снимается."""
+    choose = PHOTO_MARK[PHOTO_MARK.index('function onChooserClick'):PHOTO_MARK.index('function openChooser')]
+    assert choose.index('cameraStarted()') < choose.index('input.click()'), 'пометка — до открытия камеры'
+    assert 'const pendingAt = +store.get(CAM_PENDING)' in PHOTO_MARK and 'showCameraNote()' in PHOTO_MARK
+    change = PHOTO_MARK[PHOTO_MARK.index("document.addEventListener('change'"):]
+    assert change.index('cameraDone()') < change.index('if (passChange'), 'снимок дошёл — пометка снимается всегда'
+    assert "addEventListener('visibilitychange'" in PHOTO_MARK and 'cameraFailedHere()' in PHOTO_MARK
+    assert 'try { return localStorage.getItem(k); } catch' in PHOTO_MARK, 'без хранилища страница не падает'
+
+
 def test_photo_button_works_the_old_way_without_dialog_support():
     """Без окон dialog перехват не включается: иначе нажатие ничего бы не открыло, а фото не дошло бы до страницы."""
     for listener in ("document.addEventListener('click'", "document.addEventListener('change'"):

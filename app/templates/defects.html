@@ -129,7 +129,13 @@
       border:none;border-radius:12px 12px 0 0;background:var(--card);color:var(--text)}
     .pm-choose[open]{display:flex;flex-direction:column;gap:8px}
     .pm-choose .btn{width:100%;min-height:48px;justify-content:center;font-size:15px}
-    .pm-choose::backdrop{background:rgba(0,0,0,.5)}
+    .pm-choose::backdrop,.pm-note::backdrop{background:rgba(0,0,0,.5)}
+    .pm-hint{margin:0 2px;font-size:13px;line-height:1.4;color:var(--warn)}
+    .pm-note{width:min(92vw,420px);margin:auto;padding:1rem 1rem calc(1rem + env(safe-area-inset-bottom));border:none;border-radius:12px;
+      background:var(--card);color:var(--text)}
+    .pm-note h3{margin:0 0 .5rem;font-size:16px}
+    .pm-note p{margin:0 0 .75rem;font-size:14px;line-height:1.45}
+    .pm-note .btn{width:100%;min-height:44px;justify-content:center}
     .pm-edit{width:100%;height:100vh;height:100dvh;max-width:none;max-height:none;margin:0;padding:0;border:none;background:#000;color:#fff}
     .pm-edit[open]{display:flex;flex-direction:column}
     .pm-head{flex:none;display:flex;align-items:center;gap:.25rem;min-height:48px;padding:env(safe-area-inset-top) .5rem 0 .25rem}
@@ -414,7 +420,7 @@
 <button type="button" id="regFab" class="fab" aria-label="Зафиксировать дефект" title="Зафиксировать дефект" hidden>＋</button>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-<script src="/static/photo-mark.js?v=2"></script>
+<script src="/static/photo-mark.js?v=3"></script>
 <script>
 const $ = id => document.getElementById(id);
 let ME = {}, BOARD = {open:[], unresolved:[], closed:[]}, TAB = 'mine', openId = null;

@@ -69,6 +69,67 @@
     return el;
   }
 
+  // ── Камера и нехватка оперативной памяти ──
+  // Пока открыта камера, Android может выгрузить Chrome из памяти. Вернувшись, Chrome открывает
+  // страницу заново и пишет «Не удалось завершить операцию (недостаточно памяти)» — снимок теряется,
+  // и сайт это никак не предотвратит (камера внутри страницы требует HTTPS). Поэтому помечаем запуск
+  // камеры: страница открылась заново с пометкой — объясняем, что делать, и запоминаем телефон,
+  // чтобы в следующий раз подсказать в окне выбора. Карточку дефекта страница откроет сама (#d…).
+  const CAM_PENDING = 'pm-camera-pending', CAM_FAILED = 'pm-camera-failed';
+  const CAM_FRESH_MS = 10 * 60 * 1000, CAM_REMEMBER_MS = 30 * 24 * 3600 * 1000;
+  const store = {                                // без хранилища (приватный режим) — просто без подсказок
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch { /* нет хранилища */ } },
+    del(k) { try { localStorage.removeItem(k); } catch { /* нет хранилища */ } },
+  };
+  const cameraFailedHere = () => Date.now() - (+store.get(CAM_FAILED) || 0) < CAM_REMEMBER_MS;
+  let cameraWaiting = false;
+
+  function cameraStarted() {
+    store.set(CAM_PENDING, String(Date.now()));
+    cameraWaiting = true;
+  }
+  function cameraDone() {
+    store.del(CAM_PENDING);
+    cameraWaiting = false;
+  }
+  function showCameraNote() {
+    const el = document.createElement('dialog');
+    el.className = 'pm-note';
+    el.setAttribute('aria-labelledby', 'pmNoteTitle');
+    el.innerHTML = `<h3 id="pmNoteTitle">Фото не прикрепилось</h3>
+      <p>Пока была открыта камера, телефону не хватило оперативной памяти, и браузер перезапустился.
+         Свободное место на телефоне тут ни при чём.</p>
+      <p><b>Как добавить фото:</b> сфотографируйте обычной камерой телефона, затем нажмите
+         «Добавить фото» → «Выбрать из галереи». Помогает и закрыть другие приложения.</p>
+      <button type="button" class="btn btn-primary">Понятно</button>`;
+    el.querySelector('button').addEventListener('click', () => { el.close(); el.remove(); });
+    el.addEventListener('close', () => el.remove());             // Esc или «назад» в новых Chrome
+    document.body.appendChild(el);
+    el.showModal();
+  }
+  // страница открылась заново, пока ждали снимок с камеры
+  const pendingAt = +store.get(CAM_PENDING);
+  if (pendingAt) {
+    store.del(CAM_PENDING);
+    if (Date.now() - pendingAt < CAM_FRESH_MS) {
+      store.set(CAM_FAILED, String(Date.now()));
+      if (hasDialog) showCameraNote();
+    }
+  }
+  // вернулись с камеры, а страница жива — Chrome не выгружался; снимок придёт событием change
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible' || !cameraWaiting) return;
+    store.del(CAM_PENDING);
+    setTimeout(() => {
+      if (!cameraWaiting) return;                // снимок пришёл
+      cameraWaiting = false;                     // не пришёл: отменили съёмку или Chrome всё же сбился
+      if (typeof window.toast === 'function') {
+        window.toast('Фото не пришло? Если телефон пишет «недостаточно памяти» — снимите камерой телефона и выберите из галереи');
+      }
+    }, 4000);
+  });
+
   // ── Телефон (кроме iPhone): одна кнопка, дальше выбор источника ──
   let chooser = null, chooserInput = null, passClick = false;
 
@@ -81,7 +142,7 @@
     const input = chooserInput, src = btn && btn.dataset.src;
     hide();
     if (!src) return;
-    if (src === 'camera') input.setAttribute('capture', 'environment');
+    if (src === 'camera') { input.setAttribute('capture', 'environment'); cameraStarted(); }
     else input.removeAttribute('capture');
     passClick = true;
     input.click();
@@ -91,10 +152,13 @@
     if (!chooser) {
       chooser = makeDialog('pm-choose', 'Добавить фото', `
         <button type="button" class="btn btn-primary" data-src="camera">📷 Сделать фото</button>
+        <p class="pm-hint" hidden>На этом телефоне камера из браузера уже срывалась из-за нехватки памяти.
+           Надёжнее: снимите камерой телефона и выберите фото из галереи.</p>
         <button type="button" class="btn btn-ghost" data-src="gallery">🖼 Выбрать из галереи</button>
         <button type="button" class="btn btn-ghost">Отмена</button>`);
       chooser.addEventListener('click', onChooserClick);
     }
+    chooser.querySelector('.pm-hint').hidden = !cameraFailedHere();
     chooserInput = input;
     show(chooser, () => {});
   }
@@ -247,6 +311,7 @@
   }
   document.addEventListener('change', e => {
     const input = e.target;
+    if (isPhotoInput(input) && input.files.length) cameraDone();   // снимок дошёл до страницы
     if (passChange || !canReplaceFiles || !hasDialog || !coarse.matches || !isPhotoInput(input) || !input.files.length) return;
     e.stopImmediatePropagation();                // страница получит событие после редактора
     markAll(input, [...input.files]);
