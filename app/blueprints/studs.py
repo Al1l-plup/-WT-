@@ -2,7 +2,9 @@
 схеме + фото), ИТО/УЗК разбирают записи по фото (категория, источник).
 
 QR читается в телефоне (static/vendor/jsQR.js) — фото QR на сервер не приходит, только VIN.
-Картинки схем (чертежи OEM) в git не хранятся: data/uploads/studs/views/<view_key>.<ext>.
+Картинки в git не хранятся (чертежи OEM, снимки с водяными знаками), их загружает WeldTeam:
+  схемы видов      — data/uploads/studs/views/<view_key>.<ext>      (A13T-top.jpg)
+  вид шпилек       — data/uploads/studs/parts/<деталь>_<цвет>.<ext> (09170071_blue.png), для легенды.
 """
 import os
 import uuid
@@ -45,13 +47,35 @@ def _image_kind(head: bytes) -> str | None:
     return None
 
 
-def _view_image_path(view_key):
-    d = _dir('views')
+def _image_path(kind, key):
+    """Файл картинки kind ('views' | 'parts') с ключом key или None."""
+    d = _dir(kind)
     for ext in _IMG_EXT:
-        p = os.path.join(d, view_key + ext)
+        p = os.path.join(d, key + ext)
         if os.path.isfile(p):
             return p
     return None
+
+
+def _image_info(kind, key):
+    """has_image + img_v (время файла): img_v идёт в адрес картинки, чтобы после повторной
+    загрузки браузер взял новую, а не свою копию из кэша (картинки кэшируются на час)."""
+    p = _image_path(kind, key)
+    return {'has_image': p is not None, 'img_v': int(os.path.getmtime(p)) if p else 0}
+
+
+def _part_keys(db):
+    """{ключ картинки шпильки: (деталь, цвет)} — по активным шпилькам каталога."""
+    out = {}
+    for r in db.execute('SELECT DISTINCT part, colour FROM stud WHERE active=1'):
+        key = st.part_image_key(r['part'], r['colour'])
+        if key:
+            out[key] = (r['part'], r['colour'])
+    return out
+
+
+# Номер шпильки для людей: номер цеха, без него — внутренний ключ stud_no (миграция 0029).
+_LABEL_SQL = "COALESCE({t}.shop_no, CAST({t}.stud_no AS TEXT))"
 
 
 def _ts_minus(minutes):
@@ -77,14 +101,18 @@ def catalog():
     views = {}
     for r in db.execute('SELECT view_key, scheme_code, title, width, height FROM stud_view ORDER BY sort_order'):
         v = dict(r)
-        v['has_image'] = _view_image_path(v['view_key']) is not None
+        v.update(_image_info('views', v['view_key']))
         views.setdefault(v['scheme_code'], []).append(v)
     for s in schemes:
         s['views'] = views.get(s['code'], [])
+    # label — номер, который видят люди: номер цеха (shop_no), а без него — внутренний stud_no
     studs = [dict(r) for r in db.execute(
-        'SELECT stud_no, scheme_code, view_key, x, y, part, colour, station FROM stud WHERE active=1 ORDER BY stud_no')]
+        f'SELECT stud_no, {_LABEL_SQL.format(t="stud")} AS label, scheme_code, view_key, x, y, part, colour, station '
+        'FROM stud WHERE active=1 ORDER BY stud_no')]
+    parts = [{'key': k, 'part': p, 'colour': c, **_image_info('parts', k)}
+             for k, (p, c) in sorted(_part_keys(db).items())]
     return jsonify({
-        'schemes': schemes, 'studs': studs,
+        'schemes': schemes, 'studs': studs, 'parts': parts,
         'categories': st.CATEGORIES, 'sources': st.SOURCES,
         'can_review': st.can_review(dept, is_admin),
         'can_manage': st.can_manage_schemes(dept, is_admin),
@@ -104,15 +132,24 @@ def vin_lookup():
 
 @bp.route('/api/studs/views/<view_key>/image')
 def view_image(view_key):
-    p = _view_image_path(os.path.basename(view_key))
+    p = _image_path('views', os.path.basename(view_key))
     if not p:
         return _err('Картинка схемы не загружена', 404)
     return send_file(p, max_age=3600)
 
 
+@bp.route('/api/studs/parts/<key>/image')
+def part_image(key):
+    p = _image_path('parts', os.path.basename(key))
+    if not p:
+        return _err('Картинка шпильки не загружена', 404)
+    return send_file(p, max_age=3600)
+
+
 @bp.route('/api/studs/views/images', methods=['POST'])
 def view_images_upload():
-    """Загрузить картинки видов: имя файла = ключ вида (A13T-top.jpg). WeldTeam/админ."""
+    """Загрузить картинки (WeldTeam/админ), можно все сразу. По имени файла:
+    ключ вида (A13T-top.jpg) — схема; деталь_цвет (09170071_blue.png) — вид шпильки в легенде."""
     _uid, dept, is_admin = _ctx()
     if not st.can_manage_schemes(dept, is_admin):
         return _err('Картинки схем загружает WeldTeam', 403)
@@ -120,13 +157,15 @@ def view_images_upload():
     if not files:
         return _err('Файлы не переданы')
     db = get_db()
-    known = {r[0] for r in db.execute('SELECT view_key FROM stud_view')}
+    views = {r[0] for r in db.execute('SELECT view_key FROM stud_view')}
+    parts = _part_keys(db)
     saved, skipped = [], []
     for f in files:
         name = os.path.basename(f.filename or '')
         key = os.path.splitext(name)[0]
-        if key not in known:
-            skipped.append({'name': name, 'reason': 'нет такого вида'})
+        kind = 'views' if key in views else 'parts' if key in parts else None
+        if not kind:
+            skipped.append({'name': name, 'reason': 'нет такого вида или детали_цвета'})
             continue
         head = f.stream.read(16)
         f.stream.seek(0)
@@ -134,7 +173,7 @@ def view_images_upload():
         if not ext:
             skipped.append({'name': name, 'reason': 'не картинка (нужен JPG/PNG/WEBP)'})
             continue
-        d = _dir('views')
+        d = _dir(kind)
         for old in _IMG_EXT:
             p = os.path.join(d, key + old)
             if os.path.isfile(p):
@@ -148,7 +187,8 @@ def view_images_upload():
 # ── записи ──────────────────────────────────────────────────────────────────
 
 _RECORD_SQL = """
-    SELECT d.id, d.created_at, d.created_by, d.vin, d.vin_key, d.scheme_code, d.stud_no, d.station,
+    SELECT d.id, d.created_at, d.created_by, d.vin, d.vin_key, d.scheme_code, d.stud_no,
+           COALESCE(s.shop_no, CAST(d.stud_no AS TEXT)) AS stud_label, d.station,
            d.photo IS NOT NULL AND d.photo <> '' AS has_photo,
            d.category, d.source, d.comment, d.reviewed_at,
            sc.title AS scheme_title, v.title AS view_title, s.part,
@@ -179,7 +219,8 @@ def _row_out(r):
 @bp.route('/api/studs/records')
 def records():
     """Журнал. Фильтры: status=new (без категории) | all, scheme, vin (рабочий ключ),
-    q — номер шпильки или часть VIN, date_from/date_to (YYYY-MM-DD). Новые сверху."""
+    q — номер шпильки (номер цеха; «7035» находит и «7035?») или часть VIN,
+    date_from/date_to (YYYY-MM-DD). Новые сверху."""
     where, args = [], []
     if request.args.get('status') == 'new':
         where.append("COALESCE(d.category,'') = ''")
@@ -191,9 +232,10 @@ def records():
         args.append(st.vin_key(request.args['vin']))
     q = (request.args.get('q') or '').strip()
     if q:
-        if q.isdigit() and len(q) <= 5:
-            where.append('(d.stud_no = ? OR d.vin_key LIKE ?)')
-            args += [int(q), f'%{q}%']
+        num = q.rstrip('?')
+        if num.isdigit() and len(num) <= 5:
+            where.append('(s.shop_no IN (?, ?) OR (s.shop_no IS NULL AND d.stud_no = ?) OR d.vin_key LIKE ?)')
+            args += [num, num + '?', int(num), f'%{num}%']
         else:
             where.append('d.vin_key LIKE ?')
             args.append(f'%{st.vin_key(q)}%')
@@ -230,8 +272,8 @@ def record_create():
     except ValueError:
         return _err('Номер шпильки — число')
     db = get_db()
-    stud = db.execute('SELECT stud_no, scheme_code, station FROM stud WHERE stud_no=? AND active=1',
-                      (stud_no,)).fetchone()
+    stud = db.execute(f'SELECT stud_no, {_LABEL_SQL.format(t="stud")} AS label, scheme_code, station '
+                      'FROM stud WHERE stud_no=? AND active=1', (stud_no,)).fetchone()
     if not stud:
         return _err('Нет такой шпильки')
     if stud['scheme_code'] != scheme:
@@ -239,7 +281,7 @@ def record_create():
     dup = db.execute('SELECT id FROM stud_defect WHERE vin_key=? AND stud_no=? AND created_at>=? '
                      'ORDER BY id DESC LIMIT 1', (key, stud_no, _ts_minus(st.DUPLICATE_WINDOW_MINUTES))).fetchone()
     if dup:
-        return jsonify({'status': 'success', 'message': f'Шпилька {stud_no} на этой машине уже записана',
+        return jsonify({'status': 'success', 'message': f'Шпилька {stud["label"]} на этой машине уже записана',
                         'duplicate': True, 'record': _record(db, dup['id'])})
     f = request.files.get('photo')
     if not f or not f.filename:
@@ -259,7 +301,7 @@ def record_create():
         db.execute('INSERT OR IGNORE INTO stud_vin_prefix (prefix, scheme_code, created_at, created_by) VALUES (?,?,?,?)',
                    (st.vin_prefix(key), scheme, now, uid))
         db.commit()
-        return jsonify({'status': 'success', 'message': f'Записано: шпилька {stud_no}',
+        return jsonify({'status': 'success', 'message': f'Записано: шпилька {stud["label"]}',
                         'record': _record(db, cur.lastrowid)})
     except Exception as e:  # noqa: BLE001
         db.rollback()

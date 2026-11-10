@@ -40,12 +40,20 @@
     .sp-map img{display:block;width:100%;height:auto;user-select:none;-webkit-user-drag:none}
     .sp-map .noimg{display:flex;align-items:center;justify-content:center;text-align:center;padding:1rem;color:#57606a;background:repeating-linear-gradient(45deg,#f1f3f5,#f1f3f5 10px,#e9ecef 10px,#e9ecef 20px)}
     .mk{position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;padding:0;border:0;background:none;cursor:pointer;display:flex;align-items:center;justify-content:center}
-    .mk i{display:block;width:16px;height:16px;border-radius:50%;border:3px solid var(--c,#ffd400);box-shadow:0 0 0 1.5px #000,inset 0 0 0 1.5px #000;background:rgba(255,255,255,.15)}
+    .mk i,.lg-dot i{display:block;width:16px;height:16px;border-radius:50%;border:3px solid var(--c,#ffd400);box-shadow:0 0 0 1.5px #000,inset 0 0 0 1.5px #000;background:rgba(255,255,255,.15)}
     .mk span{position:absolute;left:24px;top:-4px;background:#111;color:#ffe600;font:700 11px/1.4 system-ui,sans-serif;padding:0 4px;border-radius:4px;white-space:nowrap;pointer-events:none;display:none}
     .sp-map.labels .mk span,.mk.sel span{display:block}
     .mk.sel i{width:22px;height:22px;border-color:#ff2d55;box-shadow:0 0 0 2px #fff,0 0 0 4px #ff2d55}
     .mk.done i{border-color:#2da44e;background:#2da44e;box-shadow:0 0 0 1.5px #fff}
     .mk.done::after{content:'✓';position:absolute;color:#fff;font:700 11px system-ui}
+    .sp-legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+    .sp-legend .lg{display:flex;align-items:center;gap:10px;padding:6px 12px 6px 8px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--card2);min-width:0}
+    .lg-dot{flex:0 0 auto;display:flex;align-items:center;justify-content:center;width:22px;height:22px}
+    .lg-pic{flex:0 0 auto;width:52px;height:64px;object-fit:contain;background:#fff;border-radius:6px;padding:2px}
+    .sp-legend b{font:600 13px/1.3 ui-monospace,Consolas,monospace;overflow-wrap:anywhere}
+    .sp-legend small{display:block;color:var(--muted);font-size:12px}
+    .sp-selhead{display:flex;gap:12px;align-items:center}
+    .sp-selhead .lg-pic{width:44px;height:54px}
     .sp-sheet{position:sticky;bottom:0;z-index:50;background:var(--card);border:1px solid var(--accent);border-radius:var(--r) var(--r) 0 0;padding:12px 14px calc(12px + env(safe-area-inset-bottom));box-shadow:0 -6px 20px rgba(0,0,0,.35);margin:0 -2px}
     .sp-sheet h3{font-size:17px;margin-bottom:2px}
     .sp-sheet .meta{color:var(--muted);font-size:13px;margin-bottom:10px}
@@ -144,6 +152,7 @@
         <label class="text-sm" style="display:flex;align-items:center;gap:6px;margin-left:6px"><input type="checkbox" id="labelsChk"> номера</label>
       </div>
       <div class="sp-mapwrap" id="mapWrap"><div class="sp-map" id="map"></div></div>
+      <div class="sp-legend" id="legend" aria-label="Какие шпильки на этом виде"></div>
       <p class="note">Нажмите на кружок шпильки, которой нет на машине.</p>
     </div>
 
@@ -153,8 +162,11 @@
     </div>
 
     <div class="sp-sheet" id="sheet" hidden>
-      <h3>Шпилька <span id="selNo"></span></h3>
-      <div class="meta" id="selMeta"></div>
+      <div class="sp-selhead">
+        <img class="lg-pic" id="selPic" alt="" hidden>
+        <div><h3>Шпилька <span id="selNo"></span></h3>
+          <div class="meta" id="selMeta"></div></div>
+      </div>
       <button class="btn btn-primary btn-full sp-big" type="button" id="photoBtn">📷 Сфотографировать шпильку</button>
       <div class="sp-links">
         <button class="linkish" type="button" id="photoGalleryBtn">выбрать из галереи</button> ·
@@ -176,7 +188,7 @@
         <div class="fgroup"><label class="lbl" for="fStatus">Показать</label>
           <select id="fStatus"><option value="new">Без категории</option><option value="all">Все</option></select></div>
         <div class="fgroup"><label class="lbl" for="fScheme">Модель</label><select id="fScheme"><option value="">Все модели</option></select></div>
-        <div class="fgroup"><label class="lbl" for="fQ">VIN или № шпильки</label><input type="search" id="fQ" placeholder="например 4021" autocomplete="off"></div>
+        <div class="fgroup"><label class="lbl" for="fQ">VIN или № шпильки</label><input type="search" id="fQ" placeholder="например 7086" autocomplete="off"></div>
         <div class="fgroup"><label class="lbl" for="fFrom">С даты</label><input type="date" id="fFrom"></div>
         <div class="fgroup"><label class="lbl" for="fTo">По дату</label><input type="date" id="fTo"></div>
       </div>
@@ -189,8 +201,8 @@
     </div>
 
     <div class="card" id="imgCard" hidden>
-      <div class="card-title accent">Картинки схем</div>
-      <p class="note" style="margin-top:0">Чертежи не хранятся в git — загрузите их на этот сервер. Имя файла = ключ вида (например <code>A13T-top.jpg</code>), можно выбрать все файлы сразу.</p>
+      <div class="card-title accent">Картинки схем и шпилек</div>
+      <p class="note" style="margin-top:0">Картинки не хранятся в git — загрузите их на этот сервер, можно все файлы сразу. Имя файла: для схемы — ключ вида (<code>A13T-top.jpg</code>), для вида шпильки в легенде — деталь_цвет (<code>09170071_blue.png</code>).</p>
       <div class="sp-row">
         <input type="file" id="imgFiles" accept="image/jpeg,image/png,image/webp" multiple>
         <button class="btn btn-primary btn-sm" type="button" id="imgUpload">Загрузить</button>
@@ -224,6 +236,6 @@
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script src="/static/vendor/jsQR.js"></script>
-<script src="/static/studs.js?v=7"></script>
+<script src="/static/studs.js?v=9"></script>
 </body>
 </html>

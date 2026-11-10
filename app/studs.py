@@ -60,6 +60,14 @@ def vin_prefix(key: str) -> str:
     return (key or '')[:VIN_PREFIX_LEN]
 
 
+def part_image_key(part, colour) -> str | None:
+    """Ключ картинки «примерный вид шпильки» для легенды: номер детали + цвет кружка
+    (09170071_blue). Цвет входит в ключ: в Excel цеха одна деталь с разными кружками
+    показана разными картинками (у Jolion зелёные 09170071 — короче синих)."""
+    part, colour = (part or '').strip(), (colour or '').strip()
+    return f'{part}_{colour}' if part and colour else None
+
+
 def can_review(dept, is_admin) -> bool:
     return bool(is_admin) or dept in REVIEW_DEPTS
 

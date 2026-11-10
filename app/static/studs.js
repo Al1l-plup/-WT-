@@ -15,6 +15,7 @@
   const readJson = r => r.json().catch(() => ({ status: 'error', message: `Сервер не принял запрос (код ${r.status})` }));
 
   const COLOURS = { yellow: '#ffd400', blue: '#00b0f0', green: '#00d000', red: '#ff2020', white: '#ffffff', pink: '#ff66cc', orange: '#ff8c00' };
+  const COLOUR_NAMES = { yellow: 'жёлтый', blue: 'синий', green: 'зелёный', red: 'красный', white: 'белый', pink: 'розовый', orange: 'оранжевый' };
   const STORE = 'studs-v1';
   const STORE_TTL = 15 * 60 * 1000;          // шаг оператора помнится 15 минут
   const TAB_STORE = 'studs-tab';
@@ -25,6 +26,7 @@
   let C = null;                  // каталог с сервера
   let schemeByCode = {};
   let studByNo = {};
+  let partByKey = {};            // картинки «вид шпильки»: деталь_цвет → {has_image, img_v}
   let S = blank();               // шаг оператора (переживает перезапуск страницы)
   let zoom = 1;
   let zoomChosen = false;        // масштаб по умолчанию выбирается один раз по ширине экрана
@@ -134,11 +136,19 @@
     C = await r.json();
     schemeByCode = {};
     studByNo = {};
+    partByKey = {};
     C.schemes.forEach(s => { schemeByCode[s.code] = s; });
     C.studs.forEach(s => { studByNo[s.stud_no] = s; });
+    (C.parts || []).forEach(p => { partByKey[p.key] = p; });
   }
   const viewsOf = code => (schemeByCode[code] || { views: [] }).views;
   const studsOf = viewKey => C.studs.filter(s => s.view_key === viewKey);
+  // то же правило, что app.studs.part_image_key: деталь_цвет
+  const partKey = s => (s.part && s.colour ? `${s.part}_${s.colour}` : '');
+  function partPicUrl(key) {
+    const p = partByKey[key];
+    return p && p.has_image ? `/api/studs/parts/${encodeURIComponent(key)}/image?v=${p.img_v}` : '';
+  }
 
   // ── запись: машина ─────────────────────────────────────────────────────────
 
@@ -226,15 +236,16 @@
   function renderMap(center) {
     const v = viewsOf(S.scheme).find(x => x.view_key === S.view);
     const map = $('map');
-    if (!v) { map.innerHTML = ''; return; }
+    if (!v) { map.innerHTML = ''; $('legend').innerHTML = ''; return; }
     const pic = v.has_image
-      ? `<img src="/api/studs/views/${encodeURIComponent(v.view_key)}/image" alt="${esc(v.title)}" width="${v.width}" height="${v.height}" draggable="false">`
+      ? `<img src="/api/studs/views/${encodeURIComponent(v.view_key)}/image?v=${v.img_v}" alt="${esc(v.title)}" width="${v.width}" height="${v.height}" draggable="false">`
       : `<div class="noimg" style="aspect-ratio:${v.width}/${v.height}">Картинка этого вида ещё не загружена на сервер (Журнал → «Картинки схем»). Кружки шпилек стоят на своих местах.</div>`;
     const done = doneSet();
     const marks = studsOf(v.view_key).map(s =>
       `<button type="button" class="mk${s.stud_no === S.sel ? ' sel' : ''}${done.has(s.stud_no) ? ' done' : ''}" data-no="${s.stud_no}"
-         style="left:${s.x}%;top:${s.y}%;--c:${COLOURS[s.colour] || '#ffd400'}" aria-label="Шпилька ${s.stud_no}"><i></i><span>${s.stud_no}</span></button>`).join('');
+         style="left:${s.x}%;top:${s.y}%;--c:${COLOURS[s.colour] || '#ffd400'}" aria-label="Шпилька ${esc(s.label)}"><i></i><span>${esc(s.label)}</span></button>`).join('');
     map.innerHTML = pic + marks;
+    renderLegend(v);
     chooseDefaultZoom();
     applyZoom(zoom, false);
     if (center) centerMap();
@@ -249,6 +260,26 @@
     zoom = w < 600 ? 2.5 : 1;
     zoomChosen = true;
     return true;
+  }
+
+  // Легенда под схемой, как в Excel цеха: кружок цвета + примерный вид шпильки + деталь + сколько на виде.
+  function renderLegend(v) {
+    const groups = new Map();
+    studsOf(v.view_key).forEach(s => {
+      const key = partKey(s) || `?_${s.colour || ''}`;
+      const g = groups.get(key) || { key, part: s.part, colour: s.colour, n: 0 };
+      g.n++;
+      groups.set(key, g);
+    });
+    $('legend').innerHTML = [...groups.values()].sort((a, b) => b.n - a.n).map(g => {
+      const pic = partPicUrl(g.key);
+      const colour = COLOUR_NAMES[g.colour] || g.colour || '';
+      return `<div class="lg">
+        <span class="lg-dot" style="--c:${COLOURS[g.colour] || '#ffd400'}" title="${esc(colour)}"><i></i></span>
+        ${pic ? `<img class="lg-pic" src="${pic}" alt="Вид шпильки ${esc(g.part)}" loading="lazy">` : ''}
+        <span><b>${esc(g.part || 'деталь не указана')}</b><small>${esc(colour)} · ${g.n} шт.</small></span>
+      </div>`;
+    }).join('');
   }
 
   // Отметки (выбрана / уже записана) — без перерисовки картинки: прокрутка и масштаб остаются.
@@ -313,8 +344,12 @@
     const s = studByNo[S.sel];
     if (!s) { closeSheet(); return; }
     const v = viewsOf(S.scheme).find(x => x.view_key === s.view_key);
-    $('selNo').textContent = s.stud_no;
-    $('selMeta').textContent = [s.part, v && v.title, s.station ? 'станция ' + s.station : ''].filter(Boolean).join(' · ');
+    $('selNo').textContent = s.label;
+    $('selMeta').textContent = [s.part, v && v.title, s.station ? 'станция ' + s.station : '',
+      String(s.label).endsWith('?') ? 'номер уточняется в цехе' : ''].filter(Boolean).join(' · ');
+    const pic = partPicUrl(partKey(s));
+    $('selPic').hidden = !pic;
+    if (pic) $('selPic').src = pic; else $('selPic').removeAttribute('src');
     $('sheet').hidden = false;
     if (note) say($('sendStatus'), 'warn', note);
   }
@@ -388,7 +423,7 @@
     const card = $('carRecordsCard');
     card.hidden = !S.vinKey || !carRecords.length;
     $('carRecords').innerHTML = carRecords.map(r =>
-      `<li><span><b>${r.stud_no}</b> · ${esc(fmtTime(r.created_at))} · ${esc(r.operator || '')}</span>
+      `<li><span><b>${esc(r.stud_label)}</b> ·${esc(fmtTime(r.created_at))} · ${esc(r.operator || '')}</span>
          ${canDelete(r) ? `<button class="btn btn-ghost btn-sm" type="button" data-del="${r.id}">Удалить</button>` : ''}</li>`).join('');
   }
 
@@ -439,10 +474,10 @@
       <td data-label="Когда">${esc(fmtTime(r.created_at))}</td>
       <td data-label="VIN"><span style="font-family:ui-monospace,Consolas,monospace">${esc(r.vin)}</span></td>
       <td data-label="Модель">${esc(r.scheme_title || r.scheme_code)}</td>
-      <td data-label="Шпилька"><b>${r.stud_no}</b> <span class="text-muted text-sm">${esc(r.view_title || '')}</span></td>
+      <td data-label="Шпилька"><b>${esc(r.stud_label)}</b><span class="text-muted text-sm">${esc(r.view_title || '')}</span></td>
       <td data-label="Станция">${esc(r.station || '—')}</td>
       <td data-label="Оператор">${esc(r.operator || '—')}</td>
-      <td data-label="Фото">${r.has_photo ? `<img class="sp-thumb" loading="lazy" src="/api/studs/records/${r.id}/photo" alt="Фото шпильки ${r.stud_no}">` : '—'}</td>
+      <td data-label="Фото">${r.has_photo ? `<img class="sp-thumb" loading="lazy" src="/api/studs/records/${r.id}/photo" alt="Фото шпильки ${esc(r.stud_label)}">` : '—'}</td>
       <td data-label="Категория">${r.category ? esc(r.category_label) : '<span class="badge bw">не разобрано</span>'}</td>
       <td data-label="Источник">${esc(r.source_label || '—')}</td></tr>`).join('');
   }
@@ -465,7 +500,7 @@
   function openReview(rec) {
     revRec = rec;
     const dlg = $('revDlg');
-    $('revTitle').textContent = `Шпилька ${rec.stud_no} · ${rec.scheme_title || rec.scheme_code}`;
+    $('revTitle').textContent = `Шпилька ${rec.stud_label} ·${rec.scheme_title || rec.scheme_code}`;
     $('revPhoto').src = rec.has_photo ? `/api/studs/records/${rec.id}/photo` : '';
     $('revPhoto').hidden = !rec.has_photo;
     const info = [['Когда', fmtTime(rec.created_at)], ['VIN', rec.vin], ['Вид', rec.view_title], ['Артикул', rec.part],
@@ -516,8 +551,18 @@
   function renderImgList() {
     $('imgCard').hidden = !C.can_manage;
     if (!C.can_manage) return;
-    $('imgList').innerHTML = C.schemes.flatMap(s => s.views.map(v =>
-      `<li><span><code>${esc(v.view_key)}</code> · ${esc(s.title)} — ${esc(v.title)}</span><span>${v.has_image ? '<span class="badge bs">загружена</span>' : '<span class="badge bd">нет</span>'}</span></li>`)).join('');
+    const badge = has => (has ? '<span class="badge bs">загружена</span>' : '<span class="badge bd">нет</span>');
+    const views = C.schemes.flatMap(s => s.views.map(v =>
+      `<li><span><code>${esc(v.view_key)}</code> · ${esc(s.title)} — ${esc(v.title)}</span><span>${badge(v.has_image)}</span></li>`));
+    const models = {};
+    C.studs.forEach(s => {
+      const k = partKey(s);
+      const t = (schemeByCode[s.scheme_code] || {}).title || s.scheme_code;
+      if (k) (models[k] = models[k] || new Set()).add(t);
+    });
+    const parts = (C.parts || []).map(p =>
+      `<li><span><code>${esc(p.key)}</code> · вид шпильки ${esc(p.part)}, кружок ${esc(COLOUR_NAMES[p.colour] || p.colour)} — ${esc([...(models[p.key] || [])].join(', '))}</span><span>${badge(p.has_image)}</span></li>`);
+    $('imgList').innerHTML = views.join('') + (parts.length ? '<li class="sp-imgs-h"><b>Вид шпилек (легенда под схемой)</b></li>' + parts.join('') : '');
   }
 
   async function uploadImages() {
