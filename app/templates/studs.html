@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#161b22">
+  <meta name="description" content="WeldTeam MES — шпильки: запись недостающих шпилек и разбор">
+  <title>Шпильки · WeldTeam MES</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/theme.js"></script>
+  <style>
+    .sp{max-width:1100px}
+    /* display:flex/inline-block у блоков ниже иначе перебивает атрибут hidden */
+    .sp [hidden],#revDlg [hidden]{display:none !important}
+    .sp .note{color:var(--muted);font-size:12px;margin-top:6px}
+    .sp .card{margin-bottom:1rem}
+    .sp-tabs{display:flex;gap:6px;margin-bottom:1rem}
+    .sp-tabs button{flex:0 0 auto;padding:8px 16px;border-radius:20px;border:1px solid var(--border);background:var(--card);color:var(--muted);font:inherit;font-weight:600;cursor:pointer}
+    .sp-tabs button[aria-selected=true]{background:var(--accent);border-color:var(--accent);color:#fff}
+    .sp-big{font-size:17px;padding:14px 18px;min-height:52px}
+    .linkish{background:none;border:0;color:var(--accent);font:inherit;font-size:13px;cursor:pointer;padding:6px 2px;text-decoration:underline;text-underline-offset:3px}
+    .sp-links{margin-top:8px;color:var(--muted);font-size:13px}
+    .sp-vin{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px}
+    .sp-vin b{font-size:20px;letter-spacing:.04em;font-family:ui-monospace,Consolas,monospace;word-break:break-all}
+    .sp-model{font-size:16px;font-weight:700;margin-top:4px}
+    .sp-model small{color:var(--muted);font-weight:400}
+    .sp-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+    .sp-pick{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:8px}
+    .sp-pick button{min-height:48px}
+    #vinForm{display:flex;gap:8px;margin-top:10px}
+    #vinForm input{flex:1;font-family:ui-monospace,Consolas,monospace;text-transform:uppercase;letter-spacing:.04em}
+    .sp-chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:8px;scrollbar-width:thin}
+    .sp-chips button{flex:0 0 auto;padding:6px 12px;border-radius:16px;border:1px solid var(--border);background:var(--card2);color:var(--text);font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}
+    .sp-chips button[aria-pressed=true]{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 22%,var(--card2))}
+    .sp-chips .cnt{color:var(--muted);font-size:11px;margin-left:4px}
+    .sp-tools{display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+    .sp-tools .btn{min-width:40px}
+    .sp-mapwrap{overflow:auto;border:1px solid var(--border);border-radius:var(--r-sm);background:#fff;max-height:72vh;-webkit-overflow-scrolling:touch}
+    .sp-map{position:relative;width:100%;margin:0 auto}
+    .sp-map img{display:block;width:100%;height:auto;user-select:none;-webkit-user-drag:none}
+    .sp-map .noimg{display:flex;align-items:center;justify-content:center;text-align:center;padding:1rem;color:#57606a;background:repeating-linear-gradient(45deg,#f1f3f5,#f1f3f5 10px,#e9ecef 10px,#e9ecef 20px)}
+    .mk{position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;padding:0;border:0;background:none;cursor:pointer;display:flex;align-items:center;justify-content:center}
+    .mk i{display:block;width:16px;height:16px;border-radius:50%;border:3px solid var(--c,#ffd400);box-shadow:0 0 0 1.5px #000,inset 0 0 0 1.5px #000;background:rgba(255,255,255,.15)}
+    .mk span{position:absolute;left:24px;top:-4px;background:#111;color:#ffe600;font:700 11px/1.4 system-ui,sans-serif;padding:0 4px;border-radius:4px;white-space:nowrap;pointer-events:none;display:none}
+    .sp-map.labels .mk span,.mk.sel span{display:block}
+    .mk.sel i{width:22px;height:22px;border-color:#ff2d55;box-shadow:0 0 0 2px #fff,0 0 0 4px #ff2d55}
+    .mk.done i{border-color:#2da44e;background:#2da44e;box-shadow:0 0 0 1.5px #fff}
+    .mk.done::after{content:'✓';position:absolute;color:#fff;font:700 11px system-ui}
+    .sp-sheet{position:sticky;bottom:0;z-index:50;background:var(--card);border:1px solid var(--accent);border-radius:var(--r) var(--r) 0 0;padding:12px 14px calc(12px + env(safe-area-inset-bottom));box-shadow:0 -6px 20px rgba(0,0,0,.35);margin:0 -2px}
+    .sp-sheet h3{font-size:17px;margin-bottom:2px}
+    .sp-sheet .meta{color:var(--muted);font-size:13px;margin-bottom:10px}
+    .sp-status{margin-top:8px;font-size:13px}
+    .sp-car li{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);list-style:none;font-size:13px}
+    .sp-car li:last-child{border-bottom:0}
+    .sp-filters{display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-bottom:10px}
+    .sp-filters .fgroup{margin:0;min-width:140px}
+    .sp-filters input,.sp-filters select{width:100%}
+    .sp-thumb{width:56px;height:42px;object-fit:cover;border-radius:4px;background:var(--card2);display:block}
+    .sp-log tr{cursor:pointer}
+    #revDlg{max-width:min(720px,96vw);width:100%;border:1px solid var(--border);border-radius:var(--r);background:var(--card);color:var(--text);padding:0}
+    #revDlg::backdrop{background:rgba(0,0,0,.6)}
+    #revDlg .dh{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid var(--border)}
+    #revDlg .db{padding:14px}
+    #revDlg .photo{width:100%;max-height:60vh;object-fit:contain;background:#000;border-radius:var(--r-sm);display:block}
+    #revDlg dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:12px 0;font-size:13px}
+    #revDlg dt{color:var(--muted)}
+    #revDlg textarea{width:100%;min-height:60px}
+    #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:300;background:#1a7f37;color:#fff;padding:10px 16px;border-radius:8px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,.4);max-width:92vw;display:none}
+    #toast.err{background:#cf222e}
+    .sp-imgs li{display:flex;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);list-style:none;font-size:13px}
+    @media (max-width:640px){
+      .sp-tabs button{flex:1}
+      .sp-filters .fgroup{flex:1 1 45%}
+      .sp-mapwrap{max-height:62vh}
+    }
+  </style>
+</head>
+<body>
+
+<nav class="nav">
+  <a class="nav-brand" href="/">WeldTeam <span>/ цех BS</span></a>
+  <div class="nav-links">
+    <a class="nav-link" href="/">Главная</a>
+    <a class="nav-link" href="/maintenance">ТО</a>
+    <a class="nav-link" href="/defects">Дефекты</a>
+    <a class="nav-link active" href="/studs">Шпильки</a>
+    <a class="nav-link" href="/analytics">Аналитика</a>
+    <a class="nav-link" href="/workers">Сотрудники</a>
+    <a class="nav-link" href="/explorer">Обзор</a>
+    <a class="nav-link" href="/admin">Редактор</a>
+    <a class="nav-link" href="/history">Журнал</a>
+    <button class="btn-theme" id="themeToggle" type="button" aria-label="Переключить тему">☀</button>
+  </div>
+</nav>
+
+<div class="page sp">
+  <div class="page-head">
+    <h1>Шпильки</h1>
+    <p>Недостающие шпильки: QR с контрольной карты → шпилька на схеме → фото.</p>
+  </div>
+
+  <div id="loadAlert"></div>
+
+  <div class="sp-tabs" role="tablist">
+    <button type="button" role="tab" id="tabRecBtn" aria-controls="tabRec" aria-selected="true">Записать</button>
+    <button type="button" role="tab" id="tabLogBtn" aria-controls="tabLog" aria-selected="false">Журнал <span class="badge bw" id="newCount" hidden></span></button>
+  </div>
+
+  <!-- ── Запись (оператор) ── -->
+  <section id="tabRec" role="tabpanel" aria-labelledby="tabRecBtn">
+    <div class="card" id="carCard">
+      <div id="carEmpty">
+        <button class="btn btn-primary btn-full sp-big" type="button" id="qrBtn">📷 Сфотографировать QR</button>
+        <p class="note">Снимите крупно <b>нижний QR</b> на контрольной карте («QR VIN номера»). Фото QR никуда не отправляется — телефон только читает VIN.</p>
+        <div class="sp-links">
+          <button class="linkish" type="button" id="qrGalleryBtn">выбрать из галереи</button> ·
+          <button class="linkish" type="button" id="vinManualBtn">ввести VIN вручную</button>
+        </div>
+        <form id="vinForm" hidden novalidate>
+          <input type="text" id="vinInput" maxlength="24" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="17 знаков VIN" aria-label="VIN">
+          <button class="btn btn-primary" type="submit">OK</button>
+        </form>
+        <div class="sp-status" id="qrStatus" role="status" aria-live="polite"></div>
+      </div>
+      <div id="carSet" hidden>
+        <div class="sp-vin"><span class="text-muted text-sm">VIN</span><b id="vinText"></b></div>
+        <div class="sp-model" id="schemeText"></div>
+        <div id="schemePick" hidden>
+          <p class="note" id="schemePickNote">Выберите модель машины:</p>
+          <div class="sp-pick" id="schemeBtns"></div>
+        </div>
+        <div class="sp-row">
+          <button class="btn btn-ghost btn-sm" type="button" id="newCarBtn">Новая машина</button>
+          <button class="linkish" type="button" id="changeModelBtn">сменить модель</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="schemeCard" hidden>
+      <div class="sp-chips" id="viewChips" role="group" aria-label="Виды схемы"></div>
+      <div class="sp-tools">
+        <button class="btn btn-ghost btn-sm" type="button" id="zoomOut" aria-label="Уменьшить">−</button>
+        <button class="btn btn-ghost btn-sm" type="button" id="zoomIn" aria-label="Увеличить">+</button>
+        <label class="text-sm" style="display:flex;align-items:center;gap:6px;margin-left:6px"><input type="checkbox" id="labelsChk"> номера</label>
+      </div>
+      <div class="sp-mapwrap" id="mapWrap"><div class="sp-map" id="map"></div></div>
+      <p class="note">Нажмите на кружок шпильки, которой нет на машине.</p>
+    </div>
+
+    <div class="card sp-car" id="carRecordsCard" hidden>
+      <div class="card-title accent">Записано по этой машине</div>
+      <ul id="carRecords"></ul>
+    </div>
+
+    <div class="sp-sheet" id="sheet" hidden>
+      <h3>Шпилька <span id="selNo"></span></h3>
+      <div class="meta" id="selMeta"></div>
+      <button class="btn btn-primary btn-full sp-big" type="button" id="photoBtn">📷 Сфотографировать шпильку</button>
+      <div class="sp-links">
+        <button class="linkish" type="button" id="photoGalleryBtn">выбрать из галереи</button> ·
+        <button class="linkish" type="button" id="selCancelBtn">отмена</button>
+      </div>
+      <div class="sp-status" id="sendStatus" role="status" aria-live="polite"></div>
+    </div>
+
+    <input type="file" id="fileQrCam" accept="image/*" capture="environment" hidden>
+    <input type="file" id="fileQrGal" accept="image/*" hidden>
+    <input type="file" id="filePhotoCam" accept="image/*" capture="environment" hidden>
+    <input type="file" id="filePhotoGal" accept="image/*" hidden>
+  </section>
+
+  <!-- ── Журнал (разбор ИТО/УЗК) ── -->
+  <section id="tabLog" role="tabpanel" aria-labelledby="tabLogBtn" hidden>
+    <div class="card">
+      <div class="sp-filters">
+        <div class="fgroup"><label class="lbl" for="fStatus">Показать</label>
+          <select id="fStatus"><option value="new">Без категории</option><option value="all">Все</option></select></div>
+        <div class="fgroup"><label class="lbl" for="fScheme">Модель</label><select id="fScheme"><option value="">Все модели</option></select></div>
+        <div class="fgroup"><label class="lbl" for="fQ">VIN или № шпильки</label><input type="search" id="fQ" placeholder="например 4021" autocomplete="off"></div>
+        <div class="fgroup"><label class="lbl" for="fFrom">С даты</label><input type="date" id="fFrom"></div>
+        <div class="fgroup"><label class="lbl" for="fTo">По дату</label><input type="date" id="fTo"></div>
+      </div>
+      <div class="tbl-wrap">
+        <table class="tbl tbl-mobile sp-log">
+          <thead><tr><th>Когда</th><th>VIN</th><th>Модель</th><th>Шпилька</th><th>Станция</th><th>Оператор</th><th>Фото</th><th>Категория</th><th>Источник</th></tr></thead>
+          <tbody id="logBody"><tr class="empty-row"><td colspan="9">Загрузка…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" id="imgCard" hidden>
+      <div class="card-title accent">Картинки схем</div>
+      <p class="note" style="margin-top:0">Чертежи не хранятся в git — загрузите их на этот сервер. Имя файла = ключ вида (например <code>A13T-top.jpg</code>), можно выбрать все файлы сразу.</p>
+      <div class="sp-row">
+        <input type="file" id="imgFiles" accept="image/jpeg,image/png,image/webp" multiple>
+        <button class="btn btn-primary btn-sm" type="button" id="imgUpload">Загрузить</button>
+      </div>
+      <div class="sp-status" id="imgStatus" role="status"></div>
+      <ul class="sp-imgs" id="imgList" style="margin-top:8px"></ul>
+    </div>
+  </section>
+</div>
+
+<dialog id="revDlg" aria-labelledby="revTitle">
+  <div class="dh"><b id="revTitle">Запись</b><button class="btn btn-ghost btn-sm" type="button" id="revClose" aria-label="Закрыть">✕</button></div>
+  <div class="db">
+    <img class="photo" id="revPhoto" alt="Фото шпильки">
+    <dl id="revInfo"></dl>
+    <div id="revForm">
+      <div class="g2">
+        <div class="fgroup"><label class="lbl" for="revCat">Категория</label><select id="revCat"></select></div>
+        <div class="fgroup"><label class="lbl" for="revSrc">Источник</label><select id="revSrc"></select></div>
+      </div>
+      <div class="fgroup"><label class="lbl" for="revComment">Комментарий</label><textarea id="revComment" maxlength="500"></textarea></div>
+    </div>
+    <div class="sp-status" id="revStatus" role="status"></div>
+    <div class="sp-row" style="justify-content:space-between">
+      <button class="btn btn-danger btn-sm" type="button" id="revDelete" hidden>Удалить запись</button>
+      <button class="btn btn-primary" type="button" id="revSave">Сохранить</button>
+    </div>
+  </div>
+</dialog>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="/static/vendor/jsQR.js"></script>
+<script src="/static/studs.js?v=7"></script>
+</body>
+</html>

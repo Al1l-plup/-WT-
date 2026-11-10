@@ -392,6 +392,13 @@ strong { font-weight: 600; }
   .nav-links::-webkit-scrollbar { display: none; }
   .nav-link { white-space: nowrap; }
 }
+/* Узкий ноутбук: у админа все вкладки шире экрана — прокручивается шапка, а не вся
+   страница; полоса прокрутки тонкая и видна (мышью иначе не догадаться) */
+@media (min-width: 951px) and (max-width: 1240px) {
+  .nav-brand { flex-shrink: 0; }
+  .nav-links { overflow-x: auto; scrollbar-width: thin; flex-shrink: 1; min-width: 0; align-items: center; }
+  .nav-link { white-space: nowrap; }
+}
 /* Телефон лёжа шире 640px: шапка нажимается пальцем так же, как стоя */
 @media (max-width: 950px) and (pointer: coarse) {
   .nav-brand { display: flex; align-items: center; min-height: 44px; }

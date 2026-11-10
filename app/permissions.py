@@ -20,7 +20,7 @@
 WRITE_METHODS = {'POST', 'PUT', 'DELETE', 'PATCH'}
 
 # Разделы сайта.
-AREAS = ('home', 'maintenance', 'defects', 'analytics', 'workers',
+AREAS = ('home', 'maintenance', 'defects', 'studs', 'analytics', 'workers',
          'explorer', 'editor', 'catalog', 'reconciliation')
 
 # Страницы (path → раздел) — для гейта страниц и построения навигации.
@@ -29,6 +29,7 @@ PAGES = [
     ('/', 'home', 'Главная'),
     ('/maintenance', 'maintenance', 'ТО'),
     ('/defects', 'defects', 'Дефекты'),
+    ('/studs', 'studs', 'Шпильки'),
     ('/analytics', 'analytics', 'Аналитика'),
     ('/workers', 'workers', 'Сотрудники'),
     ('/explorer', 'explorer', 'Обзор'),
@@ -55,6 +56,7 @@ _ENDPOINT_AREA = {
 _BP_AREA = {
     'maintenance': 'maintenance',
     'defects': 'defects',
+    'studs': 'studs',          # «Шпильки»: оператор сборки записывает, ИТО/УЗК разбирают
     'analytics': 'analytics',
     'workers': 'workers',
     'explorer': 'explorer',
@@ -72,12 +74,14 @@ _ALL_W = {a: 'w' for a in AREAS}
 # поэтому все получают запись в раздел «Дефекты». КТО именно может действовать над
 # конкретным дефектом (владение этапом, регистрация=ОТК, переоткрытие=WeldTeam) решает
 # сам эндпоинт по текущему этапу — см. app/blueprints/defects.py.
+# «Шпильки»: записывают все отделы с правом записи (оператор сборки — Производство),
+# разбирают по фото ИТО и УЗК — это проверяет сам эндпоинт (app/studs.py: can_review).
 DEPARTMENT_PERMS = {
     'WeldTeam': _ALL_W,                                                  # всё (+ админ/переоткрытие)
     'ИТО': {**_ALL_R, 'editor': 'w', 'explorer': 'w', 'defects': 'w',
-            'reconciliation': 'w'},                                     # Редактор+Обзор+Дефекты+Сверка
-    'ОТК': {**_ALL_R, 'defects': 'w'},                                   # регистрация + участие
-    'Производство': {**_ALL_R, 'defects': 'w'},                          # участие в цепочке
+            'reconciliation': 'w', 'studs': 'w'},                       # Редактор+Обзор+Дефекты+Сверка+Шпильки
+    'ОТК': {**_ALL_R, 'defects': 'w', 'studs': 'w'},                     # регистрация + участие + разбор шпилек
+    'Производство': {**_ALL_R, 'defects': 'w', 'studs': 'w'},            # участие в цепочке + запись шпилек
     'ОТО': {**_ALL_R, 'defects': 'w'},                                   # исполнитель по оборудованию
 }
 

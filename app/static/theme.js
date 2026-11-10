@@ -99,6 +99,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       }).catch(() => {});
     }
 
+    // 1в) «Шпильки» — вкладку добавляем отсюда (как «Сверку»), чтобы не править шаблон
+    //     каждой страницы; место — сразу после «Дефектов».
+    if (allowed.has('/studs') && !nav.querySelector('a[href="/studs"]')) {
+      const st = document.createElement('a');
+      st.className = 'nav-link';
+      st.href = '/studs';
+      st.textContent = 'Шпильки';
+      if (location.pathname === '/studs') st.classList.add('active');
+      const def = nav.querySelector('a[href="/defects"]');
+      nav.insertBefore(st, def ? def.nextSibling : btn);
+    }
+
     // 2) админу — вкладка «Пользователи»
     if (me.is_admin && !nav.querySelector('a[href="/users"]')) {
       const link = document.createElement('a');
