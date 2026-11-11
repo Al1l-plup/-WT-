@@ -196,6 +196,27 @@ def test_serial_merges_into_open_parent(app):
     assert c.execute('SELECT COUNT(*) FROM defects WHERE spot_id=?', (sp,)).fetchone()[0] == 1   # новой карточки нет
 
 
+def test_occurrence_comment_kept_per_registration(app):
+    """Комментарий контролёра хранится у ВЫЯВЛЕНИЯ: повтор серии (слияние в открытый и
+    переоткрытие закрытого) пишет свой комментарий и не затирает первый."""
+    c = _conn(app); sp = _clean_spot(c)
+    r1 = df.register_occurrence(c, problem_code='BT', spot_id=sp, registered_by=1, comment='  подрез с краю  ')
+    df.register_occurrence(c, problem_code='LP', spot_id=sp, registered_by=2, comment='')          # слияние, без комм.
+    df.act_close(c, r1['defect_id'], dept='Производство', actor_id=1, cause='x', countermeasure='y', vin='Z1')
+    df.act_otk_approve(c, r1['defect_id'], 1, None)
+    r3 = df.register_occurrence(c, problem_code='BT', spot_id=sp, registered_by=3, comment='снова, 2 машины')
+    assert r3['repeat'] == 'reopened' and r3['defect_id'] == r1['defect_id']
+    rows = c.execute('SELECT registered_by, comment FROM defect_occurrence WHERE defect_id=? ORDER BY UniqueID',
+                     (r1['defect_id'],)).fetchall()
+    assert rows == [(1, 'подрез с краю'), (2, None), (3, 'снова, 2 машины')]
+
+
+def test_clean_comment():
+    assert df.clean_comment(None) is None and df.clean_comment('   ') is None
+    assert df.clean_comment(' ок ') == 'ок'
+    assert len(df.clean_comment('я' * 900)) == df.COMMENT_MAX
+
+
 def test_serial_different_group_is_new(app):
     c = _conn(app); sp = _clean_spot(c)
     r1 = df.register_occurrence(c, problem_code='BT', spot_id=sp, registered_by=1)

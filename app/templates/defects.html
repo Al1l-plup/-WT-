@@ -87,6 +87,13 @@
     /* подсказка про ограничение по зонам ответственности на вкладке «Мои входящие» */
     .zone-note{font-size:12px;color:var(--muted);background:color-mix(in srgb,var(--accent) 8%,transparent);border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin:.25rem 0 .5rem;line-height:1.35}
     .zone-note b{color:var(--text)}
+    /* комментарий контролёра при регистрации и выявления в карточке */
+    .reg-comment{margin:.5rem 0 0}
+    .reg-comment textarea{width:100%;min-height:52px;resize:vertical}
+    .occ-list{margin:.25rem 0 .4rem}
+    .occ-list ul{margin:.15rem 0 0 1.1rem;padding:0;font-size:13px}
+    .occ-list li{margin:.1rem 0}
+    .occ-c{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text);opacity:.9}
     /* поиск по всем столбцам — и на компьютере, и на телефоне */
     .dfm{display:flex;gap:6px;margin:.25rem 0 .55rem;align-items:center}
     .dfm input{flex:1;min-width:0;max-width:360px;padding:7px 9px;font-size:14px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:inherit}
@@ -323,6 +330,10 @@
       <label class="btn btn-ghost btn-sm">📷 Фото дефекта <span id="regPhotoStar" style="color:var(--danger)">*</span><input type="file" id="regPhoto" accept="image/*" multiple hidden></label>
       <span class="text-sm text-muted" id="regPhotoName">фото обязательно (из WhatsApp) — сожмётся на устройстве</span>
     </div>
+    <div class="fgroup reg-comment">
+      <label class="lbl" for="regComment">Комментарий <span class="text-muted">(необязательно)</span></label>
+      <textarea id="regComment" rows="2" maxlength="500" placeholder="Что увидели — попадёт в карточку дефекта"></textarea>
+    </div>
     <div id="regAlert" class="hidden mt-alert"></div>
     <div style="margin-top:.5rem;text-align:right">
       <button class="btn btn-ghost btn-sm" id="toggleManualBtn" style="font-size:11px">Точка не найдена в БД? Ввести вручную →</button>
@@ -349,6 +360,10 @@
       <div style="margin-top:.5rem">
         <label class="btn btn-ghost btn-sm">📷 Фото дефекта <span id="manPhotoStar" style="color:var(--danger)">*</span><input type="file" id="manPhoto" accept="image/*" multiple hidden></label>
         <span class="text-sm text-muted" id="manPhotoName" style="margin-left:.5rem">фото обязательно</span>
+      </div>
+      <div class="fgroup reg-comment">
+        <label class="lbl" for="manComment">Комментарий <span class="text-muted">(необязательно)</span></label>
+        <textarea id="manComment" rows="2" maxlength="500" placeholder="Что увидели — попадёт в карточку дефекта"></textarea>
       </div>
       <div id="manRegAlert" class="hidden mt-alert"></div>
     </div>
@@ -650,12 +665,37 @@ $('fClearAll').addEventListener('click', () => {
   closeColFilter();
   loadBoard();
 });
+// дата по МЕСТНОМУ времени (toISOString — UTC: до 5 утра по Казахстану «сегодня» было бы вчера)
+const isoLocal = d => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+const isoToday = () => isoLocal(new Date());
 function setPeriod(p){
   const to = new Date(), from = new Date();
   if (p === 'week') from.setDate(from.getDate() - 6);
   else if (p === 'month') from.setMonth(from.getMonth() - 1);
-  const iso = d => d.toISOString().slice(0, 10);
-  $('fFrom').value = iso(from); $('fTo').value = iso(to);
+  $('fFrom').value = isoLocal(from); $('fTo').value = isoLocal(to);
+}
+
+// ── выявления дефекта (первое и повторы серии): d.occ = [{date, by, name}] ──
+// «Дата»/«Контролёр» в списке — последнее выявление; вкладка «Контролёр» — выявления за день/период
+// (без дат в фильтре — сегодня), на любом этапе, включая закрытые.
+function ctrlPeriod(){
+  const f = $('fFrom').value, t = $('fTo').value;
+  if (!f && !t){ const d = isoToday(); return [d, d]; }
+  return [f || '0000-00-00', t || '9999-12-31'];
+}
+function occInPeriod(d){
+  const [f, t] = ctrlPeriod();
+  return (d.occ || []).filter(o => (o.date || '') >= f && (o.date || '') <= t);
+}
+function ctrlNames(d){ return [...new Set(occInPeriod(d).map(o => o.name).filter(Boolean))]; }
+function ctrlOf(d){ return TAB === 'controller' ? ctrlNames(d).join(', ') : (d.last_by_name || d.register_name || ''); }
+function dateOf(d){
+  if (TAB === 'controller'){ const ds = occInPeriod(d).map(o => o.date).sort(); if (ds.length) return ds[ds.length - 1]; }
+  return d.last_date || d.df_date || '';
+}
+function mineTodayCount(b){
+  const today = isoToday();
+  return [...b.open, ...b.unresolved, ...b.closed].filter(x => (x.occ || []).some(o => o.by === ME.uid && o.date === today)).length;
 }
 
 function priv(){ return !!(ME.is_admin || ME.privileged || ME.dept === 'WeldTeam'); }
@@ -671,7 +711,7 @@ function loadBoard(){
     $('c-serial').textContent = d.open.filter(x => x.is_serial).length;
     $('c-unres').textContent = d.unresolved.length;
     $('c-closed').textContent = d.closed.length;
-    $('c-ctrl').textContent = d.open.filter(x => x.worker_register_id === ME.uid).length;
+    $('c-ctrl').textContent = mineTodayCount(d);   // мои выявления за сегодня — на любом этапе
     renderList();
   }).catch(() => {
     $('defectList').innerHTML = `<div class="alert alert-danger" style="margin:.75rem">Нет связи с сервером — список не обновился.
@@ -683,7 +723,7 @@ function listFor(tab){
   if (tab === 'mine') return BOARD.open.filter(x => x.mine);
   if (tab === 'all') return BOARD.open;
   if (tab === 'serial') return BOARD.open.filter(x => x.is_serial);
-  if (tab === 'controller') return BOARD.open;       // открытые; по умолчанию мои зарегистрированные (см. currentRows)
+  if (tab === 'controller') return BOARD.open.concat(BOARD.unresolved, BOARD.closed);   // любой этап; мои за день — baseRows
   if (tab === 'unresolved') return BOARD.unresolved;
   return BOARD.closed;
 }
@@ -715,7 +755,7 @@ function stageCell(d){
   return `<span class="stage-chip ${cls}"><span class="lng">${chip}</span><span class="sht">${short || chip}</span></span>${lock}`;
 }
 function dateCell(d){
-  const v = d.df_date || '', m = /^\d{4}-(\d{2})-(\d{2})/.exec(v);   // телефон: день и месяц, полная дата — в карточке
+  const v = dateOf(d), m = /^\d{4}-(\d{2})-(\d{2})/.exec(v);   // телефон: день и месяц, полная дата — в карточке
   return `<span class="lng">${esc(v)}</span><span class="sht" title="${esc(v)}">${m ? m[2] + '.' + m[1] : esc(v)}</span>`;
 }
 const _norm = v => (v == null || v === '—') ? '' : String(v);   // «—» из бэка трактуем как пусто (для поиска/сорта)
@@ -727,9 +767,12 @@ const COLS = [
   {k:'brand',   label:'Бренд',     num:false, get:d=>_norm(d.brand)},
   {k:'station', label:'Станция',   num:false, get:d=>_norm(d.station_name)},
   {k:'stage',   label:'Этап',      num:false, get:d=>stageText(d),         cell:stageCell},
-  {k:'ctrl',    label:'Контролёр', num:false, get:d=>d.register_name||''},
+  // во вкладке «Контролёр» у дефекта может быть несколько контролёров за период — фильтр по любому из них
+  {k:'ctrl',    label:'Контролёр', num:false, get:ctrlOf,
+   values:d=>TAB === 'controller' ? ctrlNames(d) : [ctrlOf(d)],
+   match:(d, set)=>TAB === 'controller' ? ctrlNames(d).some(n => set.has(n)) : set.has(ctrlOf(d))},
   {k:'assignee',label:'В работе',  num:false, get:d=>d.assignee_name||'',   cell:d=>d.assigned_worker_id?`🔒 ${esc(d.assignee_name||'')}`:''},
-  {k:'date',    label:'Дата',      num:false, get:d=>d.df_date||'',         cell:dateCell},
+  {k:'date',    label:'Дата',      num:false, get:dateOf,                   cell:dateCell},
 ];
 let SORT = {col: null, dir: 1};   // dir: 1 — по возрастанию, -1 — по убыванию
 let FILT = {};                    // чек-фильтр: ключ колонки → Set выбранных значений (как colFilters в Редакторе)
@@ -749,19 +792,25 @@ function cycleSort(k){
   else { SORT.col = k; SORT.dir = 1; }
   renderList();
 }
-// базовый набор строк вкладки (с учётом дат и дефолта «Контролёр»), БЕЗ чек-фильтров — для списка значений в попапе
-function baseRows(){
-  let rows = listFor(TAB).slice();
-  if (TAB === 'controller' && !FILT.ctrl && ME.uid) rows = rows.filter(d => d.worker_register_id === ME.uid);
+// базовый набор строк вкладки (с учётом дат и дефолта «Контролёр»), БЕЗ чек-фильтров — для списка значений в попапе.
+// allCtrl — «Контролёр» без отбора «только мои» (значения для фильтра по контролёру).
+function baseRows(allCtrl){
+  const rows = listFor(TAB).slice();
+  if (TAB === 'controller'){
+    // выявления за день/период (первые и повторы серии), на любом этапе; по умолчанию — мои,
+    // выбран контролёр в фильтре колонки — его
+    const any = allCtrl || FILT.ctrl || !ME.uid;
+    return rows.filter(d => { const occ = occInPeriod(d); return any ? occ.length : occ.some(o => o.by === ME.uid); });
+  }
+  // даты: дефект попадает в период, если в нём было любое его выявление (первое или повтор)
   const f = $('fFrom').value, t = $('fTo').value;
-  if (f) rows = rows.filter(d => (d.df_date || '') >= f);
-  if (t) rows = rows.filter(d => (d.df_date || '') <= t);
-  return rows;
+  if (!f && !t) return rows;
+  return rows.filter(d => (d.occ || []).some(o => (!f || (o.date || '') >= f) && (!t || (o.date || '') <= t)));
 }
 function currentRows(){
   let rows = baseRows();
   // чек-фильтры по колонкам (множество выбранных значений)
-  for (const c of COLS){ const set = FILT[c.k]; if (set) rows = rows.filter(d => set.has(String(c.get(d)))); }
+  for (const c of COLS){ const set = FILT[c.k]; if (set) rows = rows.filter(d => c.match ? c.match(d, set) : set.has(String(c.get(d)))); }
   // глобальный поиск (мобильная панель) — по всем столбцам сразу
   const gq = GQ.trim().toLowerCase();
   if (gq) rows = rows.filter(d => COLS.some(c => String(c.get(d)).toLowerCase().includes(gq)));
@@ -779,7 +828,9 @@ function currentRows(){
 }
 function colValues(ck){
   const c = COLS.find(x => x.k === ck), seen = new Set(), vals = [];
-  baseRows().forEach(d => { const v = String(c.get(d)); if (!seen.has(v)){ seen.add(v); vals.push(v); } });
+  baseRows(ck === 'ctrl').forEach(d => (c.values ? c.values(d) : [c.get(d)]).forEach(x => {
+    const v = String(x); if (!seen.has(v)){ seen.add(v); vals.push(v); }
+  }));
   vals.sort((a, b) => cmp(a, b, c.num));
   return vals;
 }
@@ -816,9 +867,15 @@ function renderList(){
     <button type="button" class="btn btn-ghost compact-only" id="fOpen">Фильтры</button>
     <button type="button" class="btn btn-ghost compact-only" id="fRefresh" aria-label="Обновить список" title="Обновить список">↻</button></div>`;
   // подсказка: вкладка «Мои входящие» ограничена зонами ответственности (бренд·участок)
-  const zoneNote = (TAB === 'mine' && BOARD.zoned && BOARD.my_zones && BOARD.my_zones.length)
+  let zoneNote = (TAB === 'mine' && BOARD.zoned && BOARD.my_zones && BOARD.my_zones.length)
     ? `<div class="zone-note">👤 Только ваши участки: <b>${BOARD.my_zones.map(esc).join(', ')}</b> (и дефекты без участка). Остальное — во вкладке «Все открытые».</div>`
     : '';
+  if (TAB === 'controller'){
+    // за какой день/период и чьи выявления — чтобы отчёт контролёра читался без догадок
+    const f = $('fFrom').value, t = $('fTo').value, dm = v => v.split('-').reverse().join('.');
+    const per = (!f && !t) ? 'сегодня' : (f && t ? (f === t ? dm(f) : `${dm(f)} — ${dm(t)}`) : (f ? 'с ' + dm(f) : 'по ' + dm(t)));
+    zoneNote = `<div class="zone-note">👤 ${FILT.ctrl ? 'Выбранные контролёры' : 'Ваши'}: зарегистрировано за <b>${per}</b> — первичные и повторы серии, на любом этапе (и закрытые). Другой день — «С даты / По дату».</div>`;
+  }
   // телефон: подсказка под списком — экран отдан строкам, а при коротком или пустом списке она сразу на виду
   const compact = isCompact();
   host.innerHTML = (compact ? '' : zoneNote) + mbar + `<div class="tbl-wrap"><table class="tbl dtable">
@@ -993,7 +1050,12 @@ function renderDetail(res){
   const vinReq = !!res.vin_required;   // VIN нужен только для станций MB/UB
 
   const ribbon = d.is_b_point ? `<div class="b-ribbon">⚠ ТОЧКА ГРУППЫ B — требует немедленного вмешательства</div>` : '';
-  const occ = res.occurrences.length > 1 ? `<div class="muted">Появлений: ${res.occurrences.length} (${res.occurrences.map(esc).join(', ')})</div>` : '';
+  // выявления: первое и повторы серии — дата, контролёр, комментарий (у каждого — свой)
+  const occList = res.occurrences || [];
+  const occ = (occList.length > 1 || occList.some(o => o.comment)) ? `<div class="occ-list">
+      <div class="muted">${occList.length > 1 ? 'Выявлений: ' + occList.length : 'Выявление'}</div>
+      <ul>${occList.map(o => `<li><b>${esc((o.date || '').split('-').reverse().join('.'))}</b> · ${esc(o.by || '—')}${o.comment ? `<div class="occ-c">${esc(o.comment)}</div>` : ''}</li>`).join('')}</ul>
+    </div>` : '';
   // станция — как была в день дефекта (снимок); не зафиксирована — сегодняшний WB только подсказкой
   const stTxt = res.station_name ? ' · станция ' + esc(res.station_name)
     : (res.station_now ? ` · станция не зафиксирована <span title="Станция по сегодняшнему Weld Balance — не обязательно та, что была в день дефекта">(сейчас по WB: ${esc(res.station_now)})</span>` : '');
@@ -1129,7 +1191,8 @@ function renderDetail(res){
   if (compact){
     // телефон: то, чего нет в строке списка, сверху; действия — раньше истории, под рукой
     const facts = [['Статус', stageText(d) || '—'], ['Модель', d.model_name], ['Бренд', d.brand], ['Участок', res.segment],
-                   ['Пистолет', d.g_num ? 'G.' + d.g_num : ''], ['Контролёр', d.register_name], ['В работе', d.assignee_name], ['Дата', d.df_date]]
+                   ['Пистолет', d.g_num ? 'G.' + d.g_num : ''], ['В работе', d.assignee_name],
+                   ['Выявлен', [d.df_date, d.register_name].filter(Boolean).join(' · ')]]   // первое выявление; повторы — списком ниже
       .filter(f => f[1] && f[1] !== '—')
       .map(f => `<dt>${f[0]}</dt><dd>${esc(f[1])}</dd>`).join('');
     // в строке списка метки короткие, в окне место есть — пишем словами
@@ -1296,9 +1359,9 @@ function initRegistration(){
     const a = $('regAlert'), model = regModelSelect.value, spot = regSpotInput.value.trim(), code = regCodeInput.value;
     if (!model || !spot || !code){ showAlert(a, 'warn', 'Выберите модель, точку и код'); return; }
     if (reqPhoto && !regPhoto.files.length){ showAlert(a, 'warn', 'Приложите фото дефекта — при фиксации это обязательно'); return; }
-    submitDefect($('regBtn'), a, '/api/defects/register', {model_id: model, spot_number: spot, problem_code: code}, regPhoto, res => {
+    submitDefect($('regBtn'), a, '/api/defects/register', {model_id: model, spot_number: spot, problem_code: code, comment: $('regComment').value.trim()}, regPhoto, res => {
       showAlert(a, res.status==='success' ? (res.serial ? 'warn' : (res.found_in_db===false ? 'warn':'success')) : 'danger', res.message);
-      if (res.status==='success'){ regSpotInput.value=''; regCodeInput.value=''; regPhoto.value=''; regPhotoName.textContent=REG_HINT; loadBoard(); }
+      if (res.status==='success'){ regSpotInput.value=''; regCodeInput.value=''; $('regComment').value=''; regPhoto.value=''; regPhotoName.textContent=REG_HINT; loadBoard(); }
     });
   });
   regSpotInput.addEventListener('keydown', e => { if (e.key==='Enter') $('regBtn').click(); });
@@ -1313,9 +1376,9 @@ function initRegistration(){
     const a = $('manRegAlert'), gnum = manGunNum.value.trim(), code = manCodeInput.value;
     if (!gnum || !code){ showAlert(a, 'warn', 'Укажите пистолет и код'); return; }
     if (reqPhoto && !manPhoto.files.length){ showAlert(a, 'warn', 'Приложите фото дефекта — при фиксации это обязательно'); return; }
-    submitDefect($('manRegBtn'), a, '/api/defects/register_manual', {g_num: gnum, problem_code: code}, manPhoto, res => {
+    submitDefect($('manRegBtn'), a, '/api/defects/register_manual', {g_num: gnum, problem_code: code, comment: $('manComment').value.trim()}, manPhoto, res => {
       showAlert(a, res.status==='success' ? 'success' : 'danger', res.message);
-      if (res.status==='success'){ manGunNum.value=''; manCodeInput.value=''; manPhoto.value=''; manPhotoName.textContent=MAN_HINT; loadBoard(); }
+      if (res.status==='success'){ manGunNum.value=''; manCodeInput.value=''; $('manComment').value=''; manPhoto.value=''; manPhotoName.textContent=MAN_HINT; loadBoard(); }
     });
   });
   manGunNum.addEventListener('keydown', e => { if (e.key==='Enter') $('manRegBtn').click(); });

@@ -479,15 +479,30 @@ def find_serial_parent(conn, spot_id, code, when):
     return None
 
 
-def merge_into_open(conn, parent_id, when, registered_by):
+COMMENT_MAX = 500   # комментарий контролёра к выявлению (символов)
+
+
+def clean_comment(raw):
+    """Комментарий контролёра: обрезать пробелы и длину; пустой → None (поле необязательное)."""
+    text = str(raw or '').strip()[:COMMENT_MAX].strip()
+    return text or None
+
+
+def add_occurrence(conn, defect_id, when, registered_by, comment=None):
+    """Выявление дефекта: дата, контролёр, его комментарий. Каждое выявление — отдельная
+    запись (первое и каждый повтор серии): по ним контролёр видит «что нашёл я за день»."""
+    conn.execute('INSERT INTO defect_occurrence (defect_id, occ_date, registered_by, comment) VALUES (?,?,?,?)',
+                 (defect_id, when, registered_by, clean_comment(comment)))
+
+
+def merge_into_open(conn, parent_id, when, registered_by, comment=None):
     """Повтор на ещё ОТКРЫТОМ дефекте: доливаем появление и помечаем серийным, этап/статус
     не трогаем (дефект уже у кого-то на рассмотрении) — новую карточку не плодим."""
     conn.execute('UPDATE defects SET is_serial=1 WHERE UniqueID=?', (parent_id,))
-    conn.execute('INSERT INTO defect_occurrence (defect_id, occ_date, registered_by) VALUES (?,?,?)',
-                 (parent_id, when, registered_by))
+    add_occurrence(conn, parent_id, when, registered_by, comment)
 
 
-def reopen_as_serial(conn, parent_id, when, registered_by):
+def reopen_as_serial(conn, parent_id, when, registered_by, comment=None):
     """Переоткрыть родителя как серийный: вернуть отделу-закрывшему (для ОТО-кейса — отделу,
     что передавал в ОТО). Считается возвратом + серией; добавляем новое появление.
     Родитель на согласовании ОТК ещё держит открытый этап ОТК — он закрывается повтором
@@ -502,28 +517,28 @@ def reopen_as_serial(conn, parent_id, when, registered_by):
                       return_count=return_count+1, stage_entered_at=?, assigned_worker_id=NULL
                     WHERE UniqueID=?""", (back, _now(), parent_id))
     _open_stage(conn, parent_id, back, None)
-    conn.execute('INSERT INTO defect_occurrence (defect_id, occ_date, registered_by) VALUES (?,?,?)',
-                 (parent_id, when, registered_by))
+    add_occurrence(conn, parent_id, when, registered_by, comment)
     return back
 
 
 def register_occurrence(conn, *, problem_code, spot_id=None, gun_id=None, registered_by=None,
-                        when=None, manual_spot_number=None, manual_model_id=None):
+                        when=None, manual_spot_number=None, manual_model_id=None, comment=None):
     """Зафиксировать дефект. Серийный повтор на той же точке (в окне, та же группа):
     — если прежний дефект уже закрыт/не выявлен → переоткрыть его как серийный;
     — если он ещё открыт → долить появление в него (не плодя карточку).
     Иначе — создать новый и завести в цепочку. Возвращает {defect_id, serial, stage, repeat}:
-    repeat — 'reopened' (переоткрыт) / 'merged' (долит в открытый) / None (новый дефект)."""
+    repeat — 'reopened' (переоткрыт) / 'merged' (долит в открытый) / None (новый дефект).
+    comment — необязательный комментарий контролёра, хранится у этого выявления."""
     when = when or date.today().isoformat()
     code = (problem_code or '').strip().upper()
     parent = find_serial_parent(conn, spot_id, code, when)
     if parent:
         pstatus = conn.execute('SELECT COALESCE(status,"") FROM defects WHERE UniqueID=?', (parent,)).fetchone()[0]
         if pstatus in ('closed', 'pending_otk', 'unresolved'):
-            back = reopen_as_serial(conn, parent, when, registered_by)      # закрытый/не выявленный → переоткрыть
+            back = reopen_as_serial(conn, parent, when, registered_by, comment)   # закрытый/не выявленный → переоткрыть
             repeat = 'reopened'
         else:
-            merge_into_open(conn, parent, when, registered_by)              # ещё открыт → долить в него
+            merge_into_open(conn, parent, when, registered_by, comment)           # ещё открыт → долить в него
             back = conn.execute('SELECT current_stage_dept FROM defects WHERE UniqueID=?', (parent,)).fetchone()[0]
             repeat = 'merged'
         return {'defect_id': parent, 'serial': True, 'stage': back, 'repeat': repeat}
@@ -533,8 +548,7 @@ def register_occurrence(conn, *, problem_code, spot_id=None, gun_id=None, regist
             VALUES (?, '', '', ?, ?, ?, ?, 'registered', ?, ?, ?)""",
                        (code, when, _now(), spot_id, gun_id, manual_spot_number, manual_model_id, registered_by))
     did = cur.lastrowid
-    conn.execute('INSERT INTO defect_occurrence (defect_id, occ_date, registered_by) VALUES (?,?,?)',
-                 (did, when, registered_by))
+    add_occurrence(conn, did, when, registered_by, comment)
     # Снимок — один раз, до цепочки: уведомления/VIN сразу видят станцию. Серийный повтор
     # (выше) снимок прежней карточки не трогает — у неё история своего дня.
     snapshot_defect(conn, did, SNAP_REGISTRATION)

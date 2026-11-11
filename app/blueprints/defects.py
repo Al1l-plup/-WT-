@@ -1,6 +1,9 @@
 """Доска дефектов: регистрация, цепочка согласования 4M (этапы/ОТО/серийность), фото."""
+import json
 import os
 import uuid
+from collections import defaultdict
+from datetime import date
 
 from flask import Blueprint, current_app, jsonify, request, send_file, session
 
@@ -149,6 +152,7 @@ def register_defect():
     model_id     = data.get('model_id', '')
     spot_number  = str(data.get('spot_number', '')).strip()
     problem_code = str(data.get('problem_code', '')).strip().upper()
+    comment      = df.clean_comment(data.get('comment'))   # необязательно; хранится у этого выявления
 
     if not model_id or not spot_number or not problem_code:
         return jsonify({'status': 'error', 'message': 'Укажите модель авто, номер точки и код дефекта'}), 400
@@ -161,10 +165,10 @@ def register_defect():
     try:
         if row:
             res = df.register_occurrence(db, problem_code=problem_code, spot_id=row['spot_id'],
-                                         gun_id=row['gun_id'], registered_by=uid)
+                                         gun_id=row['gun_id'], registered_by=uid, comment=comment)
             msg = f'Дефект {problem_code} на точке №{spot_number} зафиксирован → отдел «{dept_label(res["stage"])}»'
         else:
-            res = df.register_occurrence(db, problem_code=problem_code, registered_by=uid,
+            res = df.register_occurrence(db, problem_code=problem_code, registered_by=uid, comment=comment,
                                          manual_spot_number=spot_number, manual_model_id=int(model_id))
             msg = (f'Дефект {problem_code} зарегистрирован → отдел «{dept_label(res["stage"])}». '
                    f'⚠ Точка №{spot_number} не найдена в БД — уточните при рассмотрении.')
@@ -200,6 +204,22 @@ def add_defect():
         return api_error(e)
 
 
+def _occurrences_by_defect(db, ids):
+    """{defect_id: [{date, by, name}, …]} — выявления дефектов по порядку записи.
+    ids передаются одним JSON-параметром (json_each) — без лимита числа параметров SQLite."""
+    out = defaultdict(list)
+    if not ids:
+        return out
+    for o in db.execute("""
+            SELECT o.defect_id, o.occ_date, o.registered_by,
+                   TRIM(COALESCE(w.surname,'') || ' ' || COALESCE(w.name,'')) AS name
+            FROM defect_occurrence o LEFT JOIN worker w ON w.UniqueID = o.registered_by
+            WHERE o.defect_id IN (SELECT value FROM json_each(?))
+            ORDER BY o.UniqueID""", (json.dumps(ids),)):
+        out[o['defect_id']].append({'date': o['occ_date'], 'by': o['registered_by'], 'name': o['name']})
+    return out
+
+
 @bp.route('/api/defects/all')
 def defects_all():
     db = get_db()
@@ -232,7 +252,10 @@ def defects_all():
                COALESCE(d.return_count,0)                  as return_count,
                CASE WHEN EXISTS(SELECT 1 FROM weld_point wp WHERE wp.spot_id=d.spot_id AND wp.important='B')
                     THEN 1 ELSE 0 END                      as is_b_point,
-               (SELECT COUNT(*) FROM defect_photo dp WHERE dp.defect_id=d.UniqueID) as photo_count
+               (SELECT COUNT(*) FROM defect_photo dp WHERE dp.defect_id=d.UniqueID) as photo_count,
+               -- последнее выявление (повтор серии — сегодняшней датой); df_date — первое, не меняется
+               COALESCE((SELECT MAX(o.occ_date) FROM defect_occurrence o WHERE o.defect_id=d.UniqueID),
+                        d.df_date)                         as last_date
         FROM defects d
         LEFT JOIN spot   s       ON d.spot_id             = s.UniqueID
         LEFT JOIN model  m       ON s.model_id             = m.UniqueID
@@ -248,10 +271,10 @@ def defects_all():
     """
     # GROUP BY d.UniqueID — одна строка на дефект (страховка: джойны не должны размножать
     # дефект ни при каких данных).
-    # Приоритет списка: 1) точки B → 2) серийные → 3) остальные.
+    # Приоритет списка: 1) точки B → 2) серийные → 3) остальные; внутри — по последнему выявлению.
     priority = """GROUP BY d.UniqueID
                   ORDER BY CASE WHEN is_b_point THEN 0 WHEN is_serial THEN 1 ELSE 2 END,
-                           d.df_date DESC, d.UniqueID DESC"""
+                           last_date DESC, d.UniqueID DESC"""
     open_in = ','.join('?' * len(df.OPEN_STATUSES))   # единый список «открытых» статусов (df.OPEN_STATUSES)
     open_rows = db.execute(base + f"""
         WHERE COALESCE(d.status,'registered') IN ({open_in})
@@ -262,18 +285,29 @@ def defects_all():
     unresolved_rows = db.execute(base + """
         WHERE COALESCE(d.status,'registered') = 'unresolved'
     """ + priority).fetchall()
-    # Закрытые обрезаны до 50 последних; при фильтре по датам (панель фильтров) берём полный
-    # диапазон с сервера, т.к. клиент видит только топ-50.
+    # Закрытые: без фильтра — 50 последних И все, выявленные сегодня (отчёт контролёра за день —
+    # на любом этапе, даже если за день закрыли больше 50); с фильтром по датам — весь диапазон
+    # с сервера. Дата дефекта = любое его выявление (первое или повтор серии); у старых
+    # дефектов без записей выявлений — дата карточки.
     df_from = (request.args.get('date_from') or '').strip()
     df_to = (request.args.get('date_to') or '').strip()
+    occ_in = 'EXISTS (SELECT 1 FROM defect_occurrence o WHERE o.defect_id=d.UniqueID AND o.occ_date BETWEEN ? AND ?)'
+    no_occ = 'NOT EXISTS (SELECT 1 FROM defect_occurrence o WHERE o.defect_id=d.UniqueID)'
     closed_sql = base + " WHERE COALESCE(d.status,'registered') = 'closed'"
-    closed_params = []
     if df_from and df_to:
-        closed_sql += ' AND d.df_date BETWEEN ? AND ?'
-        closed_params = [df_from, df_to]
-    closed_sql += ' GROUP BY d.UniqueID ORDER BY d.df_date DESC, d.UniqueID DESC'
-    closed_sql += '' if (df_from and df_to) else ' LIMIT 50'
+        closed_sql += f' AND ({occ_in} OR ({no_occ} AND d.df_date BETWEEN ? AND ?))'
+        closed_params = [df_from, df_to, df_from, df_to]
+    else:
+        today = date.today().isoformat()
+        closed_sql += f""" AND (d.UniqueID IN (
+                SELECT d2.UniqueID FROM defects d2 WHERE COALESCE(d2.status,'registered') = 'closed'
+                ORDER BY COALESCE((SELECT MAX(o2.occ_date) FROM defect_occurrence o2 WHERE o2.defect_id=d2.UniqueID),
+                                  d2.df_date) DESC, d2.UniqueID DESC
+                LIMIT 50) OR {occ_in})"""
+        closed_params = [today, today]
+    closed_sql += ' GROUP BY d.UniqueID ORDER BY last_date DESC, d.UniqueID DESC'
     closed_rows = db.execute(closed_sql, closed_params).fetchall()
+    occ = _occurrences_by_defect(db, [r['UniqueID'] for r in (*open_rows, *unresolved_rows, *closed_rows)])
     workers = db.execute('SELECT UniqueID, surname, name FROM worker WHERE is_active=1').fetchall()
     mydept = session.get('dept')
     myuid = session.get('uid')
@@ -295,6 +329,13 @@ def defects_all():
         # «Мои входящие» = мой этап И (мои участки ИЛИ без участка). WeldTeam/админ и без зон — только этап.
         d['mine'] = at_my_stage and (privileged or not has_zones or df.in_zones(
             my_zone_pairs, d.get('brand'), seg, df.station_zone(r['station_name'])))
+        # выявления: первое и повторы серии — кто и когда (вкладка «Контролёр», колонки Дата/Контролёр).
+        # У старых дефектов без записей выявлений — сама карточка.
+        d['occ'] = occ.get(d['UniqueID']) or [{'date': d['df_date'], 'by': d['worker_register_id'],
+                                               'name': d['register_name']}]
+        # последнее: по дате, а в один день — более позднее по порядку записи (max берёт первое из равных)
+        last = max(enumerate(d['occ']), key=lambda t: (t[1]['date'] or '', t[0]))[1]
+        d['last_by'], d['last_by_name'] = last['by'], last['name']
         return d
 
     # полные справочники для фильтров (чтобы участок/бренд были доступны всегда,
@@ -563,7 +604,8 @@ def register_defect_manual():
         else:
             gun_id = db.execute("INSERT INTO gun (g_num, gun_type) VALUES (?, 'Ручной ввод')",
                                 (int(g_num),)).lastrowid
-        res = df.register_occurrence(db, problem_code=problem_code, gun_id=gun_id, registered_by=uid)
+        res = df.register_occurrence(db, problem_code=problem_code, gun_id=gun_id, registered_by=uid,
+                                     comment=df.clean_comment(data.get('comment')))
         _save_photos(db, res['defect_id'], photos, uid)   # снимок сделала регистрация (до цепочки)
         db.commit()
         return jsonify({'status': 'success', 'stage': res['stage'], 'serial': res['serial'], 'defect_id': res['defect_id'],
@@ -740,8 +782,12 @@ def defect_detail(defect_id):
                COALESCE(st.note,'') as note, COALESCE(w.surname,'') as actor
         FROM defect_stage st LEFT JOIN worker w ON st.actor_id=w.UniqueID
         WHERE st.defect_id=? ORDER BY st.UniqueID""", (defect_id,)).fetchall()
-    occ = db.execute('SELECT occ_date FROM defect_occurrence WHERE defect_id=? ORDER BY UniqueID',
-                     (defect_id,)).fetchall()
+    # выявления: первое и повторы серии — дата, контролёр, его комментарий
+    occ = db.execute("""
+        SELECT o.occ_date, TRIM(COALESCE(w.surname,'') || ' ' || COALESCE(w.name,'')) AS by_name,
+               COALESCE(o.comment,'') AS comment
+        FROM defect_occurrence o LEFT JOIN worker w ON w.UniqueID = o.registered_by
+        WHERE o.defect_id=? ORDER BY o.UniqueID""", (defect_id,)).fetchall()
     photo_rows = db.execute("""
         SELECT dp.UniqueID, dp.stage_dept, dp.stage_id, dp.ts, dp.uploaded_by,
                s.left_at AS stage_left_at, ? AS current_stage_dept
@@ -755,7 +801,7 @@ def defect_detail(defect_id):
     station = df.station_name_for(db, defect_id)          # как было в день дефекта (снимок)
     return jsonify({'status': 'success', 'defect': dict(d),
                     'stages': [dict(r) for r in stages],
-                    'occurrences': [r['occ_date'] for r in occ],
+                    'occurrences': [{'date': r['occ_date'], 'by': r['by_name'], 'comment': r['comment']} for r in occ],
                     'photos': photos,
                     'vin_required': df.vin_required(db, defect_id),
                     'station_name': station,

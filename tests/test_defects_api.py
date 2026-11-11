@@ -288,6 +288,83 @@ def test_board_exposes_registrar_and_date_filter(register_client):
     assert not any(x['UniqueID'] == did for x in closed_old)                     # вне диапазона — нет
 
 
+def _free_spot(app):
+    """(model_id, spot_number) точки без дефектов — серия на ней начинается с чистого листа."""
+    db = sqlite3.connect(app.config['DB_PATH'])
+    try:
+        return db.execute("""SELECT model_id, spot_number FROM spot
+                             WHERE UniqueID NOT IN (SELECT spot_id FROM defects WHERE spot_id IS NOT NULL)
+                               AND model_id IS NOT NULL AND COALESCE(spot_number,'') <> ''
+                             LIMIT 1""").fetchone()
+    finally:
+        db.close()
+
+
+def test_series_by_two_controllers_keeps_each_registration(register_client, app):
+    """Повтор серии другим контролёром: карточка одна, но выявления — свои у каждого (дата,
+    контролёр, комментарий). В списке «Дата»/«Контролёр» — последнее выявление, первое не
+    перезаписано: оба контролёра видят дефект в своём отчёте."""
+    import datetime
+    today = datetime.date.today().isoformat()
+    otk1 = register_client(department='ОТК', login='ser1@x.kz')
+    otk2 = register_client(department='ОТК', login='ser2@x.kz')
+    uid1, uid2 = otk1.get('/api/me').get_json()['uid'], otk2.get('/api/me').get_json()['uid']
+    model_id, num = _free_spot(app)
+    reg = lambda c, code, comment: c.post('/api/defects/register', json={  # noqa: E731
+        'model_id': model_id, 'spot_number': num, 'problem_code': code, 'comment': comment}).get_json()
+    r1 = reg(otk1, 'BT', '  подрез с краю ')
+    r2 = reg(otk2, 'LP', 'снова, 2 машины подряд')
+    assert r1['status'] == r2['status'] == 'success'
+    assert r2['serial'] and r2['defect_id'] == r1['defect_id']
+    did = r1['defect_id']
+    occ = otk1.get(f'/api/defects/{did}').get_json()['occurrences']
+    assert [o['comment'] for o in occ] == ['подрез с краю', 'снова, 2 машины подряд']
+    assert all(o['date'] == today and o['by'] for o in occ)
+    row = next(x for x in otk2.get('/api/defects/all').get_json()['open'] if x['UniqueID'] == did)
+    assert [o['by'] for o in row['occ']] == [uid1, uid2]                  # оба выявления — в выдаче списка
+    assert row['last_by'] == uid2 and row['last_date'] == today
+    assert row['worker_register_id'] == uid1 and row['df_date'] == today  # первое выявление не перезаписано
+
+
+def test_comment_is_optional_and_trimmed_on_manual_registration(client):
+    j = client.post('/api/defects/register_manual', json={'g_num': 70980, 'problem_code': 'CR'}).get_json()
+    assert client.get(f"/api/defects/{j['defect_id']}").get_json()['occurrences'][0]['comment'] == ''
+    j = client.post('/api/defects/register_manual',
+                    json={'g_num': 70981, 'problem_code': 'CR', 'comment': 'x' * 900}).get_json()
+    assert len(client.get(f"/api/defects/{j['defect_id']}").get_json()['occurrences'][0]['comment']) == 500
+
+
+def test_board_closed_has_everything_registered_today(client, app):
+    """Отчёт контролёра за день — на любом этапе: закрытые, выявленные сегодня, приходят все, даже
+    если их больше 50 (без фильтра список закрытых обрезан до 50 последних). Фильтр по датам у
+    закрытых — по выявлениям: старый дефект, повторённый сегодня, попадает и в «сегодня»."""
+    import datetime
+    today = datetime.date.today().isoformat()
+    db = sqlite3.connect(app.config['DB_PATH'])
+    ins = "INSERT INTO defects (problem_code, root_cause, solution, df_date, status) VALUES ('CR','','',?,'closed')"
+    occ = 'INSERT INTO defect_occurrence (defect_id, occ_date, registered_by) VALUES (?,?,NULL)'
+    fresh = []
+    for _ in range(55):
+        did = db.execute(ins, (today,)).lastrowid
+        db.execute(occ, (did, today))
+        fresh.append(did)
+    old = db.execute(ins, ('2000-01-05',)).lastrowid
+    db.execute(occ, (old, '2000-01-05'))
+    db.execute(occ, (old, today))                       # повтор сегодня
+    db.commit()
+    db.close()
+    closed = client.get('/api/defects/all').get_json()['closed']
+    assert set(fresh) | {old} <= {x['UniqueID'] for x in closed}
+    row = next(x for x in closed if x['UniqueID'] == old)
+    assert row['last_date'] == today and row['df_date'] == '2000-01-05'
+    in_2000 = {x['UniqueID'] for x in client.get('/api/defects/all?date_from=2000-01-01&date_to=2000-12-31')
+               .get_json()['closed']}
+    assert old in in_2000 and not set(fresh) & in_2000
+    in_today = {x['UniqueID'] for x in client.get(f'/api/defects/all?date_from={today}&date_to={today}')
+                .get_json()['closed']}
+    assert old in in_today and set(fresh) <= in_today
+
+
 def test_board_no_duplicate_on_multi_assignment(client, app):
     """Дефект на гане с НЕСКОЛЬКИМИ активными назначениями трансформатора не должен
     дублироваться в доске (регрессия: джойн gun→трансформатор→станция размножал строки)."""
