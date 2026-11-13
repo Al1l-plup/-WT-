@@ -12,8 +12,11 @@ from app import studs as st
 
 ROOT = Path(__file__).resolve().parents[1]
 ADMIN_EMAIL = 'al.galimov@astana-motors.kz'
-VIN = 'MXMDB21B9TK193362'                     # Chery Tiggo 4 (A13T) — с контрольной карты
+VIN = 'MXMDB21B9TK193362'                     # Chery Tiggo 4 (кузов T19) — с контрольной карты
 TOP_QR = VIN + 'CRT19-BE4TD62NS-----|TC_KZ_E-KZ.0774.00047|CHERY_TIGGO_4|1798 кг|1044 кг|854 кг|'
+# верхние QR с контрольных карт цеха (2026-11-12): Tiggo 2 Pro — схема A13T, CS55 Plus — CS55
+T2P_QR = 'MXMDB21B1TK003922CRA13TBE4GC82NS-----BLCHW---|TC_KZ_E-KZ.0774.00037|CHERY_TIGGO2_PRO|1662 кг|977 кг|785 кг||'
+CS55_QR = 'MXMASE2E1TK008261CHCS553JL7D72SC-----BL9MC---|TC KZ E-KZ.0774.00057|CHANGAN_CS55PLUS|1835 кг|991 кг|844 кг||'
 JPEG = b'\xff\xd8\xff\xe0' + b'\x00' * 64      # достаточно сигнатуры: сервер смотрит содержимое
 PNG = b'\x89PNG\r\n\x1a\n' + b'\x00' * 64
 # внутренние номера (stud_no) по моделям; 0029 добавила A01 2093–2094 и A13T 4094–4095
@@ -27,8 +30,10 @@ def _db(app):
     return con
 
 
-def _post_record(c, vin=VIN, scheme='A13T', stud_no=4021, photo=JPEG, name='p.jpg'):
+def _post_record(c, vin=VIN, scheme='A13T', stud_no=4021, photo=JPEG, name='p.jpg', card_qr=None):
     data = {'vin': vin, 'scheme_code': scheme, 'stud_no': str(stud_no)}
+    if card_qr is not None:
+        data['card_qr'] = card_qr
     if photo is not None:
         data['photo'] = (io.BytesIO(photo), name)
     return c.post('/api/studs/records', data=data, content_type='multipart/form-data')
@@ -122,6 +127,82 @@ def test_vin_lookup_learns_scheme_from_first_record(client):
     assert _post_record(client).get_json()['status'] == 'success'
     other = 'MXMDB21B9TK000001'                             # та же модель, другая машина
     assert client.get('/api/studs/vin?vin=' + other).get_json()['scheme_code'] == 'A13T'
+
+
+# ── модель по верхнему QR карты ──────────────────────────────────────────────
+
+def test_parse_card_qr():
+    assert st.parse_card_qr(TOP_QR) == {'vin': VIN, 'model_token': 'CHERY_TIGGO_4'}   # верхний: VIN + модель
+    # реальный текст с телефона (2026-11-12): «ТС» кириллицей и «||» в конце — модель всё равно 3-е поле
+    real = VIN + 'CRT19-BE4TD62NS-----|ТС_KZ_E-KZ.0774.00047|CHERY_TIGGO_4|1798 кг|1044 кг|854 кг||'
+    assert st.parse_card_qr(real) == {'vin': VIN, 'model_token': 'CHERY_TIGGO_4'}
+    assert st.parse_card_qr(VIN) == {'vin': VIN, 'model_token': None}                 # нижний: только VIN
+    assert st.parse_card_qr('hello|x|tank 300') == {'vin': None, 'model_token': 'TANK_300'}   # без VIN сервер откажет
+    assert st.parse_card_qr('hello|x|y')['model_token'] is None                       # 1 знак — не модель
+    assert st.parse_card_qr(VIN + 'X|TC|haval jolion |1 кг|')['model_token'] == 'HAVAL_JOLION'
+    assert st.parse_card_qr(VIN + 'X|TC|<script>|')['model_token'] is None             # мусор моделью не считаем
+
+
+def test_vin_lookup_by_top_qr_opens_scheme(client):
+    look = lambda qr: client.get('/api/studs/vin', query_string={'qr': qr}).get_json()  # noqa: E731
+    r = look(T2P_QR)
+    assert (r['vin'], r['model_token']) == ('MXMDB21B1TK003922', 'CHERY_TIGGO2_PRO')
+    assert (r['scheme_code'], r['scheme_source'], r['no_scheme']) == ('A13T', 'qr', False)   # сразу, без выбора
+    assert (look(CS55_QR)['scheme_code'], look(CS55_QR)['scheme_source']) == ('CS55', 'qr')
+    r = look(VIN)                                                                     # нижний QR — только VIN
+    assert r['model_token'] is None and r['scheme_source'] is None
+    assert client.get('/api/studs/vin', query_string={'qr': 'https://example.kz'}).status_code == 400
+
+
+def test_tiggo4_has_no_scheme_and_is_not_learned(client):
+    """Tiggo 4 (T19) — модель известна, схемы шпилек нет. Подсказки по началу VIN нет (у Tiggo 4 и
+    Tiggo 2 Pro оно одинаковое), а ручной выбор оператора не привязывает Tiggo 4 к чужой схеме."""
+    assert _post_record(client, vin='MXMDB21B1TK003922', card_qr=T2P_QR).get_json()['status'] == 'success'
+    r = client.get('/api/studs/vin', query_string={'qr': TOP_QR}).get_json()
+    assert (r['model_token'], r['scheme_code'], r['scheme_source'], r['no_scheme']) == ('CHERY_TIGGO_4', None, None, True)
+    assert _post_record(client, card_qr=TOP_QR).get_json()['status'] == 'success'     # оператор выбрал A13T вручную
+    tokens = {t['token']: t['scheme_code'] for t in client.get('/api/studs/catalog').get_json()['model_tokens']}
+    assert tokens['CHERY_TIGGO_4'] is None                                          # не «научился»
+
+
+def test_a13t_scheme_is_tiggo2_pro(client):
+    schemes = {s['code']: s['title'] for s in client.get('/api/studs/catalog').get_json()['schemes']}
+    assert schemes['A13T'] == 'Chery Tiggo 2 Pro'                                   # код комплектации CRA13T…
+
+
+def test_unknown_model_from_qr_learned_from_first_record(app, client):
+    """Незнакомую модель из QR оператор выбирает один раз — первая запись её запоминает,
+    следующая машина этой модели открывает схему сама. Сырой текст QR — в записи."""
+    vin = 'LGWEF6A57MH000001'
+    qr = vin + 'XX01-TEST|TC_KZ_E-KZ.0000.00001|NEW_MODEL_X|1500 кг|'                # выдуманная модель
+    r = client.get('/api/studs/vin', query_string={'qr': qr}).get_json()
+    assert r['model_token'] == 'NEW_MODEL_X' and r['scheme_code'] is None and not r['no_scheme']
+    res = _post_record(client, vin=vin, scheme='A01', stud_no=2001, card_qr=qr).get_json()
+    assert res['status'] == 'success'
+    other = 'LGWEF6A57MH000002' + qr[17:]                                            # другая машина той же модели
+    r = client.get('/api/studs/vin', query_string={'qr': other}).get_json()
+    assert r['scheme_code'] == 'A01' and r['scheme_source'] == 'qr'
+    with _db(app) as con:
+        assert con.execute('SELECT card_qr FROM stud_defect WHERE id=?', (res['record']['id'],)).fetchone()[0] == qr
+
+
+def test_card_qr_must_match_vin(client):
+    r = _post_record(client, card_qr='LVVDB21B9TC193362|x|CHERY_TIGGO_4|')            # QR другой машины
+    assert r.status_code == 400 and 'не совпадает' in r.get_json()['message']
+    assert _post_record(client, card_qr=TOP_QR).get_json()['status'] == 'success'
+
+
+def test_model_tokens_admin(client, register_client):
+    tokens = {t['token']: t['scheme_code'] for t in client.get('/api/studs/catalog').get_json()['model_tokens']}
+    assert tokens == {'CHERY_TIGGO2_PRO': 'A13T', 'CHANGAN_CS55PLUS': 'CS55',      # задано миграцией 0031
+                      'CHERY_TIGGO_4': None}                                        # известна, схемы нет
+    prod = register_client(department='Производство', login='tok_prod@x.kz')
+    assert prod.get('/api/studs/catalog').get_json()['model_tokens'] == []           # список — только WeldTeam
+    assert prod.delete('/api/studs/model-tokens/CHERY_TIGGO2_PRO').status_code == 403
+    assert client.delete('/api/studs/model-tokens/CHERY_TIGGO2_PRO').get_json()['status'] == 'success'
+    assert client.delete('/api/studs/model-tokens/CHERY_TIGGO2_PRO').status_code == 404
+    r = client.get('/api/studs/vin', query_string={'qr': T2P_QR}).get_json()
+    assert r['model_token'] == 'CHERY_TIGGO2_PRO' and r['scheme_source'] != 'qr'     # забыта — выберут заново
 
 
 # ── запись оператора ─────────────────────────────────────────────────────────
@@ -321,3 +402,6 @@ def test_studs_js_syntax_and_vin_parsing():
     assert 'Math.round(base * z)' in src and 'ResizeObserver' in src and 'chooseDefaultZoom()' in src
     # ключ картинки шпильки — то же правило, что app.studs.part_image_key
     assert "`${s.part}_${s.colour}`" in src and 'renderLegend(v)' in src
+    # машина — по ВСЕМУ тексту верхнего QR (VIN и модель разбирает сервер), сырой QR уходит с записью
+    assert 'takeCar({ qr: r.text })' in src and "fd.append('card_qr', S.qr)" in src
+    assert "r.data.includes('|')" in src                    # из двух QR на снимке берём верхний

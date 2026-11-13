@@ -111,23 +111,71 @@ def catalog():
         'FROM stud WHERE active=1 ORDER BY stud_no')]
     parts = [{'key': k, 'part': p, 'colour': c, **_image_info('parts', k)}
              for k, (p, c) in sorted(_part_keys(db).items())]
+    can_manage = st.can_manage_schemes(dept, is_admin)
+    # «модель из QR → схема» — WeldTeam видит и может забыть ошибочную (оператор ошибся с моделью)
+    tokens = [dict(r) for r in db.execute(
+        "SELECT t.token, t.scheme_code, t.created_at, TRIM(COALESCE(w.surname,'') || ' ' || COALESCE(w.name,'')) AS who "
+        'FROM stud_model_token t LEFT JOIN worker w ON w.UniqueID = t.created_by ORDER BY t.token')] if can_manage else []
     return jsonify({
-        'schemes': schemes, 'studs': studs, 'parts': parts,
+        'schemes': schemes, 'studs': studs, 'parts': parts, 'model_tokens': tokens,
         'categories': st.CATEGORIES, 'sources': st.SOURCES,
         'can_review': st.can_review(dept, is_admin),
-        'can_manage': st.can_manage_schemes(dept, is_admin),
+        'can_manage': can_manage,
         'uid': uid, 'is_admin': is_admin, 'own_delete_minutes': st.OWN_DELETE_MINUTES,
     })
 
 
+def _token_row(db, token):
+    """Строка stud_model_token модели из QR: None — модель незнакома; scheme_code NULL — модель
+    известна, но схемы шпилек для неё нет."""
+    if not token:
+        return None
+    return db.execute('SELECT scheme_code FROM stud_model_token WHERE token=?', (token,)).fetchone()
+
+
 @bp.route('/api/studs/vin')
 def vin_lookup():
-    """VIN → рабочий ключ и схема (если начало VIN уже знакомо)."""
-    key = st.vin_key(request.args.get('vin'))
+    """Машина по QR контрольной карты (qr= — весь текст) или по VIN (vin=, ручной ввод).
+
+    scheme_source='qr' — модель из верхнего QR знакома, схема определена надёжно;
+    'vin' — только подсказка по началу VIN (оператор выбирает модель сам); None — нет данных.
+    no_scheme — модель знакома, но схемы шпилек для неё нет (подсказку по VIN тогда не даём:
+    у Chery Tiggo 4 и Tiggo 2 Pro начало VIN одинаковое)."""
+    db = get_db()
+    qr = request.args.get('qr')
+    token = None
+    if qr is not None:
+        parsed = st.parse_card_qr(qr)
+        if not parsed['vin']:
+            return _err('В этом QR нет VIN — сфотографируйте QR на контрольной карте')
+        raw, token = parsed['vin'], parsed['model_token']
+    else:
+        raw = (request.args.get('vin') or '').strip()
+    key = st.vin_key(raw)
     if not st.is_valid_vin(key):
         return _err('VIN — 17 знаков: латинские буквы (кроме I, O, Q) и цифры')
-    r = get_db().execute('SELECT scheme_code FROM stud_vin_prefix WHERE prefix=?', (st.vin_prefix(key),)).fetchone()
-    return jsonify({'status': 'success', 'vin_key': key, 'scheme_code': r['scheme_code'] if r else None})
+    row = _token_row(db, token)
+    no_scheme = bool(row) and not row['scheme_code']
+    scheme, source = (row['scheme_code'], 'qr') if row and row['scheme_code'] else (None, None)
+    if not row:
+        r = db.execute('SELECT scheme_code FROM stud_vin_prefix WHERE prefix=?', (st.vin_prefix(key),)).fetchone()
+        scheme, source = (r['scheme_code'], 'vin') if r else (None, None)
+    return jsonify({'status': 'success', 'vin': raw, 'vin_key': key, 'model_token': token,
+                    'scheme_code': scheme, 'scheme_source': source, 'no_scheme': no_scheme})
+
+
+@bp.route('/api/studs/model-tokens/<token>', methods=['DELETE'])
+def model_token_delete(token):
+    """Забыть модель из QR (оператор ошибся с моделью) — при следующем скане её выберут заново.
+    Записи журнала не меняются: схема у каждой записи своя. WeldTeam/админ."""
+    _uid, dept, is_admin = _ctx()
+    if not st.can_manage_schemes(dept, is_admin):
+        return _err('Модели из QR правит WeldTeam', 403)
+    db = get_db()
+    if not db.execute('DELETE FROM stud_model_token WHERE token=?', (token,)).rowcount:
+        return _err('Такой модели нет', 404)
+    db.commit()
+    return jsonify({'status': 'success', 'message': f'Модель {token} забыта — при следующем скане её выберут заново'})
 
 
 @bp.route('/api/studs/views/<view_key>/image')
@@ -256,16 +304,24 @@ def records():
 
 @bp.route('/api/studs/records', methods=['POST'])
 def record_create():
-    """Новая запись: VIN (как прочитан), схема, номер шпильки, фото шпильки (обязательно).
+    """Новая запись: VIN (как прочитан), схема, номер шпильки, фото шпильки (обязательно),
+    card_qr — сырой текст QR карты (если машину записали по QR).
 
-    Новое начало VIN запоминается за выбранной схемой. Та же шпилька той же машины в
-    течение DUPLICATE_WINDOW_MINUTES — не дубль, а уже существующая запись."""
+    Новое начало VIN и новая модель из QR запоминаются за выбранной схемой. Та же шпилька
+    той же машины в течение DUPLICATE_WINDOW_MINUTES — не дубль, а уже существующая запись."""
     uid, _dept, _is_admin = _ctx()
     form = request.form
     raw_vin = (form.get('vin') or '').strip()
     key = st.vin_key(raw_vin)
     if not st.is_valid_vin(key):
         return _err('VIN — 17 знаков: латинские буквы (кроме I, O, Q) и цифры')
+    card_qr = (form.get('card_qr') or '').strip()[:st.CARD_QR_MAX] or None
+    token = None
+    if card_qr:
+        parsed = st.parse_card_qr(card_qr)
+        if parsed['vin'] != key:
+            return _err('VIN не совпадает с QR — отсканируйте QR заново')
+        token = parsed['model_token']
     scheme = (form.get('scheme_code') or '').strip()
     try:
         stud_no = int(form.get('stud_no') or 0)
@@ -296,10 +352,14 @@ def record_create():
     try:
         f.save(path)
         now = _now()
-        cur = db.execute('INSERT INTO stud_defect (created_at, created_by, vin, vin_key, scheme_code, stud_no, station, photo) '
-                         'VALUES (?,?,?,?,?,?,?,?)', (now, uid, raw_vin, key, scheme, stud_no, stud['station'], fname))
+        cur = db.execute('INSERT INTO stud_defect (created_at, created_by, vin, vin_key, scheme_code, stud_no, station, '
+                         'photo, card_qr) VALUES (?,?,?,?,?,?,?,?,?)',
+                         (now, uid, raw_vin, key, scheme, stud_no, stud['station'], fname, card_qr))
         db.execute('INSERT OR IGNORE INTO stud_vin_prefix (prefix, scheme_code, created_at, created_by) VALUES (?,?,?,?)',
                    (st.vin_prefix(key), scheme, now, uid))
+        if token:   # незнакомая модель из QR: выбор оператора запоминается — дальше схема откроется сама
+            db.execute('INSERT OR IGNORE INTO stud_model_token (token, scheme_code, created_at, created_by) '
+                       'VALUES (?,?,?,?)', (token, scheme, now, uid))
         db.commit()
         return jsonify({'status': 'success', 'message': f'Записано: шпилька {stud["label"]}',
                         'record': _record(db, cur.lastrowid)})

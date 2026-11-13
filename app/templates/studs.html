@@ -104,7 +104,7 @@
 <div class="page sp">
   <div class="page-head">
     <h1>Шпильки</h1>
-    <p>Недостающие шпильки: QR с контрольной карты → шпилька на схеме → фото.</p>
+    <p>Недостающие шпильки: верхний QR контрольной карты → шпилька на схеме → фото.</p>
   </div>
 
   <div id="loadAlert"></div>
@@ -119,7 +119,7 @@
     <div class="card" id="carCard">
       <div id="carEmpty">
         <button class="btn btn-primary btn-full sp-big" type="button" id="qrBtn">📷 Сфотографировать QR</button>
-        <p class="note">Снимите крупно <b>нижний QR</b> на контрольной карте («QR VIN номера»). Фото QR никуда не отправляется — телефон только читает VIN.</p>
+        <p class="note">Снимите крупно <b>верхний QR</b> на контрольной карте (справа, «Multifilling + OTTC QR») — по нему сайт узнаёт VIN и модель. Фото QR никуда не отправляется — телефон только читает код.</p>
         <div class="sp-links">
           <button class="linkish" type="button" id="qrGalleryBtn">выбрать из галереи</button> ·
           <button class="linkish" type="button" id="vinManualBtn">ввести VIN вручную</button>
@@ -210,6 +210,13 @@
       <div class="sp-status" id="imgStatus" role="status"></div>
       <ul class="sp-imgs" id="imgList" style="margin-top:8px"></ul>
     </div>
+
+    <div class="card" id="tokenCard" hidden>
+      <div class="card-title accent">Модели из QR</div>
+      <p class="note" style="margin-top:0">Модель из верхнего QR контрольной карты → схема шпилек. Незнакомую модель оператор выбирает один раз — сайт запоминает. Ошиблись с моделью — «забыть», и при следующем скане её выберут заново.</p>
+      <ul class="sp-imgs" id="tokenList"></ul>
+      <div class="sp-status" id="tokenStatus" role="status"></div>
+    </div>
   </section>
 </div>
 
@@ -236,6 +243,6 @@
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script src="/static/vendor/jsQR.js"></script>
-<script src="/static/studs.js?v=9"></script>
+<script src="/static/studs.js?v=11"></script>
 </body>
 </html>

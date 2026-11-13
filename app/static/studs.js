@@ -1,7 +1,8 @@
 /* Вкладка «Шпильки».
  *
- * Запись (оператор сборки): фото QR контрольной карты → VIN читается прямо в телефоне
- * (jsQR, фото QR никуда не отправляется) → схема модели по VIN → тап по шпильке → фото
+ * Запись (оператор сборки): фото верхнего QR контрольной карты → текст QR читается прямо в
+ * телефоне (jsQR, фото QR никуда не отправляется) → сервер разбирает VIN и модель
+ * (app.studs.parse_card_qr) → схема модели открывается сама → тап по шпильке → фото
  * шпильки → запись на сервере. Шаг (VIN, выбранная шпилька) хранится в localStorage:
  * если Android выгрузит Chrome во время съёмки, оператор продолжит с того же места.
  *
@@ -21,7 +22,7 @@
   const TAB_STORE = 'studs-tab';
   const ZOOMS = [1, 1.6, 2.5, 4];
   const VIN_AT_START = /^[A-HJ-NPR-Z0-9]{17}/; // нижний QR = VIN; верхний начинается с VIN
-  const AUTO_MODEL = false;                    // модель по VIN — выключено, выбирает оператор
+  const AUTO_MODEL = false;                    // модель по началу VIN — выключено (модель — по верхнему QR)
 
   let C = null;                  // каталог с сервера
   let schemeByCode = {};
@@ -36,7 +37,9 @@
   let logRows = [];
   let revRec = null;
 
-  function blank() { return { vin: '', vinKey: '', scheme: '', view: '', sel: null, cam: 0, t: 0 }; }
+  // qr — сырой текст QR карты (уходит с записью), token — модель из него (пусто: нижний QR или VIN руками),
+  // noScheme — модель знакома, но схемы шпилек для неё нет
+  function blank() { return { vin: '', vinKey: '', qr: '', token: '', noScheme: false, scheme: '', view: '', sel: null, cam: 0, t: 0 }; }
   function save() { S.t = Date.now(); try { localStorage.setItem(STORE, JSON.stringify(S)); } catch { /* приватный режим */ } }
   function restore() {
     try {
@@ -81,6 +84,8 @@
 
   // Кадр целиком в двух масштабах, затем по частям: на снимке всей карты два QR и много
   // мелочи — по частям код находится надёжнее. Между попытками отдаём поток (прогресс).
+  // Нужен ВЕРХНИЙ QR (VIN + модель, поля через «|»): нижний (только VIN) берём, лишь если
+  // верхнего на снимке не нашлось.
   async function readQr(file, onStep) {
     const img = await loadImage(file);
     const W = img.width, H = img.height;
@@ -90,7 +95,7 @@
     }
     const cv = document.createElement('canvas');
     const ctx = cv.getContext('2d', { willReadFrequently: true });
-    let other = null;
+    let other = null, vinOnly = null;
     try {
       for (let i = 0; i < plan.length; i++) {
         if (onStep) onStep(i + 1, plan.length);
@@ -104,12 +109,12 @@
         const r = window.jsQR(d.data, cv.width, cv.height, { inversionAttempts: 'dontInvert' });
         if (r && r.data) {
           const vin = vinFromText(r.data);
-          if (vin) return { vin, text: r.data };
-          other = r.data;
+          if (vin && r.data.includes('|')) return { vin, text: r.data, card: true };   // верхний QR
+          if (vin) vinOnly = vinOnly || r.data; else other = r.data;
         }
       }
     } finally { if (img.close) img.close(); }
-    return { vin: null, text: other };
+    return vinOnly ? { vin: vinFromText(vinOnly), text: vinOnly, card: false } : { vin: null, text: other };
   }
 
   // Фото шпильки: до 2000 px по длинной стороне (для разбора хватает, диск сервера бережём).
@@ -152,21 +157,21 @@
 
   // ── запись: машина ─────────────────────────────────────────────────────────
 
-  async function lookupVin(raw) {
-    const r = await fetch('/api/studs/vin?vin=' + encodeURIComponent(raw)).then(readJson);
-    if (r.status !== 'success') throw new Error(r.message || 'VIN не принят');
-    return r;
-  }
-
-  async function takeVin(raw) {
-    const res = await lookupVin(raw);
+  // Машина: { qr } — весь текст QR карты (VIN и модель разбирает сервер) или { vin } — VIN руками.
+  async function takeCar({ qr, vin }) {
+    const q = qr != null ? 'qr=' + encodeURIComponent(qr) : 'vin=' + encodeURIComponent(vin);
+    const res = await fetch('/api/studs/vin?' + q).then(readJson);
+    if (res.status !== 'success') throw new Error(res.message || 'VIN не принят');
     forget();
-    S.vin = raw;
+    S.vin = res.vin || vin;          // сырой VIN: как в QR / как введён
     S.vinKey = res.vin_key;
-    // Модель оператор пока выбирает сам (решение Алибека 2026-11-10: как VIN разных брендов
-    // различаются — выясняем по записям). Сервер всё равно подсказывает схему по началу VIN —
-    // включить автоопределение = AUTO_MODEL = true.
-    S.scheme = AUTO_MODEL && res.scheme_code && schemeByCode[res.scheme_code] ? res.scheme_code : '';
+    S.qr = qr || '';
+    S.token = res.model_token || '';
+    S.noScheme = !!res.no_scheme;
+    // Модель — по верхнему QR (модель знакома → scheme_source 'qr'). По началу VIN — только
+    // подсказка сервера, автоопределение по ней выключено (AUTO_MODEL).
+    const auto = res.scheme_source === 'qr' || (AUTO_MODEL && res.scheme_source === 'vin');
+    S.scheme = auto && schemeByCode[res.scheme_code] ? res.scheme_code : '';
     S.view = S.scheme ? (viewsOf(S.scheme)[0] || {}).view_key || '' : '';
     save();
     carRecords = [];
@@ -180,13 +185,14 @@
     try {
       const r = await readQr(file, (i, n) => say(st, 'info', `Читаю QR… ${i}/${n}`));
       if (!r.vin) {
-        say(st, 'warn', 'QR не прочитан. Снимите ближе — чтобы <b>нижний QR</b> занимал почти весь кадр, без бликов. Или введите VIN вручную.' +
+        say(st, 'warn', 'QR не прочитан. Снимите ближе — чтобы <b>верхний QR</b> занимал почти весь кадр, без бликов. Или введите VIN вручную.' +
           (r.text ? `<br><span class="text-sm">Прочитан другой код: ${esc(r.text.slice(0, 60))}</span>` : ''));
         return;
       }
       say(st, '', '');
-      await takeVin(r.vin);
-      toast('VIN прочитан: ' + r.vin);
+      await takeCar({ qr: r.text });
+      const sc = schemeByCode[S.scheme];
+      toast('VIN ' + S.vinKey + (sc ? ' · ' + sc.title : ''));
     } catch (e) {
       say(st, 'danger', esc(e.message && !/^\d+$/.test(e.message) ? e.message : 'Не удалось прочитать фото — попробуйте ещё раз'));
     }
@@ -207,12 +213,27 @@
     $('schemeText').innerHTML = sc ? `${esc(sc.title)} <small>· ${esc(sc.code)}</small>` : '';
     $('schemePick').hidden = !!sc;
     $('changeModelBtn').hidden = !sc;
+    if (!sc) $('schemePickNote').innerHTML = pickNote();
     $('schemeBtns').innerHTML = C.schemes.map(s =>
       `<button class="btn btn-ghost" type="button" data-scheme="${esc(s.code)}">${esc(s.title)}<br><small class="text-muted">${esc(s.code)}</small></button>`).join('');
     $('schemeCard').hidden = !sc;
     if (sc) { renderViews(); renderMap(true); }
     renderCarRecords();
     if (S.sel && sc) openSheet(); else closeSheet();
+  }
+
+  // почему модель не определилась сама — и что сделать в следующий раз
+  function pickNote() {
+    if (S.noScheme) {
+      return `Для модели <b>${esc(S.token)}</b> схемы шпилек на сайте нет. Сообщите WeldTeam. Если схема другой модели точно подходит — выберите её:`;
+    }
+    if (S.qr && S.token) {
+      return `Модель <b>${esc(S.token)}</b> из QR ещё не знакома — выберите её один раз, дальше схема откроется сама:`;
+    }
+    if (S.qr) {
+      return 'Это <b>нижний</b> QR — в нём только VIN. В следующий раз снимайте <b>верхний</b> QR (справа, «Multifilling + OTTC») — модель определится сама. Сейчас выберите модель:';
+    }
+    return 'Выберите модель машины:';
   }
 
   function pickScheme(code) {
@@ -384,6 +405,7 @@
       fd.append('vin', S.vin);
       fd.append('scheme_code', S.scheme);
       fd.append('stud_no', String(S.sel));
+      if (S.qr) fd.append('card_qr', S.qr);   // сырой текст QR: сервер сверит VIN и запомнит новую модель
       fd.append('photo', await shrinkPhoto(pendingPhoto));
       const res = await fetch('/api/studs/records', { method: 'POST', body: fd }).then(readJson);
       if (res.status !== 'success') { say($('sendStatus'), 'danger', esc(res.message || 'Не записано')); return; }
@@ -586,6 +608,32 @@
     } finally { btn.disabled = false; }
   }
 
+  // ── модели из QR (WeldTeam): модель верхнего QR → схема ────────────────────
+
+  function renderTokenList() {
+    $('tokenCard').hidden = !C.can_manage;
+    if (!C.can_manage) return;
+    const rows = C.model_tokens || [];
+    $('tokenList').innerHTML = rows.length ? rows.map(t => {
+      const sc = schemeByCode[t.scheme_code];
+      const who = t.who ? `запомнил ${esc(t.who)}` : 'задано заранее';
+      const target = t.scheme_code ? esc(sc ? sc.title : t.scheme_code) : '<i>схемы шпилек нет</i>';
+      return `<li><span><code>${esc(t.token)}</code> → ${target} <span class="text-muted text-sm">· ${who}, ${esc(fmtTime(t.created_at))}</span></span>
+        <button class="btn btn-ghost btn-sm" type="button" data-forget="${esc(t.token)}">забыть</button></li>`;
+    }).join('') : '<li class="text-muted">Пока ни одной</li>';
+  }
+
+  async function forgetToken(token) {
+    if (!confirm(`Забыть модель ${token}? При следующем скане её выберут заново. Записи журнала не изменятся.`)) return;
+    try {
+      const res = await fetch('/api/studs/model-tokens/' + encodeURIComponent(token), { method: 'DELETE' }).then(readJson);
+      say($('tokenStatus'), res.status === 'success' ? 'success' : 'danger', esc(res.message || 'Ошибка'));
+      if (res.status === 'success') { await loadCatalog(); renderTokenList(); }
+    } catch {
+      say($('tokenStatus'), 'danger', 'Нет связи с сервером — не изменено');
+    }
+  }
+
   // ── вкладки ────────────────────────────────────────────────────────────────
 
   function showTab(tab) {
@@ -615,7 +663,7 @@
       e.preventDefault();
       const raw = $('vinInput').value.trim();
       if (!raw) return;
-      try { await takeVin(raw); $('vinForm').hidden = true; $('vinInput').value = ''; say($('qrStatus'), '', ''); } catch (err) { say($('qrStatus'), 'warn', esc(err.message)); }
+      try { await takeCar({ vin: raw }); $('vinForm').hidden = true; $('vinInput').value = ''; say($('qrStatus'), '', ''); } catch (err) { say($('qrStatus'), 'warn', esc(err.message)); }
     });
 
     $('schemeBtns').addEventListener('click', e => {
@@ -698,6 +746,10 @@
       if (revRec && await deleteRecord(revRec.id)) { closeReview(); renderLog(); }
     });
     $('imgUpload').addEventListener('click', uploadImages);
+    $('tokenList').addEventListener('click', e => {
+      const b = e.target.closest('[data-forget]');
+      if (b) forgetToken(b.dataset.forget);
+    });
     window.addEventListener('hashchange', () => {
       if (location.hash === '#log' || location.hash === '#rec') showTab(location.hash.slice(1));
     });
@@ -714,6 +766,7 @@
     $('fScheme').innerHTML = '<option value="">Все модели</option>' +
       C.schemes.map(s => `<option value="${esc(s.code)}">${esc(s.title)}</option>`).join('');
     renderImgList();
+    renderTokenList();
 
     const prev = restore();
     if (prev && prev.vinKey) {

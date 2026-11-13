@@ -56,6 +56,23 @@ def vin_from_qr(text) -> str | None:
     return m.group(0) if m else None
 
 
+CARD_QR_MAX = 500                                  # сырой текст QR в записи (символов)
+_MODEL_TOKEN_RE = re.compile(r'[A-Z0-9][A-Z0-9_.\-]{1,39}')
+
+
+def parse_card_qr(text) -> dict:
+    """Текст QR контрольной карты → {'vin': VIN | None, 'model_token': модель | None}.
+
+    Верхний QR («Multifilling + OTTC QR»): VIN (17) + код комплектации | № ОТТС | МОДЕЛЬ |
+    массы…, например «MXMDB21B1TK003922CRA13TBE4GC82NS-----BLCHW---|TC_KZ_E-KZ.0774.00037|CHERY_TIGGO2_PRO|…».
+    Нижний («QR VIN номера») — только VIN, модели в нём нет. Одна функция разбора входа:
+    сам текст QR хранится в записи как есть, логика — только по её результату."""
+    raw = str(text or '').strip()
+    fields = raw.split('|')
+    token = re.sub(r'\s+', '_', fields[2].strip().upper()) if len(fields) >= 3 else ''
+    return {'vin': vin_from_qr(raw), 'model_token': token if _MODEL_TOKEN_RE.fullmatch(token) else None}
+
+
 def vin_prefix(key: str) -> str:
     return (key or '')[:VIN_PREFIX_LEN]
 
