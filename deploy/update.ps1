@@ -25,6 +25,30 @@ if (-not (Test-Path "$Dir\.git")) {
   Write-Host "No git checkout in $Dir - run deploy\setup_git.ps1 first." -ForegroundColor Red; exit 1
 }
 
+# Git: from PATH, else from the standard install folders (PATH of this user/console may lack it,
+# e.g. Git installed by another admin account). Nothing is touched until git is found.
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+  $cands = @("$env:ProgramFiles\Git\cmd", "${env:ProgramFiles(x86)}\Git\cmd", "$env:LOCALAPPDATA\Programs\Git\cmd") +
+           (Get-ChildItem 'C:\Users\*\AppData\Local\Programs\Git\cmd' -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object FullName)
+  $found = $cands | Where-Object { $_ -and (Test-Path (Join-Path $_ 'git.exe')) } | Select-Object -First 1
+  if (-not $found) {
+    Write-Host '[WeldTeam] ERROR: Git not found. Install it (Administrator PowerShell):' -ForegroundColor Red
+    Write-Host '    winget install -e --id Git.Git' -ForegroundColor Yellow
+    Write-Host '  then open a NEW Administrator PowerShell and run update.ps1 again. Nothing was changed.' -ForegroundColor Red
+    exit 1
+  }
+  $env:Path = "$found;$env:Path"
+  Write-Host "[WeldTeam] Git found at $found (not on PATH of this console)" -ForegroundColor Yellow
+}
+
+$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+         ).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
+if (-not $admin) {
+  Write-Host '[WeldTeam] ERROR: run in an Administrator PowerShell (right-click PowerShell -> Run as administrator) - restarting the service needs it. Nothing was changed.' -ForegroundColor Red
+  exit 1
+}
+
 # Allow git to operate on the folder even when update is run by a different user than
 # the repo owner (owner is usually BUILTIN\Administrators -> otherwise "dubious ownership").
 # Idempotent: add the safe.directory entry only if it is not present yet.
