@@ -24,7 +24,7 @@
 2. Откройте **PowerShell от имени администратора** (правой кнопкой → «Запуск от имени администратора»).
 3. Выполните команду (это ОДНА строка — скопируйте целиком; две части разделены `;`):
    ```powershell
-   Set-ExecutionPolicy -Scope Process Bypass -Force; iwr -useb https://raw.githubusercontent.com/Al1l-plup/-WT-/DEV/deploy/install.ps1 | iex
+   Set-ExecutionPolicy -Scope Process Bypass -Force; iwr -useb https://raw.githubusercontent.com/Al1l-plup/-WT-/PROD/deploy/install.ps1 | iex
    ```
    *(Если вводите вручную — сначала `Set-ExecutionPolicy -Scope Process Bypass -Force`,
    Enter, затем `iwr -useb …/install.ps1 | iex`, Enter. На одной строке без `;` PowerShell
@@ -35,7 +35,7 @@
    *Если репозиторий приватный и строка выше не сработала — сначала клонируйте, потом
    запустите локальный скрипт:*
    ```powershell
-   git clone -b DEV https://github.com/Al1l-plup/-WT-.git C:\WeldTeam
+   git clone -b PROD https://github.com/Al1l-plup/-WT-.git C:\WeldTeam
    C:\WeldTeam\deploy\install.ps1
    ```
 4. **Перенесите реальную базу:** скопируйте `data\welding_shop.db` с рабочего ПК в
@@ -46,7 +46,8 @@
 
 Готово — сайт работает и **поднимается сам после каждой перезагрузки** сервера.
 
-**Обновление до новой версии** (после того как запушили правки в `DEV`):
+**Обновление до новой версии** (после выпуска правок в боевую ветку `PROD` — сервер работает
+на ней; `DEV` — разработка и проверка, см. `CONTRIBUTING.md`):
 ```powershell
 powershell -ExecutionPolicy Bypass -File C:\WeldTeam\deploy\update.ps1
 ```
@@ -54,7 +55,7 @@ powershell -ExecutionPolicy Bypass -File C:\WeldTeam\deploy\update.ps1
 > НЕ было Git (код скачался ZIP-архивом), один раз выполните конвертацию в git-репозиторий
 > (ставит Git, бэкапит `.env` и базу, ничего не теряет):
 > ```powershell
-> Set-ExecutionPolicy -Scope Process Bypass -Force; iwr -useb https://raw.githubusercontent.com/Al1l-plup/-WT-/DEV/deploy/setup_git.ps1 | iex
+> Set-ExecutionPolicy -Scope Process Bypass -Force; iwr -useb https://raw.githubusercontent.com/Al1l-plup/-WT-/PROD/deploy/setup_git.ps1 | iex
 > ```
 > После этого обновления идут лёгкой командой `update.ps1` выше. Пока не сконвертировали —
 > обновляйтесь повторным запуском `install.ps1` (тоже сохраняет базу и `.env`).
@@ -106,7 +107,7 @@ powershell -ExecutionPolicy Bypass -File C:\WeldTeam\deploy\update.ps1
 cd C:\
 git clone https://github.com/Al1l-plup/-WT-.git WeldTeam
 cd C:\WeldTeam
-git checkout DEV
+git checkout PROD
 ```
 
 **Вариант Б — просто копированием:** заархивируйте папку проекта `-WT-` на своём

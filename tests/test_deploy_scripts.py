@@ -40,6 +40,15 @@ def test_update_finds_git_and_requires_admin():
     assert src.index('Git not found') < src.index('Git-Do -C $Dir fetch')
 
 
+@pytest.mark.parametrize('path', SCRIPTS, ids=lambda p: p.name)
+def test_server_runs_production_branch(path):
+    """Сервер цеха — ветка PROD; DEV (разработка и тест) попадает на сервер только через
+    вливание в PROD. Ни один скрипт не берёт код или сам себя из DEV."""
+    src = path.read_text(encoding='ascii')
+    assert re.search(r"\[string\]\$Branch\s*=\s*'PROD'", src), path.name
+    assert '/DEV/' not in src and "'DEV'" not in src, path.name
+
+
 @pytest.mark.skipif(not (shutil.which('powershell') or shutil.which('pwsh')), reason='нет PowerShell')
 @pytest.mark.parametrize('path', SCRIPTS, ids=lambda p: p.name)
 def test_scripts_parse(path):

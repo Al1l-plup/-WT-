@@ -1,17 +1,18 @@
 <#
-  Convert a ZIP-based WeldTeam install (no .git) into a proper Git checkout of DEV,
-  so future updates are a light `update.ps1` (git pull) instead of a full re-install.
+  Convert a ZIP-based WeldTeam install (no .git) into a proper Git checkout of the
+  production branch PROD, so future updates are a light `update.ps1` (git pull)
+  instead of a full re-install.
 
   Safe: backs up .env and the database first; Git overwrites only repo-tracked files,
   while .env / data\ / .venv / logs (gitignored) are preserved on disk.
 
   Run in an Administrator PowerShell:
-      Set-ExecutionPolicy -Scope Process Bypass -Force; iwr -useb https://raw.githubusercontent.com/Al1l-plup/-WT-/DEV/deploy/setup_git.ps1 | iex
+      Set-ExecutionPolicy -Scope Process Bypass -Force; iwr -useb https://raw.githubusercontent.com/Al1l-plup/-WT-/PROD/deploy/setup_git.ps1 | iex
 #>
 param(
   [string]$Dir    = 'C:\WeldTeam',
   [string]$Repo   = 'https://github.com/Al1l-plup/-WT-.git',
-  [string]$Branch = 'DEV'
+  [string]$Branch = 'PROD'
 )
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12

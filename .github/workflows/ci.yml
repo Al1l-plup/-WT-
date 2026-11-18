@@ -1,8 +1,10 @@
 name: CI
 
+# DEV — разработка и тест, PROD — то, что работает на сервере цеха. Pull Request в любую
+# из них проверяется до вливания (в PROD без зелёной проверки не вливаем — см. CONTRIBUTING).
 on:
   push:
-    branches: [DEV, PROD, main]
+    branches: [DEV, PROD]
   pull_request:
 
 jobs:

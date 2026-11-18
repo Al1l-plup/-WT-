@@ -100,9 +100,10 @@ app/
 
 ## 8. Git-workflow
 
-- Ветки: **`DEV` — рабочая** (сюда коммитим, с неё разворачивается сервер), `main` — стабильная
-  линия (намеренно пустая), `feature/*`/`fix/*` — от `DEV` для крупных задач. Подробности — в `CONTRIBUTING.md`.
-- **Conventional Commits**: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`, `build:`.
+- Ветки, Pull Request'ы, формат сообщений коммитов и проверки перед push — в одном месте:
+  [`CONTRIBUTING.md`](../CONTRIBUTING.md) (`PROD` — боевая, с неё обновляется сервер; `DEV` —
+  разработка и проверка; задачи — в `feature/*`/`fix/*` от `DEV` через Pull Request, выпуск —
+  вливание `DEV` → `PROD`).
 - Коммиты — небольшие и логически цельные; репозиторий должен быть работоспособен на каждом коммите.
 - Не коммитим: `.venv/`, `.env`, `data/welding_shop.db`, `__pycache__/`, `backups/`, служебные файлы SQLite.
 
@@ -167,7 +168,7 @@ ruff check app tests                   # линт
 - [ ] Изменения схемы — новой Alembic-ревизией (`alembic revision`), не правкой БД руками.
 - [ ] Ошибки не возвращают внутренние детали клиенту (`api_error`).
 - [ ] Изменил справочные данные → пересобрал `db/seed.sql` (`python scripts/dump_seed.py`).
-- [ ] Осмысленный commit-message (Conventional Commits); ветка `feature/*`/`fix/*` от `DEV`.
+- [ ] Осмысленный commit-message (`Раздел: что изменилось`, см. CONTRIBUTING); ветка `feature/*`/`fix/*` от `DEV`.
 - [ ] Для деструктивных операций с данными — сделан бэкап.
 - [ ] Новая страница → есть `viewport`/`theme-color`/`lang`, поля 16px, тач-цели ≥44px (§9a).
 

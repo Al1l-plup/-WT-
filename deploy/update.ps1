@@ -1,13 +1,14 @@
 <#
-  Update WeldTeam MES on the server to the latest code and restart the service.
-  Run in an Administrator PowerShell:
+  Update WeldTeam MES on the server to the latest PRODUCTION code (branch PROD) and restart
+  the service. DEV is the development/test branch - it reaches the server only after it is
+  merged into PROD. Run in an Administrator PowerShell:
       powershell -ExecutionPolicy Bypass -File C:\WeldTeam\deploy\update.ps1
   The database (data\welding_shop.db) is NOT touched; schema migrates on start.
   Messages are in English on purpose (reliable under any Windows codepage).
 #>
 param(
   [string]$Dir     = 'C:\WeldTeam',
-  [string]$Branch  = 'DEV',
+  [string]$Branch  = 'PROD',
   [string]$Service = 'WeldTeamMES'
 )
 $ErrorActionPreference = 'Stop'

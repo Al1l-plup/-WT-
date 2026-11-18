@@ -18,14 +18,15 @@
 
   Or fetch and run in one line (public repo):
       Set-ExecutionPolicy -Scope Process Bypass -Force
-      iwr -useb https://raw.githubusercontent.com/Al1l-plup/-WT-/DEV/deploy/install.ps1 | iex
+      iwr -useb https://raw.githubusercontent.com/Al1l-plup/-WT-/PROD/deploy/install.ps1 | iex
 
+  The server runs the PRODUCTION branch (PROD); DEV is the development/test branch.
   Messages are in English on purpose (reliable under any Windows codepage).
 #>
 param(
   [string]$Dir     = 'C:\WeldTeam',
   [string]$Repo    = 'https://github.com/Al1l-plup/-WT-.git',
-  [string]$Branch  = 'DEV',
+  [string]$Branch  = 'PROD',
   [string]$Service = 'WeldTeamMES',
   [int]   $Port    = 5000,
   [switch]$FreshDb                      # existing install without a DB: build an EMPTY one on purpose
