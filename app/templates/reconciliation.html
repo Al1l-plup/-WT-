@@ -7,6 +7,7 @@
   <meta name="description" content="WeldTeam MES — сверка данных с Weld Balance">
   <title>Сверка · WeldTeam MES</title>
   <script src="/static/theme.js"></script>
+  <script src="/static/page-state.js?v=1"></script>
   <link rel="stylesheet" href="/static/style.css">
   <style>
     .muted{opacity:.7;font-size:12px}
@@ -104,6 +105,7 @@ async function load(){
   $('groups').innerHTML = '<p class="muted">Загрузка…</p>';
   const r = await fetch('/api/wb-issues?status=' + encodeURIComponent($('fStatus').value));
   DATA = await r.json();
+  if (FKIND && !DATA.issues.some(i => i.kind === FKIND)) FKIND = '';   // сохранённого типа уже нет — не прячем всё
   renderSync(); renderKinds(); render();
 }
 
@@ -180,6 +182,7 @@ function editorLinks(items, label){
 const gunLink = i => i.gun_id ? `<a class="go alt" href="/explorer?mode=gun&id=${i.gun_id}" title="Паспорт пистолета в «Обзоре»">паспорт G${escapeHtml(String(i.g_num ?? ''))}</a>` : '';
 
 function render(){
+  saveView();
   const q = $('fq').value.trim().toLowerCase();
   const rows = DATA.issues.filter(i => (!FKIND || i.kind === FKIND) &&
     (!PRE_KINDS.length || PRE_KINDS.includes(i.kind)) && (!PRE_MODEL || i.model_code === PRE_MODEL) &&
@@ -289,6 +292,16 @@ async function save(id, patch){
 $('fStatus').onchange = load;
 $('refresh').onclick = load;
 $('fq').oninput = () => DATA && render();
+
+// Вид «Сверки» (статус, поиск, выбранный тип) переживает переход в другой раздел сайта
+// (static/page-state.js). Пришли по ссылке из Редактора (?kinds=) — главнее ссылка.
+function saveView(){ if (!PRE_KINDS.length) PageState.save('recon', {status: $('fStatus').value, q: $('fq').value, kind: FKIND}); }
+const savedView = PRE_KINDS.length ? null : PageState.load('recon');
+if (savedView){
+  if ([...$('fStatus').options].some(o => o.value === savedView.status)) $('fStatus').value = savedView.status;
+  $('fq').value = savedView.q || '';
+  FKIND = savedView.kind || '';
+}
 load();
 </script>
 </body>

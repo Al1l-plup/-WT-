@@ -8,6 +8,7 @@
   <title>Аналитика дефектов — WeldTeam MES</title>
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/theme.js"></script>
+  <script src="/static/page-state.js?v=1"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
@@ -132,6 +133,16 @@ const COLORS = ['#f85149','#fd8e73','#d29922','#e3b341','#3fb950','#58a6ff','#79
 let pieChart = null;
 let activePeriod = 'month';
 
+// Вид «Аналитики» (период, даты, модель, станция) переживает переход в другой раздел сайта
+// (static/page-state.js). Сохраняется то, что применили кнопкой «Применить».
+const SAVED = PageState.load('analytics');
+const RESTORE_MODEL = !!(SAVED && SAVED.model);
+function saveAnalytics() {
+  PageState.save('analytics', {period: activePeriod, from: document.getElementById('dateFrom').value,
+                               to: document.getElementById('dateTo').value, model: filterModel.value, station: filterStation.value});
+}
+const hasOption = (sel, v) => [...sel.options].some(o => o.value === v);
+
 // Пресеты периода
 document.querySelectorAll('[data-period]').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -141,24 +152,39 @@ document.querySelectorAll('[data-period]').forEach(btn => {
     document.getElementById('customDates').classList.toggle('hidden', activePeriod !== 'custom');
   });
 });
+if (SAVED) {
+  const b = SAVED.period && document.querySelector(`[data-period="${CSS.escape(SAVED.period)}"]`);
+  if (b) b.click();
+  document.getElementById('dateFrom').value = SAVED.from || '';
+  document.getElementById('dateTo').value = SAVED.to || '';
+}
 
 // Модели авто + станции
 let analyticsModels = [];
 fetch('/api/models').then(r => r.json()).then(data => {
   analyticsModels = data;
   data.forEach(m => filterModel.add(new Option(m.display_name, m.UniqueID)));
-});
-filterModel.addEventListener('change', () => {
+  if (!RESTORE_MODEL) return;
+  // сохранённая модель → её станции → сохранённая станция → только теперь данные
+  if (!hasOption(filterModel, SAVED.model)) { applyFilters(); return; }
+  filterModel.value = SAVED.model;
+  loadStations().then(() => {
+    if (SAVED.station && hasOption(filterStation, SAVED.station)) filterStation.value = SAVED.station;
+    applyFilters();
+  });
+}).catch(() => { if (RESTORE_MODEL) applyFilters(); });
+function loadStations() {
   filterStation.innerHTML = '<option value="">Все станции</option>';
   filterStation.disabled = !filterModel.value;
-  if (!filterModel.value) return;
+  if (!filterModel.value) return Promise.resolve();
   const modelObj = analyticsModels.find(m => String(m.UniqueID) === filterModel.value);
-  if (!modelObj) return;
-  fetch(`/api/stations?brand_id=${modelObj.brand_id}`).then(r => r.json()).then(data => {
+  if (!modelObj) return Promise.resolve();
+  return fetch(`/api/stations?brand_id=${modelObj.brand_id}`).then(r => r.json()).then(data => {
     data.forEach(s => filterStation.add(new Option(s.station_name, s.UniqueID)));
     filterStation.disabled = false;
   });
-});
+}
+filterModel.addEventListener('change', loadStations);
 
 document.getElementById('applyBtn').addEventListener('click', applyFilters);
 
@@ -167,16 +193,19 @@ function getDateRange() {
   if (activePeriod === 'custom') {
     return { from: document.getElementById('dateFrom').value, to: document.getElementById('dateTo').value };
   }
-  const to = now.toISOString().split('T')[0];
+  // дата по МЕСТНОМУ времени (toISOString — UTC: до 5 утра по Казахстану было бы «вчера»)
+  const iso = d => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const to = iso(now);
   const from = new Date(now);
   if (activePeriod === 'month')  from.setDate(1);
   if (activePeriod === '3m')     from.setMonth(from.getMonth() - 3);
   if (activePeriod === '6m')     from.setMonth(from.getMonth() - 6);
   if (activePeriod === 'year')   from.setFullYear(from.getFullYear() - 1);
-  return { from: from.toISOString().split('T')[0], to };
+  return { from: iso(from), to };
 }
 
 function applyFilters() {
+  saveAnalytics();
   const { from, to } = getDateRange();
   const model   = filterModel.value;
   const station = filterStation.value;
@@ -274,8 +303,8 @@ function render(data) {
   </tr>`).join('');
 }
 
-// Загрузить при открытии
-applyFilters();
+// Загрузить при открытии (с сохранённой моделью — после её восстановления, см. выше)
+if (!RESTORE_MODEL) applyFilters();
 </script>
 </body>
 </html>

@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/sheet.css">
   <script src="/static/theme.js"></script>
+  <script src="/static/page-state.js?v=1"></script>
   <style>
     .dtabs{display:flex;gap:.3rem;flex-wrap:wrap;margin-bottom:1rem;border-bottom:1px solid var(--border);padding-bottom:.6rem}
     .dtab{padding:6px 12px;border-radius:var(--r-sm);border:1px solid transparent;background:none;color:var(--muted);font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:.45rem}
@@ -565,6 +566,7 @@ fetch('/api/me').then(r=>r.json()).then(me=>{
   if (me.can_edit_docs) $('editorCard').hidden = false;
   $('whoami').textContent = me.dept ? `· вы: ${deptLabel(me.dept)}` : '';
   renderTgBanner(me);
+  restoreDefUi();          // вкладка, даты, фильтры, сортировка, поиск — как оставили (даты нужны уже запросу)
   loadBoard();
   openFromHash();
 }).catch(() => {
@@ -966,8 +968,34 @@ function openColFilter(ck, btn){
   }
   window._dbf = p;
 }
+// Вид доски переживает переход в другой раздел сайта и обратно (static/page-state.js): сюда
+// сходятся все изменения — вкладка, даты, чек-фильтры колонок, сортировка, поиск, «Сбросить все».
+var uiRestored = false;     // до восстановления не сохраняем: ранняя перерисовка затёрла бы сохранённый вид (var — без «мёртвой зоны» let)
+function saveDefUi(){
+  if (!uiRestored) return;
+  PageState.save('defects', {tab: TAB, from: $('fFrom').value, to: $('fTo').value, gq: GQ, sort: SORT,
+                             filt: Object.fromEntries(Object.entries(FILT).map(([k, s]) => [k, [...s]]))});
+}
+function restoreDefUi(){
+  uiRestored = true;
+  const s = PageState.load('defects');
+  if (!s) return;
+  if (s.tab && document.querySelector(`.dtab[data-tab="${CSS.escape(s.tab)}"]`)){
+    TAB = s.tab;
+    document.querySelectorAll('.dtab').forEach(t => t.classList.toggle('active', t.dataset.tab === TAB));
+  }
+  $('fFrom').value = typeof s.from === 'string' ? s.from : '';
+  $('fTo').value = typeof s.to === 'string' ? s.to : '';
+  FILT = {};
+  for (const [k, vals] of Object.entries(s.filt || {})){
+    if (COLS.some(c => c.k === k) && Array.isArray(vals)) FILT[k] = new Set(vals.map(String));
+  }
+  if (s.sort && (s.sort.col === null || COLS.some(c => c.k === s.sort.col))) SORT = {col: s.sort.col, dir: s.sort.dir === -1 ? -1 : 1};
+  GQ = typeof s.gq === 'string' ? s.gq : '';
+}
 function renderRows(){
   const tb = $('dtbody'); if (!tb) return;
+  saveDefUi();
   updateFilterSummary();   // при любом ре-рендере (вкл. ввод в мобильный поиск) кнопка «Сбросить все» отражает состояние
   const rows = currentRows();
   if (!rows.length){
@@ -1384,7 +1412,7 @@ function initRegistration(){
   manGunNum.addEventListener('keydown', e => { if (e.key==='Enter') $('manRegBtn').click(); });
 }
 </script>
-<script src="/static/sheet.js?v=14"></script>
+<script src="/static/sheet.js?v=15"></script>
 <script src="/static/editor-embed.js?v=4"></script>
 <script>
 (function(){

@@ -341,7 +341,8 @@
   </ul>
 </dialog>
 
-<script src="/static/sheet.js?v=14"></script>
+<script src="/static/page-state.js?v=1"></script>
+<script src="/static/sheet.js?v=15"></script>
 <script>
 const $ = s => document.querySelector(s);
 // автор правок определяется на сервере по сессии входа
@@ -387,6 +388,29 @@ const GROUPS_FALLBACK=[{key:'source',title:'Эталон'},{key:'refs',title:'С
 // localStorage может быть недоступен (приватный режим) — это только удобство, не данные
 const lsGet=k=>{ try{ return localStorage.getItem(k); }catch(e){ return null; } };
 const lsSet=(k,v)=>{ try{ localStorage.setItem(k,v); }catch(e){} };
+
+// Вид документа — фильтры колонок, сортировка, поиск, прокрутка — переживает переход в другой
+// раздел сайта и обратно (static/page-state.js). Свой у каждого документа и у каждой таблицы
+// «Все таблицы». Фильтр из «Сверки» (?issues=) — по ссылке, сохранённый вид тогда не подмешиваем.
+const edKey = ()=> (mode==='raw' ? 'ed:raw:' : 'ed:doc:') + cur;
+let restoreScroll = 0;                       // прокрутку возвращаем один раз — при открытии
+function saveEd(){
+  if(!cur || mode==='map' || !sheet || IFILTER) return;
+  PageState.save(edKey(), {q: $('#q').value, view: sheet.getViewState(), scroll: sheet.el.scrollTop});
+}
+function prepareEd(){                        // перед загрузкой: поиск и прокрутка этого документа
+  const st = IFILTER ? null : PageState.load(edKey());
+  $('#q').value = (st && st.q) || '';
+  restoreScroll = (st && st.scroll) || 0;
+}
+function applyEd(){                          // таблица создана: вернуть её фильтры и сортировку
+  sheet.onViewChange = saveEd;
+  const st = IFILTER ? null : PageState.load(edKey());
+  if(st && st.view) sheet.setViewState(st.view);
+  if(restoreScroll){ const y = restoreScroll; restoreScroll = 0; requestAnimationFrame(()=>{ if(sheet) sheet.el.scrollTop = y; }); }
+  else saveEd();
+}
+window.addEventListener('pagehide', saveEd);
 async function refreshMap(){ try{ MAP = await jget('/api/admin/data-map'); }catch(e){ MAP=null; } }
 
 async function init(openId){
@@ -414,7 +438,9 @@ async function init(openId){
     });
     // открываем то, на чём остановились (первый вход — «Карта данных»)
     const want = openId || lsGet('wt-editor-view');
-    if(want && DOCS.some(d=>d.id===want)) openDoc(want, null, want===URL_DOC); else showMap();
+    if(want && DOCS.some(d=>d.id===want)) openDoc(want, null, want===URL_DOC);
+    else if(want==='raw' && $('#tabs').querySelector('[data-raw]')) openRaw();
+    else showMap();
   } catch(e){
     $('#tabs').innerHTML = `<div style="color:var(--danger,#c0392b);padding:8px 0">Не удалось загрузить редактор (${escapeHtml(e.message)}).<br>Обновите страницу; если не помогло — перезапустите сервер (обновилась версия кода).</div>`;
   }
@@ -425,6 +451,7 @@ function showArea(which){
   $('#editorArea').style.display = which==='map' ? 'none' : '';
 }
 function showMap(){
+  saveEd();
   dropIssueFilter();
   mode='map'; cur=null; sheet=null; childSheet=null; lsSet('wt-editor-view','map');
   markTab([...$('#tabs').querySelectorAll('.tab')].find(t=>t.dataset.map));
@@ -498,8 +525,9 @@ function markTab(el){ $('#tabs').querySelectorAll('.tab').forEach(x=>x.classList
 
 // ── документы ──────────────────────────────────────────────────────────────
 async function openDoc(id, el, keepFilter=false){
+  saveEd();                                  // вид прежнего документа (прокрутка) — до переключения
   if(!keepFilter) dropIssueFilter();
-  mode='doc'; cur=id; page=0; sort=''; $('#q').value=''; $('#tables').style.display='none';
+  mode='doc'; cur=id; page=0; sort=''; prepareEd(); $('#tables').style.display='none';
   markTab(el||[...$('#tabs').querySelectorAll('.tab')].find(t=>t.dataset.doc===id));
   lsSet('wt-editor-view', id); showArea('doc'); $('#saveNote').textContent='';
   await loadDoc();
@@ -532,6 +560,7 @@ async function loadDoc(){
   sheet.onSort=col=>{ if(!guard())return; if(sort===col){ if(dir==='asc'){dir='desc';} else {sort=''; dir='asc';} }else{sort=col;dir='asc';} page=0; loadDoc(); };
   sheet.onSelect = childCfg ? (r,row)=>selectPoint(row) : null;
   wireSheet(sheet);
+  applyEd();
   $('#title').textContent=d.title;
   lastCols=d.columns; renderBanner(cur, lastCols); renderIssueChip(d.total);
   // пустой документ: куда кликнуть, чтобы вставить лист из Excel
@@ -581,17 +610,21 @@ async function saveChild(){
 
 // ── режим «Все таблицы» ──────────────────────────────────────────────────────
 async function openRaw(){
+  saveEd();
   dropIssueFilter();
-  mode='raw'; cur=null; $('#childWrap').style.display='none'; $('#title').textContent='';
+  mode='raw'; cur=null; lsSet('wt-editor-view','raw'); $('#childWrap').style.display='none'; $('#title').textContent='';
   showArea('doc'); $('#docBanner').innerHTML=''; $('#saveNote').textContent='';
   markTab([...$('#tabs').querySelectorAll('.tab')].find(t=>t.dataset.raw));
   $('#tables').style.display=''; $('#sheet').innerHTML='';
   const t = await jget('/api/admin/tables');
   $('#tables').innerHTML = t.map(x=>`<a data-t="${escapeHtml(x.name)}"><span>${escapeHtml(x.name)}</span><span class="c">${x.rows}</span></a>`).join('');
   $('#tables').querySelectorAll('a').forEach(a=>a.onclick=()=>{ if(guard()) selectRawTable(a.dataset.t); });
+  const last = PageState.load('ed:rawtable');           // таблица, на которой остановились
+  if(last && t.some(x=>x.name===last)) selectRawTable(last);
 }
 async function selectRawTable(name){
-  cur=name; page=0; sort=''; $('#q').value='';
+  saveEd();
+  cur=name; page=0; sort=''; prepareEd(); PageState.save('ed:rawtable', name);
   $('#tables').querySelectorAll('a').forEach(a=>a.classList.toggle('on',a.dataset.t===name));
   await loadRaw();
 }
@@ -605,6 +638,7 @@ async function loadRaw(){
   sheet.onChange=setCnt;
   sheet.onSort=col=>{ if(!guard())return; if(sort===col){ if(dir==='asc'){dir='desc';} else {sort=''; dir='asc';} }else{sort=col;dir='asc';} page=0; loadRaw(); };
   wireSheet(sheet);
+  applyEd();
   $('#title').textContent=cur; pageBar(d);
 }
 async function saveRaw(){

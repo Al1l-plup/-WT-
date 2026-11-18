@@ -966,9 +966,28 @@ class Sheet {
     if (!this._sort || this._sort.col !== name) this._sort = { col: name, dir: 'asc' };
     else if (this._sort.dir === 'asc') this._sort = { col: name, dir: 'desc' };
     else this._sort = null;
+    this.render(); this._recompute(); this._viewChanged();
+  }
+  _setSort(name, dir) { this._sort = { col: name, dir }; this.render(); this._recompute(); this._viewChanged(); }
+
+  // Вид таблицы (фильтры колонок + сортировка) — чтобы страница запомнила его между переходами
+  // по разделам сайта. Значения фильтра — отображаемый текст ячеек, как в попапе «▾».
+  getViewState() {
+    const filters = {};
+    for (const [k, s] of Object.entries(this.colFilters)) filters[k] = [...s];
+    return { filters, sort: this._sort ? { col: this._sort.col, dir: this._sort.dir } : null };
+  }
+  setViewState(st) {
+    if (!st) return;
+    const names = new Set(this.allCols.map(c => c.name));
+    this.colFilters = {};
+    for (const [k, vals] of Object.entries(st.filters || {})) {
+      if (names.has(k) && Array.isArray(vals)) this.colFilters[k] = new Set(vals.map(String));
+    }
+    if (st.sort && names.has(st.sort.col)) this._sort = { col: st.sort.col, dir: st.sort.dir === 'desc' ? 'desc' : 'asc' };
     this.render(); this._recompute();
   }
-  _setSort(name, dir) { this._sort = { col: name, dir }; this.render(); this._recompute(); }
+  _viewChanged() { if (this.onViewChange) this.onViewChange(this.getViewState()); }
 
   _openFilter(name, btn) {
     this._closeFilter(); this._closeMenu();
@@ -1023,10 +1042,10 @@ class Sheet {
       items().forEach((it, i) => { if (it.firstChild.checked) picked.add(shown[i]); });
       if (!capped && picked.size === shown.length) delete this.colFilters[name];   // всё выбрано → фильтра нет
       else this.colFilters[name] = picked;
-      this._closeFilter(); this._markFilterBtns(); this._recompute();
+      this._closeFilter(); this._markFilterBtns(); this._recompute(); this._viewChanged();
     };
     p.querySelector('.sf-cancel').onclick = () => this._closeFilter();
-    p.querySelector('.sf-clear').onclick = () => { delete this.colFilters[name]; this._closeFilter(); this._markFilterBtns(); this._recompute(); };
+    p.querySelector('.sf-clear').onclick = () => { delete this.colFilters[name]; this._closeFilter(); this._markFilterBtns(); this._recompute(); this._viewChanged(); };
     p.querySelectorAll('.sf-sort button').forEach(b => b.onclick = () => { this._closeFilter(); this._setSort(name, b.dataset.sort); });
 
     this._filterEsc = (e) => { if (e.key === 'Escape') this._closeFilter(); };

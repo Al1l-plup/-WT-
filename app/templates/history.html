@@ -7,6 +7,7 @@
   <meta name="description" content="WeldTeam MES — система управления точечной сваркой цеха BS">
   <title>Журнал версий · WeldTeam MES</title>
   <script src="/static/theme.js"></script>
+  <script src="/static/page-state.js?v=1"></script>
   <link rel="stylesheet" href="/static/style.css">
   <style>
     .bar{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
@@ -192,7 +193,11 @@ $('#fltTable').onchange = loadHistory;
 $('#fltAuthor').onchange = loadHistory;
 $('#fltFrom').onchange = loadHistory;
 $('#fltTo').onchange = loadHistory;
-(async () => { await loadLabels(); await loadTables(); loadHistory(); loadRP(); })();
+// фильтры журнала переживают переход в другой раздел сайта (static/page-state.js);
+// документ восстанавливаем после загрузки списка документов
+const FLT = ['fltTable', 'fltAuthor', 'fltFrom', 'fltTo'];
+PageState.trackFields('history', FLT);
+(async () => { await loadLabels(); await loadTables(); PageState.restoreFields('history', FLT); loadHistory(); loadRP(); })();
 </script>
 </body>
 </html>

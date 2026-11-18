@@ -765,6 +765,13 @@
     }
     $('fScheme').innerHTML = '<option value="">Все модели</option>' +
       C.schemes.map(s => `<option value="${esc(s.code)}">${esc(s.title)}</option>`).join('');
+    // фильтры журнала переживают переход в другой раздел сайта (static/page-state.js);
+    // модель — после того, как список моделей заполнен
+    if (window.PageState) {
+      const LOG_FILTERS = ['fStatus', 'fScheme', 'fQ', 'fFrom', 'fTo'];
+      PageState.restoreFields('studs-log', LOG_FILTERS);
+      PageState.trackFields('studs-log', LOG_FILTERS);
+    }
     renderImgList();
     renderTokenList();
 
