@@ -41,18 +41,44 @@ def _photo_dir():
     return d
 
 
-def _photo_stage(db, defect_id):
-    """(stage_id, stage_dept) этапа, на котором ДОБАВЛЯЕТСЯ фото: текущий открытый этап
-    дефекта (left_at IS NULL); иначе — последний этап; иначе — current_stage_dept."""
-    r = db.execute("""SELECT UniqueID, dept FROM defect_stage
-                      WHERE defect_id=? AND left_at IS NULL ORDER BY UniqueID DESC LIMIT 1""", (defect_id,)).fetchone()
-    if not r:
-        r = db.execute('SELECT UniqueID, dept FROM defect_stage WHERE defect_id=? ORDER BY UniqueID DESC LIMIT 1',
-                       (defect_id,)).fetchone()
-    if r:
-        return r['UniqueID'], r['dept']
-    cur = db.execute('SELECT current_stage_dept FROM defects WHERE UniqueID=?', (defect_id,)).fetchone()
-    return None, (cur['current_stage_dept'] if cur else None)
+def _open_stage_of(db, defect_id, dept=None):
+    """UniqueID открытого этапа дефекта (left_at IS NULL); dept — только этап этого отдела."""
+    r = db.execute("""SELECT UniqueID FROM defect_stage
+                      WHERE defect_id=? AND left_at IS NULL AND (? IS NULL OR dept=?)
+                      ORDER BY UniqueID DESC LIMIT 1""", (defect_id, dept, dept)).fetchone()
+    return r[0] if r else None
+
+
+def _can_upload_photo(dept, priv, current_stage_dept):
+    """Добавить фото из карточки: отдел текущего этапа, УЗК (снимает дефект в любой момент)
+    и WeldTeam/админ (аварийный клапан)."""
+    return bool(priv or dept == df.OTK or (dept and dept == current_stage_dept))
+
+
+def _photo_target(db, defect_id, dept, priv):
+    """Куда ложится фото, добавленное из карточки, — на шаг ЗАГРУЗИВШЕГО, а не на этап, где
+    сейчас дефект. Возвращает (stage_id, stage_dept, occurrence_id):
+    1) у дефекта открыт этап отдела загрузившего → этот этап (УЗК на согласовании закрытия,
+       Производство на своём этапе и т.д.);
+    2) УЗК, когда дефект не на этапе УЗК, → к последнему выявлению: регистрация — шаг УЗК;
+    3) WeldTeam/админ (аварийный клапан действует за текущий этап) → текущий открытый этап;
+    4) иначе — последний этап отдела загрузившего; нет такого — фото без этапа.
+    Регистрация кладёт фото к своему выявлению сама (см. _save_photos)."""
+    own = _open_stage_of(db, defect_id, dept)
+    if own:
+        return own, dept, None
+    if dept == df.OTK:
+        occ = db.execute('SELECT MAX(UniqueID) FROM defect_occurrence WHERE defect_id=?', (defect_id,)).fetchone()[0]
+        if occ:
+            return None, df.OTK, occ
+    if priv:
+        cur = db.execute("""SELECT UniqueID, dept FROM defect_stage WHERE defect_id=? AND left_at IS NULL
+                            ORDER BY UniqueID DESC LIMIT 1""", (defect_id,)).fetchone()
+        if cur:
+            return cur['UniqueID'], cur['dept'], None
+    last = db.execute('SELECT MAX(UniqueID) FROM defect_stage WHERE defect_id=? AND dept=?',
+                      (defect_id, dept)).fetchone()[0]
+    return last, dept, None
 
 
 def _del_photo_file(fname):
@@ -65,19 +91,35 @@ def _del_photo_file(fname):
         pass
 
 
+# Фото дефекта со всем, что нужно правилу удаления (_can_delete_photo) и карточке: открыт ли
+# этап фото; открыт ли этап, на котором дефект был в момент снимка (для фото выявления); кто
+# снял. Одна выборка для карточки и для DELETE — правило не расходится.
+_PHOTO_SQL = """
+    SELECT dp.UniqueID, dp.path, dp.uploaded_by, dp.stage_id, dp.stage_dept, dp.occurrence_id, dp.ts,
+           dp.taken_at_stage_id, s.left_at AS stage_left_at, ts_.left_at AS taken_stage_left_at,
+           d.current_stage_dept,
+           TRIM(w.surname || ' ' || substr(w.name, 1, 1) || '.') AS by_name
+    FROM defect_photo dp
+    JOIN defects d ON d.UniqueID = dp.defect_id
+    LEFT JOIN defect_stage s ON s.UniqueID = dp.stage_id
+    LEFT JOIN defect_stage ts_ ON ts_.UniqueID = dp.taken_at_stage_id
+    LEFT JOIN worker w ON w.UniqueID = dp.uploaded_by"""
+
+
 def _can_delete_photo(p, uid, is_admin):
     """Удалить фото: реальный админ — любое; остальные — ТОЛЬКО то, что загрузили САМИ
-    (dp.uploaded_by == uid), и только пока его этап ещё открыт (после передачи дальше —
-    заморожено). Владение фото — по загрузившему, а не по отделу текущего этапа: иначе
-    фото, снятое ОТК при регистрации, попадает на этап получателя и получатель мог его
-    удалить, а сам автор — нет."""
+    (dp.uploaded_by == uid), и только пока его шаг не пройден (после передачи дальше —
+    заморожено): фото этапа — пока этап открыт; фото выявления (регистрация УЗК) — пока
+    открыт этап, на котором дефект был в момент снимка (taken_at_stage_id)."""
     if is_admin:
         return True
     if p['uploaded_by'] is None or p['uploaded_by'] != uid:
         return False
     if p['stage_id'] is not None:
         return p['stage_left_at'] is None                  # этап фото ещё не закрыт (не передан дальше)
-    return p['stage_dept'] == p['current_stage_dept']      # фото без привязки к этапу — грубый прокси «активно»
+    if p['occurrence_id'] is not None:                     # фото выявления: дефект ещё не ушёл дальше
+        return p['taken_at_stage_id'] is None or p['taken_stage_left_at'] is None
+    return p['stage_dept'] == p['current_stage_dept']      # старое фото без привязки — грубый прокси «активно»
 
 
 def _denied_edit():
@@ -97,15 +139,24 @@ def _reg_input():
     return (request.get_json(silent=True) or {}), []
 
 
-def _save_photos(db, defect_id, photos, uid):
-    """Сохранить фото, пометив их ЭТАПОМ ДЕФЕКТА (где оно добавлено), а не отделом загрузившего."""
-    sid, sdept = _photo_stage(db, defect_id)
+def _save_photos(db, defect_id, photos, uid, target):
+    """Сохранить фото на шаг загрузившего. target = (stage_id, stage_dept, occurrence_id):
+    из _photo_target (фото из карточки) или (None, ОТК, выявление) — фото регистрации."""
+    sid, sdept, occ = target
+    taken_at = _open_stage_of(db, defect_id)   # где был дефект в момент снимка (для фото выявления — до какого шага удалять)
     for f in photos:
         ext = os.path.splitext(f.filename)[1].lower()
         fname = f'{defect_id}_{uuid.uuid4().hex}{ext}'
         f.save(os.path.join(_photo_dir(), fname))
-        db.execute('INSERT INTO defect_photo (defect_id, path, uploaded_by, stage_dept, stage_id, ts) VALUES (?,?,?,?,?,?)',
-                   (defect_id, fname, uid, sdept, sid, df._now()))
+        db.execute("""INSERT INTO defect_photo
+                        (defect_id, path, uploaded_by, stage_dept, stage_id, occurrence_id, taken_at_stage_id, ts)
+                      VALUES (?,?,?,?,?,?,?,?)""", (defect_id, fname, uid, sdept, sid, occ, taken_at, df._now()))
+
+
+def _registration_target(res):
+    """Фото, снятое при регистрации, — к ЭТОМУ выявлению (шаг УЗК), а не к этапу отдела,
+    куда дефект ушёл после регистрации (Производство / отдел, закрывший дефект при повторе)."""
+    return None, df.OTK, res['occurrence_id']
 
 
 def _photo_required_error(db, photos):
@@ -174,7 +225,7 @@ def register_defect():
                    f'⚠ Точка №{spot_number} не найдена в БД — уточните при рассмотрении.')
         if res['serial']:
             msg = _repeat_message(db, res, problem_code, spot_number)
-        _save_photos(db, res['defect_id'], photos, uid)   # снимок сделала регистрация (до цепочки)
+        _save_photos(db, res['defect_id'], photos, uid, _registration_target(res))
         db.commit()
         return jsonify({'status': 'success', 'message': msg, 'serial': res['serial'],
                         'stage': res['stage'], 'defect_id': res['defect_id'], 'found_in_db': bool(row)})
@@ -606,7 +657,7 @@ def register_defect_manual():
                                 (int(g_num),)).lastrowid
         res = df.register_occurrence(db, problem_code=problem_code, gun_id=gun_id, registered_by=uid,
                                      comment=df.clean_comment(data.get('comment')))
-        _save_photos(db, res['defect_id'], photos, uid)   # снимок сделала регистрация (до цепочки)
+        _save_photos(db, res['defect_id'], photos, uid, _registration_target(res))
         db.commit()
         return jsonify({'status': 'success', 'stage': res['stage'], 'serial': res['serial'], 'defect_id': res['defect_id'],
                         'message': f'Дефект {problem_code} на пистолете №{g_num} зафиксирован → отдел «{dept_label(res["stage"])}»'})
@@ -684,9 +735,9 @@ def defect_act(defect_id):
                 return jsonify({'status': 'error',
                                 'message': 'Добавьте комментарий — почему закрытие не согласовано'}), 400
             if df.config_flag(db, 'require_reject_photo', True):
-                sid, _ = _photo_stage(db, defect_id)      # текущий открытый этап = ОТК
-                has_photo = db.execute('SELECT 1 FROM defect_photo WHERE defect_id=? AND stage_id=? LIMIT 1',
-                                       (defect_id, sid)).fetchone()
+                sid = _open_stage_of(db, defect_id, df.OTK)      # открытый этап согласования УЗК
+                has_photo = sid and db.execute('SELECT 1 FROM defect_photo WHERE defect_id=? AND stage_id=? LIMIT 1',
+                                               (defect_id, sid)).fetchone()
                 if not has_photo:
                     return jsonify({'status': 'error',
                                     'message': 'Приложите фото — подтвердите, что точка не закрыта'}), 400
@@ -784,25 +835,28 @@ def defect_detail(defect_id):
         WHERE st.defect_id=? ORDER BY st.UniqueID""", (defect_id,)).fetchall()
     # выявления: первое и повторы серии — дата, контролёр, его комментарий
     occ = db.execute("""
-        SELECT o.occ_date, TRIM(COALESCE(w.surname,'') || ' ' || COALESCE(w.name,'')) AS by_name,
+        SELECT o.UniqueID, o.occ_date, TRIM(COALESCE(w.surname,'') || ' ' || COALESCE(w.name,'')) AS by_name,
                COALESCE(o.comment,'') AS comment
         FROM defect_occurrence o LEFT JOIN worker w ON w.UniqueID = o.registered_by
         WHERE o.defect_id=? ORDER BY o.UniqueID""", (defect_id,)).fetchall()
-    photo_rows = db.execute("""
-        SELECT dp.UniqueID, dp.stage_dept, dp.stage_id, dp.ts, dp.uploaded_by,
-               s.left_at AS stage_left_at, ? AS current_stage_dept
-        FROM defect_photo dp LEFT JOIN defect_stage s ON s.UniqueID = dp.stage_id
-        WHERE dp.defect_id=? ORDER BY dp.UniqueID""", (d['current_stage_dept'], defect_id)).fetchall()
-    # can_delete считает СЕРВЕР тем же правилом, что и DELETE (_can_delete_photo) —
-    # интерфейс не дублирует логику прав и не расходится с ней.
-    uid, is_admin = session.get('uid'), bool(session.get('is_admin'))
-    photos = [{'UniqueID': p['UniqueID'], 'stage_dept': p['stage_dept'], 'stage_id': p['stage_id'], 'ts': p['ts'],
+    photo_rows = db.execute(_PHOTO_SQL + ' WHERE dp.defect_id=? ORDER BY dp.UniqueID', (defect_id,)).fetchall()
+    # can_delete и место для нового фото (photo_target) считает СЕРВЕР теми же правилами, что
+    # DELETE и загрузка (_can_delete_photo, _photo_target): интерфейс не дублирует логику.
+    uid, dept, is_admin, priv = _ctx()
+    photos = [{'UniqueID': p['UniqueID'], 'stage_dept': p['stage_dept'], 'stage_id': p['stage_id'],
+               'occurrence_id': p['occurrence_id'], 'ts': p['ts'], 'by': p['by_name'],
                'can_delete': _can_delete_photo(p, uid, is_admin)} for p in photo_rows]
+    target = None
+    if _can_upload_photo(dept, priv, d['current_stage_dept']):
+        t_sid, _t_dept, t_occ = _photo_target(db, defect_id, dept, priv)
+        target = {'stage_id': t_sid, 'occurrence_id': t_occ}
     station = df.station_name_for(db, defect_id)          # как было в день дефекта (снимок)
     return jsonify({'status': 'success', 'defect': dict(d),
                     'stages': [dict(r) for r in stages],
-                    'occurrences': [{'date': r['occ_date'], 'by': r['by_name'], 'comment': r['comment']} for r in occ],
+                    'occurrences': [{'id': r['UniqueID'], 'date': r['occ_date'], 'by': r['by_name'],
+                                     'comment': r['comment']} for r in occ],
                     'photos': photos,
+                    'photo_target': target,   # куда ляжет новое фото из карточки (None — добавлять нельзя)
                     'vin_required': df.vin_required(db, defect_id),
                     'station_name': station,
                     'segment': df.defect_area(station),   # участок: на телефоне в строке его нет — показывает карточка
@@ -815,26 +869,21 @@ def defect_detail(defect_id):
 
 @bp.route('/api/defects/<int:defect_id>/photo', methods=['POST'])
 def defect_photo_upload(defect_id):
-    """Фото дефекта: любой на своём этапе (+ ОТК/WeldTeam). Изображения, хранятся в data/uploads/defects."""
+    """Фото дефекта: любой на своём этапе (+ УЗК/WeldTeam) — ложится на шаг загрузившего
+    (_photo_target). Изображения, хранятся в data/uploads/defects."""
     uid, dept, _is_admin, priv = _ctx()
     db = get_db()
     d = db.execute('SELECT current_stage_dept FROM defects WHERE UniqueID=?', (defect_id,)).fetchone()
     if not d:
         return jsonify({'status': 'error', 'message': 'Дефект не найден'}), 404
-    if not (priv or dept == 'ОТК' or dept == d['current_stage_dept']):
+    if not _can_upload_photo(dept, priv, d['current_stage_dept']):
         return _denied()
     f = request.files.get('photo')
-    if not f or not f.filename:
-        return jsonify({'status': 'error', 'message': 'Файл не передан'}), 400
-    ext = os.path.splitext(f.filename)[1].lower()
-    if ext not in _IMG_EXT:
-        return jsonify({'status': 'error', 'message': 'Только изображения (jpg/png/webp/gif)'}), 400
+    if not _valid_photo(f):
+        msg = 'Файл не передан' if not (f and f.filename) else 'Только изображения (jpg/png/webp/gif)'
+        return jsonify({'status': 'error', 'message': msg}), 400
     try:
-        sid, sdept = _photo_stage(db, defect_id)
-        fname = f'{defect_id}_{uuid.uuid4().hex}{ext}'
-        f.save(os.path.join(_photo_dir(), fname))
-        db.execute('INSERT INTO defect_photo (defect_id, path, uploaded_by, stage_dept, stage_id, ts) VALUES (?,?,?,?,?,?)',
-                   (defect_id, fname, uid, sdept, sid, df._now()))
+        _save_photos(db, defect_id, [f], uid, _photo_target(db, defect_id, dept, priv))
         db.commit()
         return jsonify({'status': 'success', 'message': 'Фото добавлено'})
     except Exception as e:
@@ -848,12 +897,7 @@ def defect_photo_delete(defect_id, photo_id):
     заморожено. Реальный админ удаляет любое. Чистит и файл."""
     uid, _dept, is_admin, _priv = _ctx()
     db = get_db()
-    p = db.execute("""SELECT dp.path, dp.uploaded_by, dp.stage_id, dp.stage_dept,
-                             s.left_at AS stage_left_at, d.current_stage_dept
-                      FROM defect_photo dp
-                      JOIN defects d ON d.UniqueID=dp.defect_id
-                      LEFT JOIN defect_stage s ON s.UniqueID=dp.stage_id
-                      WHERE dp.UniqueID=? AND dp.defect_id=?""", (photo_id, defect_id)).fetchone()
+    p = db.execute(_PHOTO_SQL + ' WHERE dp.UniqueID=? AND dp.defect_id=?', (photo_id, defect_id)).fetchone()
     if not p:
         return jsonify({'status': 'error', 'message': 'Фото не найдено'}), 404
     if not _can_delete_photo(p, uid, is_admin):
@@ -901,7 +945,7 @@ def defect_correct(defect_id):
     """ОТК исправляет справочные данные дефекта (код/модель/номер точки), пока дефект ВОЗВРАЩЁН
     на этап ОТК (bounce в ОТК). Точку перепривязываем как при регистрации, снимок переснимаем.
     Можно приложить фото (ляжет на текущий этап ОТК). Реальный админ — всегда."""
-    uid, dept, is_admin, _priv = _ctx()
+    uid, dept, is_admin, priv = _ctx()
     data, photos = _reg_input()
     db = get_db()
     d = db.execute('SELECT current_stage_dept, df_date FROM defects WHERE UniqueID=?', (defect_id,)).fetchone()
@@ -927,7 +971,7 @@ def defect_correct(defect_id):
                             manual_spot_number=?, manual_model_id=? WHERE UniqueID=?""",
                        (code, spot_number, int(model_id), defect_id))
         if photos:
-            _save_photos(db, defect_id, photos, uid)
+            _save_photos(db, defect_id, photos, uid, _photo_target(db, defect_id, dept, priv))
         snapshot_defect(db, defect_id, SNAP_CORRECTION)
         db.commit()
         msg = 'Данные исправлены' if row else 'Данные исправлены (точка не найдена в БД — сохранена как ручная)'

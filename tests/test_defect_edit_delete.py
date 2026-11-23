@@ -1,7 +1,7 @@
 """Правка/удаление записей и фото с правами по этапу (п.2 бэклога) + привязка фото к этапу.
 
 Правки записей этапа: СВОЙ отдел, пока дефект на МОЁМ этапе; после передачи — заморожено.
-Удаление фото: владение по ЗАГРУЗИВШЕМУ (dp.uploaded_by), пока его этап открыт; после
+Удаление фото: владение по ЗАГРУЗИВШЕМУ (dp.uploaded_by), пока его шаг не пройден; после
 передачи — заморожено; чужое фото удалять нельзя. Админ (реальный) — всё и везде.
 """
 import io
@@ -19,15 +19,17 @@ def _upload(c, did):
     return c.post(f'/api/defects/{did}/photo', data={'photo': _png()}, content_type='multipart/form-data')
 
 
-def test_photo_tagged_with_stage_not_uploader(register_client):
-    """Фото помечается ЭТАПОМ ДЕФЕКТА (Производство), а не отделом загрузившего (ОТК)."""
+def test_photo_tagged_with_uploaders_stage(register_client):
+    """Фото помечается этапом ЗАГРУЗИВШЕГО: Производство на своём этапе → этап Производства.
+    (Фото регистрации — у выявления УЗК: tests/test_defect_photo_owner_stage.py.)"""
     otk = register_client(department='ОТК')
-    data = {'g_num': '90001', 'problem_code': 'CR', 'photo': _png()}
-    j = otk.post('/api/defects/register_manual', data=data, content_type='multipart/form-data').get_json()
-    det = otk.get(f"/api/defects/{j['defect_id']}").get_json()
+    prod = register_client(department='Производство', login='pt_prod@x.kz')
+    did = _reg(otk, 90001)['defect_id']
+    _upload(prod, did)
+    det = otk.get(f'/api/defects/{did}').get_json()
     ph = det['photos'][0]
-    assert ph['stage_dept'] == 'Производство'      # этап дефекта, НЕ ОТК (загрузивший)
-    assert ph['stage_id']                          # привязан к конкретному этапу
+    assert ph['stage_dept'] == 'Производство'
+    assert ph['stage_id'] == [s for s in det['stages'] if not s['left_at']][0]['stage_id']
 
 
 def test_photo_delete_own_on_stage(register_client):
@@ -58,15 +60,15 @@ def test_photo_frozen_after_handoff_only_admin(register_client):
 
 
 def test_photo_delete_owned_by_uploader_not_receiver(register_client):
-    """#7: фото, снятое ОТК при регистрации, попадает на этап получателя (Производство),
-    но удалять его может АВТОР (ОТК), а не получатель (раньше было наоборот)."""
+    """#7: фото, снятое ОТК при регистрации, — у выявления УЗК (не на этапе получателя);
+    удалять его может АВТОР (ОТК), а не получатель."""
     otk = register_client(department='ОТК')
     prod = register_client(department='Производство', login='u7_prod@x.kz')
     data = {'g_num': '90050', 'problem_code': 'CR', 'photo': _png()}
     did = otk.post('/api/defects/register_manual', data=data,
                    content_type='multipart/form-data').get_json()['defect_id']
     ph = otk.get(f'/api/defects/{did}').get_json()['photos'][0]
-    assert ph['stage_dept'] == 'Производство'                                        # фото на этапе получателя
+    assert ph['stage_dept'] == 'ОТК' and ph['occurrence_id']                        # шаг УЗК, не получателя
     pid = ph['UniqueID']
     assert prod.delete(f'/api/defects/{did}/photo/{pid}').status_code == 403          # получатель не автор — нельзя
     assert otk.delete(f'/api/defects/{did}/photo/{pid}').get_json()['status'] == 'success'  # автор удаляет своё

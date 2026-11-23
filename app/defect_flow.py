@@ -490,23 +490,26 @@ def clean_comment(raw):
 
 def add_occurrence(conn, defect_id, when, registered_by, comment=None):
     """Выявление дефекта: дата, контролёр, его комментарий. Каждое выявление — отдельная
-    запись (первое и каждый повтор серии): по ним контролёр видит «что нашёл я за день»."""
-    conn.execute('INSERT INTO defect_occurrence (defect_id, occ_date, registered_by, comment) VALUES (?,?,?,?)',
-                 (defect_id, when, registered_by, clean_comment(comment)))
+    запись (первое и каждый повтор серии): по ним контролёр видит «что нашёл я за день».
+    Возвращает id выявления — к нему цепляются фото регистрации."""
+    return conn.execute('INSERT INTO defect_occurrence (defect_id, occ_date, registered_by, comment) VALUES (?,?,?,?)',
+                        (defect_id, when, registered_by, clean_comment(comment))).lastrowid
 
 
 def merge_into_open(conn, parent_id, when, registered_by, comment=None):
     """Повтор на ещё ОТКРЫТОМ дефекте: доливаем появление и помечаем серийным, этап/статус
-    не трогаем (дефект уже у кого-то на рассмотрении) — новую карточку не плодим."""
+    не трогаем (дефект уже у кого-то на рассмотрении) — новую карточку не плодим.
+    Возвращает id нового выявления."""
     conn.execute('UPDATE defects SET is_serial=1 WHERE UniqueID=?', (parent_id,))
-    add_occurrence(conn, parent_id, when, registered_by, comment)
+    return add_occurrence(conn, parent_id, when, registered_by, comment)
 
 
 def reopen_as_serial(conn, parent_id, when, registered_by, comment=None):
     """Переоткрыть родителя как серийный: вернуть отделу-закрывшему (для ОТО-кейса — отделу,
     что передавал в ОТО). Считается возвратом + серией; добавляем новое появление.
     Родитель на согласовании ОТК ещё держит открытый этап ОТК — он закрывается повтором
-    (serial_repeat), иначе у дефекта два открытых этапа. Этап сменился → «в работе» снимается."""
+    (serial_repeat), иначе у дефекта два открытых этапа. Этап сменился → «в работе» снимается.
+    Возвращает id нового выявления (отдел возврата — defects.current_stage_dept)."""
     row = conn.execute('SELECT closed_by_dept, delegated_from_dept, problem_code FROM defects WHERE UniqueID=?',
                         (parent_id,)).fetchone()
     closed_by, deleg, code = row[0], row[1], row[2]
@@ -517,8 +520,7 @@ def reopen_as_serial(conn, parent_id, when, registered_by, comment=None):
                       return_count=return_count+1, stage_entered_at=?, assigned_worker_id=NULL
                     WHERE UniqueID=?""", (back, _now(), parent_id))
     _open_stage(conn, parent_id, back, None)
-    add_occurrence(conn, parent_id, when, registered_by, comment)
-    return back
+    return add_occurrence(conn, parent_id, when, registered_by, comment)
 
 
 def register_occurrence(conn, *, problem_code, spot_id=None, gun_id=None, registered_by=None,
@@ -526,8 +528,9 @@ def register_occurrence(conn, *, problem_code, spot_id=None, gun_id=None, regist
     """Зафиксировать дефект. Серийный повтор на той же точке (в окне, та же группа):
     — если прежний дефект уже закрыт/не выявлен → переоткрыть его как серийный;
     — если он ещё открыт → долить появление в него (не плодя карточку).
-    Иначе — создать новый и завести в цепочку. Возвращает {defect_id, serial, stage, repeat}:
-    repeat — 'reopened' (переоткрыт) / 'merged' (долит в открытый) / None (новый дефект).
+    Иначе — создать новый и завести в цепочку. Возвращает {defect_id, serial, stage, repeat,
+    occurrence_id}: repeat — 'reopened' (переоткрыт) / 'merged' (долит в открытый) / None (новый
+    дефект); occurrence_id — это выявление (к нему ложатся фото регистрации).
     comment — необязательный комментарий контролёра, хранится у этого выявления."""
     when = when or date.today().isoformat()
     code = (problem_code or '').strip().upper()
@@ -535,25 +538,25 @@ def register_occurrence(conn, *, problem_code, spot_id=None, gun_id=None, regist
     if parent:
         pstatus = conn.execute('SELECT COALESCE(status,"") FROM defects WHERE UniqueID=?', (parent,)).fetchone()[0]
         if pstatus in ('closed', 'pending_otk', 'unresolved'):
-            back = reopen_as_serial(conn, parent, when, registered_by, comment)   # закрытый/не выявленный → переоткрыть
+            occ = reopen_as_serial(conn, parent, when, registered_by, comment)   # закрытый/не выявленный → переоткрыть
             repeat = 'reopened'
         else:
-            merge_into_open(conn, parent, when, registered_by, comment)           # ещё открыт → долить в него
-            back = conn.execute('SELECT current_stage_dept FROM defects WHERE UniqueID=?', (parent,)).fetchone()[0]
+            occ = merge_into_open(conn, parent, when, registered_by, comment)    # ещё открыт → долить в него
             repeat = 'merged'
-        return {'defect_id': parent, 'serial': True, 'stage': back, 'repeat': repeat}
+        back = conn.execute('SELECT current_stage_dept FROM defects WHERE UniqueID=?', (parent,)).fetchone()[0]
+        return {'defect_id': parent, 'serial': True, 'stage': back, 'repeat': repeat, 'occurrence_id': occ}
     cur = conn.execute("""INSERT INTO defects
             (problem_code, root_cause, solution, df_date, created_at, spot_id, gun_id, status,
              manual_spot_number, manual_model_id, worker_register_id)
             VALUES (?, '', '', ?, ?, ?, ?, 'registered', ?, ?, ?)""",
                        (code, when, _now(), spot_id, gun_id, manual_spot_number, manual_model_id, registered_by))
     did = cur.lastrowid
-    add_occurrence(conn, did, when, registered_by, comment)
+    occ = add_occurrence(conn, did, when, registered_by, comment)
     # Снимок — один раз, до цепочки: уведомления/VIN сразу видят станцию. Серийный повтор
     # (выше) снимок прежней карточки не трогает — у неё история своего дня.
     snapshot_defect(conn, did, SNAP_REGISTRATION)
     stage = enter_chain(conn, did, registered_by)
-    return {'defect_id': did, 'serial': False, 'stage': stage, 'repeat': None}
+    return {'defect_id': did, 'serial': False, 'stage': stage, 'repeat': None, 'occurrence_id': occ}
 
 
 def reopen(conn, defect_id, actor_id=None, note=None):
