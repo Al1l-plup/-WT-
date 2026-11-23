@@ -49,7 +49,7 @@ def test_defects_restores_before_first_request_and_saves_on_render():
     html = _html('defects')
     assert html.index('restoreDefUi();') < html.index('loadBoard();\n  openFromHash();')
     body = html[html.index('function renderRows(){'):]
-    assert body.index('saveDefUi();') < body.index('const rows = currentRows();')
+    assert body.index('saveDefUi();') < body.index('const rows = currentRows()')
     assert 'if (!uiRestored) return;' in html                       # ранняя перерисовка не затирает
 
 

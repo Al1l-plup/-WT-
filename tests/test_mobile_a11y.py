@@ -97,7 +97,8 @@ def test_defects_rows_are_numbered_by_position():
     """№ — место строки в текущем виде, а не номер дефекта: после фильтра снова 1, 2, 3."""
     fn = DEFECTS[DEFECTS.index('function renderRows'):DEFECTS.index('window.toggleCard')]
     assert 'rows.map((d, i) =>' in fn and '<td class="rn" data-label="№">${i + 1}</td>' in fn
-    assert fn.count('colspan="${COLS.length + 1}"') == 2, 'колонка № не учтена в объединённых ячейках'
+    assert fn.count('colspan="${shown.length + 1}"') == 2, 'колонка № не учтена в объединённых ячейках'
+    assert 'shown = cols()' in fn, 'объединённые ячейки — по колонкам текущей вкладки'
 
 
 def test_defects_phone_row_shows_gun_number():
@@ -112,7 +113,7 @@ def test_defects_column_filters_reachable_without_table_header():
     """Заголовки с кнопками ▾ на телефоне скрыты — у каждой колонки должен быть другой вход
     в фильтр, в вертикальном положении телефона (раньше только поворотом)."""
     assert 'id="fOpen"' in DEFECTS and 'id="fColBtns"' in DEFECTS and 'id="fSort"' in DEFECTS
-    assert "$('fColBtns').innerHTML = COLS.map(" in DEFECTS
+    assert "$('fColBtns').innerHTML = cols().map(" in DEFECTS
     # панель фильтра — поверх окна фильтров
     mob = DEFECTS[DEFECTS.index('#dbfilter.mob{'):]
     assert 'position:fixed' in mob[:200] and 'z-index:400' in mob[:200]

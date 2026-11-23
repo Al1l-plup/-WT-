@@ -31,6 +31,12 @@ OTK = 'ОТК'
 # по эндпоинтам (иначе он разъезжается: см. баг «плитка Открытых = 0»).
 OPEN_STATUSES = ('registered', 'in_work', 'in_review', 'at_oto', 'pending_otk')
 
+# Исходы этапа, которые ставит ДЕЙСТВИЕ сотрудника (defect_stage.actor_id = он): закрыл,
+# передал дальше, вернул, передал в ОТО, контрмера ОТО, УЗК согласовал / не согласовал.
+# Не входит serial_repeat — этап закрывает система при повторе на точке (actor_id там —
+# тот, кто этап открыл). По ним вкладка «Отработанные мной».
+ACTION_OUTCOMES = ('closed', 'passed', 'returned', 'to_oto', 'oto_done', 'otk_approved', 'otk_rejected')
+
 
 def _now():
     return datetime.now().isoformat(timespec='seconds')

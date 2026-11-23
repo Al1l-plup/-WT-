@@ -198,11 +198,11 @@
       .dtable{table-layout:fixed}
       /* сумма ширин — ровно 100%: строка «нет дефектов» объединяет и скрытые колонки, им не должно достаться места */
       .dtable th.rn{width:4%}
-      .dtable th[data-col=code]{width:14%}
+      .dtable th[data-col=code]{width:12%}
       .dtable th[data-col=spot],.dtable th[data-col=g]{width:8%}
-      .dtable th[data-col=seg]{width:11%}
-      .dtable th[data-col=station]{width:17%}
-      .dtable th[data-col=stage],.dtable th[data-col=assignee]{width:14%}
+      .dtable th[data-col=model],.dtable th[data-col=seg]{width:10%}
+      .dtable th[data-col=station]{width:14%}
+      .dtable th[data-col=stage],.dtable th[data-col=assignee]{width:12%}
       .dtable th[data-col=date]{width:10%}
       .dtable th,.dtable td{padding:0 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
       .dtable thead th{position:sticky;top:89px;z-index:10;height:26px;background:var(--card);font-size:10px;letter-spacing:.02em;text-transform:none}
@@ -216,6 +216,9 @@
       .dtable .stage-chip{padding:0;border:none;background:none;font-size:12px;font-weight:600}
       .dtable td[data-col=date]{color:var(--muted);font-size:12px}
       .dtable [data-col=brand],.dtable [data-col=ctrl]{display:none}
+      /* «Отработанные мной»: «Что сделал» — на месте «В работе» (сумма ширин та же) */
+      .dtable th[data-col=did]{width:12%}
+      .dtable.t-handled [data-col=assignee]{display:none}
 
       /* окна на весь экран */
       .fsheet.open,#regCard.open,#dfilters.open{display:flex;flex-direction:column;position:fixed;inset:0;z-index:300;margin:0;padding:0;
@@ -270,11 +273,17 @@
       .stage-lock{display:inline}
       .dtable [data-col=seg],.dtable [data-col=assignee]{display:none}
       .dtable th.rn{width:7%}
-      .dtable th[data-col=code]{width:17%}
+      .dtable th[data-col=code]{width:15%}
       .dtable th[data-col=spot],.dtable th[data-col=g]{width:10%}
-      .dtable th[data-col=station]{width:26%}
+      .dtable th[data-col=model]{width:16%}
+      .dtable th[data-col=station]{width:12%}
       .dtable th[data-col=stage]{width:18%}
       .dtable th[data-col=date]{width:12%}
+      /* модель важнее станции: номер точки — внутри модели, а исполнение (A01 2WD / 4WD) должно влезть */
+      .dtable td[data-col=model]{font-size:12px}
+      /* «Отработанные мной» стоя: «Что сделал» важнее станции (станция — в карточке) */
+      .dtable.t-handled [data-col=station]{display:none}
+      .dtable.t-handled th[data-col=did]{width:12%}
     }
     /* телефон лёжа: высоты мало — панели прокручиваются вместе со списком */
     @media (max-width: 950px) and (max-height: 500px) and (pointer: coarse){
@@ -385,6 +394,7 @@
       <button class="dtab" data-tab="unresolved"><span class="lng">⚠ Не выявленные</span><span class="sht">Не выявл.</span> <span class="cnt" id="c-unres">0</span></button>
       <button class="dtab" data-tab="closed"><span class="lng">✓ Закрытые</span><span class="sht">Закрытые</span> <span class="cnt" id="c-closed">0</span></button>
       <button class="dtab" data-tab="controller"><span class="lng">👤 Контролёр</span><span class="sht">Контролёр</span> <span class="cnt" id="c-ctrl">0</span></button>
+      <button class="dtab" data-tab="handled" title="Дефекты, с которыми вы что-то сделали: зарегистрировали, передали, вернули, отправили в ОТО, закрыли, согласовали"><span class="lng">🛠 Отработанные мной</span><span class="sht">Отработанные</span> <span class="cnt" id="c-handled">0</span></button>
     </div>
 
     <style>
@@ -693,12 +703,35 @@ function ctrlNames(d){ return [...new Set(occInPeriod(d).map(o => o.name).filter
 function ctrlOf(d){ return TAB === 'controller' ? ctrlNames(d).join(', ') : (d.last_by_name || d.register_name || ''); }
 function dateOf(d){
   if (TAB === 'controller'){ const ds = occInPeriod(d).map(o => o.date).sort(); if (ds.length) return ds[ds.length - 1]; }
+  if (TAB === 'handled'){ const ds = actsInPeriod(d).map(a => a.date).sort(); if (ds.length) return ds[ds.length - 1]; }
   return d.last_date || d.df_date || '';
 }
 function mineTodayCount(b){
   const today = isoToday();
   return [...b.open, ...b.unresolved, ...b.closed].filter(x => (x.occ || []).some(o => o.by === ME.uid && o.date === today)).length;
 }
+function periodText(){
+  const f = $('fFrom').value, t = $('fTo').value, dm = v => v.split('-').reverse().join('.');
+  return (!f && !t) ? 'сегодня' : (f && t ? (f === t ? dm(f) : `${dm(f)} — ${dm(t)}`) : (f ? 'с ' + dm(f) : 'по ' + dm(t)));
+}
+
+// ── «Отработанные мной»: что Я сделал с дефектом, d.acts = [{date, what}] от сервера —
+// действия на этапах (закрыл, передал, вернул, в ОТО, контрмера ОТО, согласовал/не согласовал)
+// и регистрации. Период — как у «Контролёра»: без дат сегодня. ──
+const ACT_LABEL = {registered:'зарегистрировал', closed:'закрыл', passed:'передал дальше', returned:'вернул на доработку',
+                   to_oto:'передал в ОТО', oto_done:'контрмера ОТО', otk_approved:'согласовал закрытие', otk_rejected:'не согласовал закрытие'};
+const actLabel = a => ACT_LABEL[a.what] || a.what;
+function actsInPeriod(d){
+  const [f, t] = ctrlPeriod();
+  return (d.acts || []).filter(a => (a.date || '') >= f && (a.date || '') <= t);
+}
+function didNames(d){ return [...new Set(actsInPeriod(d).map(actLabel))]; }
+function handledTodayCount(b){
+  const today = isoToday();
+  return handledPool(b).filter(x => (x.acts || []).some(a => a.date === today)).length;
+}
+// все дефекты доски + закрытые, отработанные мной, которых нет в списке закрытых (handled_extra)
+function handledPool(b){ return b.open.concat(b.unresolved, b.closed, b.handled_extra || []); }
 
 function priv(){ return !!(ME.is_admin || ME.privileged || ME.dept === 'WeldTeam'); }
 
@@ -714,6 +747,7 @@ function loadBoard(){
     $('c-unres').textContent = d.unresolved.length;
     $('c-closed').textContent = d.closed.length;
     $('c-ctrl').textContent = mineTodayCount(d);   // мои выявления за сегодня — на любом этапе
+    $('c-handled').textContent = handledTodayCount(d);   // дефекты, с которыми я что-то сделал сегодня
     renderList();
   }).catch(() => {
     $('defectList').innerHTML = `<div class="alert alert-danger" style="margin:.75rem">Нет связи с сервером — список не обновился.
@@ -726,6 +760,7 @@ function listFor(tab){
   if (tab === 'all') return BOARD.open;
   if (tab === 'serial') return BOARD.open.filter(x => x.is_serial);
   if (tab === 'controller') return BOARD.open.concat(BOARD.unresolved, BOARD.closed);   // любой этап; мои за день — baseRows
+  if (tab === 'handled') return handledPool(BOARD);                                    // любой этап; мои действия — baseRows
   if (tab === 'unresolved') return BOARD.unresolved;
   return BOARD.closed;
 }
@@ -767,6 +802,8 @@ const COLS = [
   {k:'g',       label:'G-№',       num:true,  get:d=>d.g_num||''},
   {k:'seg',     label:'Участок',   num:false, get:d=>d.segment||''},
   {k:'brand',   label:'Бренд',     num:false, get:d=>_norm(d.brand)},
+  // модель: у бренда бывает несколько (Changan — CS55/CS65, GWM — Jolion/Tank), а номер точки — внутри модели
+  {k:'model',   label:'Модель',    num:false, get:d=>d.model||''},
   {k:'station', label:'Станция',   num:false, get:d=>_norm(d.station_name)},
   {k:'stage',   label:'Этап',      num:false, get:d=>stageText(d),         cell:stageCell},
   // во вкладке «Контролёр» у дефекта может быть несколько контролёров за период — фильтр по любому из них
@@ -774,8 +811,13 @@ const COLS = [
    values:d=>TAB === 'controller' ? ctrlNames(d) : [ctrlOf(d)],
    match:(d, set)=>TAB === 'controller' ? ctrlNames(d).some(n => set.has(n)) : set.has(ctrlOf(d))},
   {k:'assignee',label:'В работе',  num:false, get:d=>d.assignee_name||'',   cell:d=>d.assigned_worker_id?`🔒 ${esc(d.assignee_name||'')}`:''},
+  // только во вкладке «Отработанные мной»: что я сделал с дефектом за период
+  {k:'did',     label:'Что сделал', num:false, only:'handled', get:d=>didNames(d).join(', '),
+   values:didNames, match:(d, set)=>didNames(d).some(n => set.has(n))},
   {k:'date',    label:'Дата',      num:false, get:dateOf,                   cell:dateCell},
 ];
+// колонки текущей вкладки (only — колонка одной вкладки); фильтр скрытой колонки не действует
+const cols = () => COLS.filter(c => !c.only || c.only === TAB);
 let SORT = {col: null, dir: 1};   // dir: 1 — по возрастанию, -1 — по убыванию
 let FILT = {};                    // чек-фильтр: ключ колонки → Set выбранных значений (как colFilters в Редакторе)
 let GQ = '';                      // глобальный поиск (мобильная панель)
@@ -804,6 +846,7 @@ function baseRows(allCtrl){
     const any = allCtrl || FILT.ctrl || !ME.uid;
     return rows.filter(d => { const occ = occInPeriod(d); return any ? occ.length : occ.some(o => o.by === ME.uid); });
   }
+  if (TAB === 'handled') return rows.filter(d => actsInPeriod(d).length);   // мои действия за день/период, любой этап
   // даты: дефект попадает в период, если в нём было любое его выявление (первое или повтор)
   const f = $('fFrom').value, t = $('fTo').value;
   if (!f && !t) return rows;
@@ -812,12 +855,13 @@ function baseRows(allCtrl){
 function currentRows(){
   let rows = baseRows();
   // чек-фильтры по колонкам (множество выбранных значений)
-  for (const c of COLS){ const set = FILT[c.k]; if (set) rows = rows.filter(d => c.match ? c.match(d, set) : set.has(String(c.get(d)))); }
+  for (const c of cols()){ const set = FILT[c.k]; if (set) rows = rows.filter(d => c.match ? c.match(d, set) : set.has(String(c.get(d)))); }
   // глобальный поиск (мобильная панель) — по всем столбцам сразу
   const gq = GQ.trim().toLowerCase();
-  if (gq) rows = rows.filter(d => COLS.some(c => String(c.get(d)).toLowerCase().includes(gq)));
-  if (SORT.col){
-    const c = COLS.find(x => x.k === SORT.col);
+  if (gq) rows = rows.filter(d => cols().some(c => String(c.get(d)).toLowerCase().includes(gq)));
+  const sc = SORT.col && cols().find(x => x.k === SORT.col);   // сортировка по скрытой колонке не действует
+  if (sc){
+    const c = sc;
     rows.sort((a, b) => {
       const va = _norm(c.get(a)), vb = _norm(c.get(b));   // «—»/null → пусто
       if (va === '' && vb === '') return 0;
@@ -838,7 +882,7 @@ function colValues(ck){
 }
 function updateFilterSummary(){
   const b = $('fClearAll'); if (!b) return;
-  const n = Object.keys(FILT).length, dated = !!($('fFrom').value || $('fTo').value);
+  const n = cols().filter(c => FILT[c.k]).length, dated = !!($('fFrom').value || $('fTo').value);
   b.textContent = n ? `✕ Сбросить все фильтры (${n})` : '✕ Сбросить все фильтры';
   b.disabled = !(n || SORT.col || dated || GQ);
   // телефон: кнопка показывает, что фильтры включены; окно — сколько строк останется
@@ -847,22 +891,22 @@ function updateFilterSummary(){
   $('fDone').textContent = `Показать: ${currentRows().length}`;
 }
 function renderFilterPanel(){
-  $('fSort').innerHTML = ['<option value="">— без сортировки —</option>'].concat(COLS.flatMap(c => [
+  $('fSort').innerHTML = ['<option value="">— без сортировки —</option>'].concat(cols().flatMap(c => [
     `<option value="${c.k}:1"${SORT.col === c.k && SORT.dir === 1 ? ' selected' : ''}>${c.label} ▲</option>`,
     `<option value="${c.k}:-1"${SORT.col === c.k && SORT.dir === -1 ? ' selected' : ''}>${c.label} ▼</option>`,
   ])).join('');
-  $('fColBtns').innerHTML = COLS.map(c => {
+  $('fColBtns').innerHTML = cols().map(c => {
     const set = FILT[c.k];
     return `<button type="button" class="btn btn-ghost${set ? ' on' : ''}" data-col="${c.k}">${c.label}${set ? ' · ' + set.size : ''} <span aria-hidden="true">▾</span></button>`;
   }).join('');
 }
 function renderList(){
   const host = $('defectList');
-  const head = '<th class="rn" title="Номер строки в текущем списке">№</th>' + COLS.map(c => {
+  const head = '<th class="rn" title="Номер строки в текущем списке">№</th>' + cols().map(c => {
     const arr = SORT.col === c.k ? `<span class="sarr"> ${SORT.dir === 1 ? '▲' : '▼'}</span>` : '';
     return `<th class="sortable" data-col="${c.k}" title="Клик — сортировка (▲ возр / ▼ убыв / ещё раз — сброс)">${c.label}${arr}</th>`;
   }).join('');
-  const fbtns = '<th class="rn"></th>' + COLS.map(c => `<th data-col="${c.k}"><button class="dbfbtn${FILT[c.k] ? ' on' : ''}" data-col="${c.k}" title="Фильтр: поиск + галочки">▾</button></th>`).join('');
+  const fbtns = '<th class="rn"></th>' + cols().map(c => `<th data-col="${c.k}"><button class="dbfbtn${FILT[c.k] ? ' on' : ''}" data-col="${c.k}" title="Фильтр: поиск + галочки">▾</button></th>`).join('');
   // поиск по всем столбцам; на телефоне рядом — окно фильтров и обновление (кнопки шапки там скрыты)
   const mbar = `<div class="dfm">
     <input id="fmSearch" type="search" placeholder="🔎 поиск по столбцам" aria-label="Поиск по столбцам" autocomplete="off" value="${esc(GQ)}">
@@ -874,13 +918,19 @@ function renderList(){
     : '';
   if (TAB === 'controller'){
     // за какой день/период и чьи выявления — чтобы отчёт контролёра читался без догадок
-    const f = $('fFrom').value, t = $('fTo').value, dm = v => v.split('-').reverse().join('.');
-    const per = (!f && !t) ? 'сегодня' : (f && t ? (f === t ? dm(f) : `${dm(f)} — ${dm(t)}`) : (f ? 'с ' + dm(f) : 'по ' + dm(t)));
-    zoneNote = `<div class="zone-note">👤 ${FILT.ctrl ? 'Выбранные контролёры' : 'Ваши'}: зарегистрировано за <b>${per}</b> — первичные и повторы серии, на любом этапе (и закрытые). Другой день — «С даты / По дату».</div>`;
+    zoneNote = `<div class="zone-note">👤 ${FILT.ctrl ? 'Выбранные контролёры' : 'Ваши'}: зарегистрировано за <b>${periodText()}</b> — первичные и повторы серии, на любом этапе (и закрытые). Другой день — «С даты / По дату».</div>`;
+  }
+  if (TAB === 'handled'){
+    // сколько и что я сделал за день/период — по всем дефектам вкладки (до фильтров колонок)
+    const rows = baseRows(), acts = rows.flatMap(actsInPeriod), cnt = {};
+    acts.forEach(a => { cnt[a.what] = (cnt[a.what] || 0) + 1; });
+    const parts = Object.keys(ACT_LABEL).filter(k => cnt[k]).map(k => `${ACT_LABEL[k]} — ${cnt[k]}`)
+      .concat(Object.keys(cnt).filter(k => !ACT_LABEL[k]).map(k => `${esc(k)} — ${cnt[k]}`));
+    zoneNote = `<div class="zone-note">🛠 Вы отработали за <b>${periodText()}</b>: дефектов — <b>${rows.length}</b>${parts.length ? ' (' + parts.join(' · ') + ')' : ''}. На любом этапе, и закрытые. Другой день — «С даты / По дату».</div>`;
   }
   // телефон: подсказка под списком — экран отдан строкам, а при коротком или пустом списке она сразу на виду
   const compact = isCompact();
-  host.innerHTML = (compact ? '' : zoneNote) + mbar + `<div class="tbl-wrap"><table class="tbl dtable">
+  host.innerHTML = (compact ? '' : zoneNote) + mbar + `<div class="tbl-wrap"><table class="tbl dtable t-${TAB}">
     <thead><tr>${head}</tr><tr class="dftr">${fbtns}</tr></thead>
     <tbody id="dtbody"></tbody></table></div>` + (compact ? zoneNote : '');
   host.querySelectorAll('th.sortable').forEach(th => th.addEventListener('click', () => cycleSort(th.dataset.col)));
@@ -997,21 +1047,22 @@ function renderRows(){
   const tb = $('dtbody'); if (!tb) return;
   saveDefUi();
   updateFilterSummary();   // при любом ре-рендере (вкл. ввод в мобильный поиск) кнопка «Сбросить все» отражает состояние
-  const rows = currentRows();
+  const rows = currentRows(), shown = cols();
   if (!rows.length){
-    const filtered = Object.keys(FILT).length || GQ.trim() || $('fFrom').value || $('fTo').value;
-    tb.innerHTML = `<tr class="empty-row"><td data-label="" colspan="${COLS.length + 1}" style="text-align:center;color:var(--muted);padding:1.25rem;white-space:normal">${filtered ? 'Ничего не найдено — измените фильтры или поиск' : 'Здесь пока нет дефектов'}</td></tr>`;
+    const filtered = shown.some(c => FILT[c.k]) || GQ.trim() || $('fFrom').value || $('fTo').value;
+    const empty = TAB === 'handled' ? `За ${periodText()} вы ещё ничего не отработали` : 'Здесь пока нет дефектов';
+    tb.innerHTML = `<tr class="empty-row"><td data-label="" colspan="${shown.length + 1}" style="text-align:center;color:var(--muted);padding:1.25rem;white-space:normal">${filtered ? 'Ничего не найдено — измените фильтры или поиск' : empty}</td></tr>`;
     return;
   }
   const compact = isCompact();   // телефон: только строка, дефект открывается отдельным окном
   tb.innerHTML = rows.map((d, i) => {
     const active = compact ? lastId === d.UniqueID : openId === d.UniqueID;
     const cls = ['drow', d.is_b_point ? 'b-point' : '', d.is_serial ? 'serial' : '', active ? 'board-row-active' : ''].filter(Boolean).join(' ');
-    const cells = COLS.map(c => `<td data-col="${c.k}" data-label="${c.label}">${c.cell ? c.cell(d) : esc(c.get(d))}</td>`).join('');
+    const cells = shown.map(c => `<td data-col="${c.k}" data-label="${c.label}">${c.cell ? c.cell(d) : esc(c.get(d))}</td>`).join('');
     // № — место в том, что показано сейчас: после фильтра и сортировки снова 1, 2, 3…
     const row = `<tr class="${cls}" data-id="${d.UniqueID}" tabindex="0" ${compact ? 'aria-haspopup="dialog"' : `aria-expanded="${active}"`}><td class="rn" data-label="№">${i + 1}</td>${cells}</tr>`;
     return compact ? row
-         : row + `<tr class="ddetail"${active ? '' : ' hidden'}><td data-label="" colspan="${COLS.length + 1}"><div class="dcard-body" id="body-${d.UniqueID}"></div></td></tr>`;
+         : row + `<tr class="ddetail"${active ? '' : ' hidden'}><td data-label="" colspan="${shown.length + 1}"><div class="dcard-body" id="body-${d.UniqueID}"></div></td></tr>`;
   }).join('');
   if (openId != null){ const b = $('body-' + openId); if (b && !b.innerHTML) loadDetail(openId); }
 }
@@ -1025,7 +1076,8 @@ window.toggleCard = function(id){
 // ── Окно дефекта (телефон): открывается сразу, с уведомлением о загрузке; данные приходят следом ──
 function defectTitle(d){
   const where = (d.spot_number && d.spot_number !== '—') ? 'точка ' + d.spot_number : (d.g_num ? 'G.' + d.g_num : '');
-  return [d.problem_code || 'Дефект', where, '#' + d.UniqueID].filter(Boolean).join(' · ');
+  // номер точки — внутри модели: без модели «точка 123» у бренда с двумя моделями неоднозначна
+  return [d.problem_code || 'Дефект', where, d.model, '#' + d.UniqueID].filter(Boolean).join(' · ');
 }
 function openDefectSheet(id){
   lastId = id;
@@ -1233,7 +1285,7 @@ function renderDetail(res){
   const alertBox = `<div id="alert-${d.UniqueID}" class="hidden mt-alert"></div>`;
   if (compact){
     // телефон: то, чего нет в строке списка, сверху; действия — раньше истории, под рукой
-    const facts = [['Статус', stageText(d) || '—'], ['Модель', d.model_name], ['Бренд', d.brand], ['Участок', res.segment],
+    const facts = [['Статус', stageText(d) || '—'], ['Модель', d.model_full || d.model_name], ['Бренд', d.brand], ['Участок', res.segment],
                    ['Пистолет', d.g_num ? 'G.' + d.g_num : ''], ['В работе', d.assignee_name],
                    ['Выявлен', [d.df_date, d.register_name].filter(Boolean).join(' · ')]]   // первое выявление; повторы — списком ниже
       .filter(f => f[1] && f[1] !== '—')

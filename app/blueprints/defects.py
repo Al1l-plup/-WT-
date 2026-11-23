@@ -271,6 +271,59 @@ def _occurrences_by_defect(db, ids):
     return out
 
 
+def _model_label(code, name, mtype):
+    """Модель дефекта для доски — как её называет цех: код (A13T, CS55, A01), а у модели с
+    несколькими исполнениями — и исполнение (A01 2WD / A01 4WD, P01G ToD). Без кода —
+    название. Модели нет (дефект по пистолету без точки) — пусто."""
+    base = (code or '').strip() or (name or '').strip()
+    if base in ('', '—'):
+        return ''
+    t = (mtype or '').strip()
+    return f'{base} {t}' if t and t.lower() != 'single' else base
+
+
+def _model_full(code, name, mtype):
+    """Модель полностью — для карточки: «Tiggo2 (A13T)», «Jolion 2WD (A01)»."""
+    n = (name or '').strip()
+    if n in ('', '—'):
+        return _model_label(code, None, mtype)
+    t = (mtype or '').strip()
+    full = f'{n} {t}' if t and t.lower() != 'single' else n
+    c = (code or '').strip()
+    return f'{full} ({c})' if c and c != n else full
+
+
+def _my_acts(db, uid):
+    """{defect_id: [{date, at, what, dept}, …]} — что сотрудник сделал с дефектами (вкладка
+    «Отработанные мной»): действия на этапах (what = исход этапа из df.ACTION_OUTCOMES, at —
+    время) и регистрации (what='registered': каждое выявление; у старых дефектов без записей
+    выявлений — сама карточка). По времени."""
+    out = defaultdict(list)
+    marks = ','.join('?' * len(df.ACTION_OUTCOMES))
+    for r in db.execute(f"""SELECT defect_id, outcome, dept, left_at FROM defect_stage
+                            WHERE actor_id=? AND left_at IS NOT NULL AND outcome IN ({marks})""",
+                        (uid, *df.ACTION_OUTCOMES)):
+        out[r['defect_id']].append({'date': r['left_at'][:10], 'at': r['left_at'], 'what': r['outcome'], 'dept': r['dept']})
+    for r in db.execute("""SELECT defect_id, occ_date AS day FROM defect_occurrence WHERE registered_by=?
+                           UNION ALL
+                           SELECT d.UniqueID, d.df_date FROM defects d
+                           WHERE d.worker_register_id=? AND d.df_date IS NOT NULL
+                             AND NOT EXISTS (SELECT 1 FROM defect_occurrence o WHERE o.defect_id=d.UniqueID)""",
+                        (uid, uid)):
+        out[r['defect_id']].append({'date': r['day'], 'at': r['day'], 'what': 'registered', 'dept': df.OTK})
+    for lst in out.values():
+        lst.sort(key=lambda a: a['at'] or '')
+    return out
+
+
+def _period(df_from, df_to, today):
+    """Период вкладок-отчётов («Контролёр», «Отработанные мной»): как на странице — без дат
+    сегодня, одна граница — открытый с другой стороны."""
+    if not df_from and not df_to:
+        return today, today
+    return df_from or '0000-00-00', df_to or '9999-12-31'
+
+
 @bp.route('/api/defects/all')
 def defects_all():
     db = get_db()
@@ -283,6 +336,7 @@ def defects_all():
                COALESCE(d.snap_brand, b.brand, enrich_b.brand, '—')     as brand,
                COALESCE(d.snap_model_name, m.model_name, enrich_m.model_name, '—') as model_name,
                COALESCE(d.snap_model_type, m.type, enrich_m.type, '')   as model_type,
+               COALESCE(snap_m.model_code, m.model_code, enrich_m.model_code, '') as model_code,
                COALESCE(d.snap_g_num, g.g_num, 0)          as g_num,
                COALESCE(d.snap_gun_type, g.gun_type,'—')   as gun_model,
                COALESCE(d.snap_station_name, '—')          as station_name,
@@ -313,6 +367,8 @@ def defects_all():
         LEFT JOIN brand  b       ON m.brand_id             = b.UniqueID
         LEFT JOIN model  enrich_m ON d.manual_model_id    = enrich_m.UniqueID
         LEFT JOIN brand  enrich_b ON enrich_m.brand_id    = enrich_b.UniqueID
+        -- код модели — по модели из снимка дефекта (какой была машина в день дефекта)
+        LEFT JOIN model  snap_m  ON d.snap_model_id       = snap_m.UniqueID
         LEFT JOIN gun    g       ON d.gun_id               = g.UniqueID
         -- станция и участок — ТОЛЬКО из снимка дефекта (как было в день дефекта): сегодняшний
         -- WB историю не переписывает. Не зафиксирована → «—» (карточка подскажет WB сейчас).
@@ -358,11 +414,24 @@ def defects_all():
         closed_params = [today, today]
     closed_sql += ' GROUP BY d.UniqueID ORDER BY last_date DESC, d.UniqueID DESC'
     closed_rows = db.execute(closed_sql, closed_params).fetchall()
-    occ = _occurrences_by_defect(db, [r['UniqueID'] for r in (*open_rows, *unresolved_rows, *closed_rows)])
-    workers = db.execute('SELECT UniqueID, surname, name FROM worker WHERE is_active=1').fetchall()
     mydept = session.get('dept')
     myuid = session.get('uid')
     privileged = bool(session.get('is_admin') or mydept == 'WeldTeam')
+
+    # «Отработанные мной»: что я сделал с дефектами. Закрытые, отработанные мной за период, но
+    # не попавшие в список закрытых (там 50 последних и выявленные за период), — досылаем
+    # отдельно (handled_extra), чтобы не менять вкладку «Закрытые».
+    acts = _my_acts(db, myuid) if myuid else {}
+    h_from, h_to = _period(df_from, df_to, date.today().isoformat())
+    shown = {r['UniqueID'] for r in (*open_rows, *unresolved_rows, *closed_rows)}
+    extra_ids = [did for did, lst in acts.items()
+                 if did not in shown and any(h_from <= (a['date'] or '') <= h_to for a in lst)]
+    extra_rows = db.execute(base + """ WHERE d.UniqueID IN (SELECT value FROM json_each(?))
+                                       GROUP BY d.UniqueID ORDER BY last_date DESC, d.UniqueID DESC""",
+                            (json.dumps(extra_ids),)).fetchall() if extra_ids else []
+
+    occ = _occurrences_by_defect(db, [r['UniqueID'] for r in (*open_rows, *unresolved_rows, *closed_rows, *extra_rows)])
+    workers = db.execute('SELECT UniqueID, surname, name FROM worker WHERE is_active=1').fetchall()
 
     # Зоны ответственности (бренд+участок) текущего сотрудника — для «Моих входящих».
     # worker_areas → {(brand_id, участок)}; сопоставляем с дефектом по ИМЕНИ бренда
@@ -376,6 +445,7 @@ def defects_all():
         d = dict(r)
         seg = df.defect_area(r['station_name'])
         d['segment'] = seg                               # участок (MB, BS-L, EC…) — для фильтра и зон
+        d['model'] = _model_label(r['model_code'], r['model_name'], r['model_type'])   # A13T, CS55, A01 4WD
         at_my_stage = bool(d.get('current_stage_dept') and d['current_stage_dept'] == mydept)
         # «Мои входящие» = мой этап И (мои участки ИЛИ без участка). WeldTeam/админ и без зон — только этап.
         d['mine'] = at_my_stage and (privileged or not has_zones or df.in_zones(
@@ -387,6 +457,7 @@ def defects_all():
         # последнее: по дате, а в один день — более позднее по порядку записи (max берёт первое из равных)
         last = max(enumerate(d['occ']), key=lambda t: (t[1]['date'] or '', t[0]))[1]
         d['last_by'], d['last_by_name'] = last['by'], last['name']
+        d['acts'] = acts.get(d['UniqueID'], [])          # что с ним сделал я — «Отработанные мной»
         return d
 
     # полные справочники для фильтров (чтобы участок/бренд были доступны всегда,
@@ -397,6 +468,7 @@ def defects_all():
     return jsonify({'open': [row(r) for r in open_rows],
                     'unresolved': [row(r) for r in unresolved_rows],
                     'closed': [row(r) for r in closed_rows],
+                    'handled_extra': [row(r) for r in extra_rows],
                     'my_dept': mydept,
                     'privileged': privileged,
                     'zoned': has_zones and not privileged,   # «Мои входящие» ограничены зонами
@@ -815,6 +887,8 @@ def defect_detail(defect_id):
                COALESCE(d.root_cause,'') as root_cause, COALESCE(d.solution,'') as solution,
                COALESCE(d.snap_spot_number, s.spot_number, d.manual_spot_number, '—') as spot_number,
                COALESCE(d.snap_model_name, m.model_name, '—') as model_name,
+               COALESCE(d.snap_model_type, m.type, snap_m.type, '') as model_type,
+               COALESCE(snap_m.model_code, m.model_code, '') as model_code,
                COALESCE(d.snap_g_num, g.g_num, 0) as g_num,
                d.snap_source, d.snap_dated, d.snap_at,
                CASE WHEN EXISTS(SELECT 1 FROM weld_point wp WHERE wp.spot_id=d.spot_id AND wp.important='B')
@@ -823,10 +897,14 @@ def defect_detail(defect_id):
         LEFT JOIN spot s ON d.spot_id=s.UniqueID
         LEFT JOIN model m ON s.model_id=m.UniqueID
         LEFT JOIN brand b ON m.brand_id=b.UniqueID
+        LEFT JOIN model snap_m ON snap_m.UniqueID = COALESCE(d.snap_model_id, d.manual_model_id)
         LEFT JOIN gun g ON d.gun_id=g.UniqueID
         WHERE d.UniqueID=?""", (defect_id,)).fetchone()
     if not d:
         return jsonify({'status': 'error', 'message': 'Дефект не найден'}), 404
+    defect = dict(d)
+    defect['model'] = _model_label(d['model_code'], d['model_name'], d['model_type'])
+    defect['model_full'] = _model_full(d['model_code'], d['model_name'], d['model_type'])
     stages = db.execute("""
         SELECT st.UniqueID as stage_id, st.dept, st.entered_at, st.left_at, st.outcome,
                COALESCE(st.cause,'') as cause, COALESCE(st.countermeasure,'') as countermeasure,
@@ -851,7 +929,7 @@ def defect_detail(defect_id):
         t_sid, _t_dept, t_occ = _photo_target(db, defect_id, dept, priv)
         target = {'stage_id': t_sid, 'occurrence_id': t_occ}
     station = df.station_name_for(db, defect_id)          # как было в день дефекта (снимок)
-    return jsonify({'status': 'success', 'defect': dict(d),
+    return jsonify({'status': 'success', 'defect': defect,
                     'stages': [dict(r) for r in stages],
                     'occurrences': [{'id': r['UniqueID'], 'date': r['occ_date'], 'by': r['by_name'],
                                      'comment': r['comment']} for r in occ],
