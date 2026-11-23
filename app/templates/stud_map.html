@@ -65,19 +65,17 @@
 (function () {
   const $ = id => document.getElementById(id);
   const fmt = s => (s || '').replace('T', ' ').slice(0, 16);
-  // Откуда данные карты: реестр цеха из папки данных на сервере + записи раздела «Шпильки»
+  // Откуда данные карты: записи «Шпильки» → «Журнал» (с нуля — только они) + Excel-реестр цеха,
+  // если его положили в папку данных на сервере (история до сайта, выпуск по неделям)
   function source(st) {
-    const parts = [];
+    const parts = ['Записи журнала «Шпильки»: ' + st.site_rows];
     const r = st.register;
     if (r && r.error) {
       $('smSrc').classList.add('err');
-      parts.push('Реестр в папке данных не читается: ' + r.error);
+      parts.push('реестр в папке данных не читается: ' + r.error);
     } else if (r) {
-      parts.push('Реестр: ' + r.rows + ' строк, файл от ' + fmt(r.updated));
-    } else {
-      parts.push('Реестра в папке данных нет');
+      parts.push('реестр цеха: ' + r.rows + ' строк, файл от ' + fmt(r.updated));
     }
-    parts.push('записи сайта: ' + st.site_rows);
     $('smSrc').textContent = parts.join(' · ');
   }
   async function load() {
@@ -91,10 +89,8 @@
       $('smBox').innerHTML = '<div class="card sm-empty">Схемы карты ещё не установлены на сервере: папка <b>data\\stud_map</b> (body, img, parts, body.json, views.json). См. docs/STUD_MAP.md.</div>';
       return;
     }
-    if (!st.has_data) {
-      $('smBox').innerHTML = '<div class="card sm-empty">Данных пока нет: нет ни реестра цеха в папке данных, ни записей в «Шпильки» → «Записать».</div>';
-      return;
-    }
+    // Данных ещё нет (начали с нуля) — карта всё равно открывается: модели, виды, станции, нули;
+    // первая запись в «Шпильки» → «Записать» появится здесь сразу (defects.json без кэша)
     const f = document.createElement('iframe');
     f.className = 'sm-frame'; f.title = 'Карта дефектов шпилек';
     f.allow = 'fullscreen'; f.allowFullscreen = true;   // кнопка «во весь экран» в карте

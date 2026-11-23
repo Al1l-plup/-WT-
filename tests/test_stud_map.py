@@ -120,6 +120,9 @@ def test_analytics_studs_page(client):
     assert '<a class="nav-link active" href="/analytics">' in page
     assert '.sm-frame.sm-fs{position:fixed !important' in page          # «во весь экран» на iPhone
     assert 'href="/analytics/studs"' in client.get('/analytics').get_data(as_text=True)
+    # с нуля (без реестра и записей) карта всё равно открывается — данные только из журнала «Шпильки»
+    assert 'st.has_data' not in page and 'Данных пока нет' not in page
+    assert "'Записи журнала «Шпильки»: ' + st.site_rows" in page and 'Реестра в папке данных нет' not in page
 
 
 def test_page_and_code(client):
