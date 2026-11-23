@@ -242,6 +242,15 @@
       mapSent = want;
       w.SM.setRecord(want);
     }
+    markMapDone();
+  }
+
+  // Записанные по этой машине шпильки — в 3D зелёные номерки с ✓ (как ✓ на А-листе).
+  // Номер на карте — номер цеха (label).
+  function markMapDone() {
+    const w = mapWin();
+    if (!w || !w.SM || !w.SM.setDone) return;
+    w.SM.setDone(S.vinKey ? carRecords.map(r => r.stud_label) : []);
   }
 
   // ── запись: машина ─────────────────────────────────────────────────────────
@@ -404,6 +413,7 @@
       b.classList.toggle('done', done.has(no));
       b.classList.toggle('sel', no === S.sel);
     });
+    markMapDone();
   }
 
   function centerMap() {

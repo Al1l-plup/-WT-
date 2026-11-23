@@ -20,7 +20,8 @@
  *                          шпильку — своя карточка, её «Записать дефект» уходит странице;
  *   SM.setRecord('A13T') — машина по QR (html.sm-car): 3D «Записи» этой модели, модель и режим не
  *                          переключаются, нажатие на шпильку сразу уходит странице.
- * Страница ставит window.__smRecordStud({model, no, part}).
+ * Страница ставит window.__smRecordStud({model, no, part}); SM.setDone([290, 291]) — записанные
+ * по машине шпильки: в «Записи» их номерки зелёные с ✓ (window.__smDone в сборке).
  */
 (() => {
   'use strict';
@@ -468,6 +469,11 @@
           if (want) { S.model = want; S.mode = 'rec'; S.recView = '3d'; } else restoreMode();
           apply();
         });
+      },
+      // записанные по машине шпильки (номера на карте) — в «Записи» зелёные номерки с ✓
+      setDone(nums) {
+        window.__smDone = new Set((nums || []).map(Number).filter((n) => Number.isFinite(n)));
+        if (window.__smRec && window.__smRedraw) window.__smRedraw();
       },
       ready: () => !!document.querySelector('#models .chip'),
     };

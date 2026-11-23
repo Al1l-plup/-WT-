@@ -141,13 +141,15 @@ def test_studs_page_record_and_map_together(client):
     assert '.sm-frame.sm-fs{position:fixed' in page                  # «во весь экран» на iPhone
     assert 'Загрузить реестр' not in page and 'smUpload' not in page
     src = re.search(r'<script src="/static/studs\.js\?v=(\d+)"></script>', page)
-    assert src and int(src.group(1)) >= 14
+    assert src and int(src.group(1)) >= 15
     js = (ROOT / 'app' / 'static' / 'studs.js').read_text(encoding='utf-8')
     # нажатие в 3D → та же запись с фото; номер карты — номер цеха (label); модель — по схеме
     assert "mapFrame.src = '/studs/map/app/'" in js and "fetch('/api/stud-map/status')" in js
     assert 'w.__smRecordStud = ({ no }) => onMapPick(no)' in js and 'w.SM.setRecord(want)' in js
     assert 'String(x.label) === String(no)' in js
     assert 'сначала сфотографируйте <b>верхний QR</b> машины' in js       # без машины — сначала QR
+    # записанные по машине шпильки отмечаются и в 3D (номер карты — номер цеха)
+    assert 'w.SM.setDone(S.vinKey ? carRecords.map(r => r.stud_label) : [])' in js
 
 
 def test_data_comes_from_server_folder_not_git(app, client):
@@ -433,6 +435,9 @@ def test_layout_mode(client):
     assert 'B.n>=2||window.__smRec||' in bundle                        # номера видны и в обзоре (без наложений)
     assert 'N="copper",' in bundle and 'color:13924366' in bundle      # все шпильки золотистые, насыщенный цвет
     assert 'function vr(p){}' in bundle                                 # без всплывающих подсказок у станций
+    # записанные по машине шпильки в «Записи» — зелёный номерок с ✓
+    assert 'n:window.__smDone&&window.__smDone.has(xe.no)?"\\u2713":""' in bundle and '"#1A7F37"' in bundle
+    assert 'setDone(nums)' in js and 'window.__smDone = new Set(' in js
 
 
 @pytest.mark.skipif(shutil.which('node') is None, reason='node недоступен')
