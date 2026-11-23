@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#161b22">
+  <meta name="description" content="WeldTeam MES — аналитика: 3D-карта дефектов шпилек">
+  <title>Аналитика · Шпильки — WeldTeam MES</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/theme.js"></script>
+  <style>
+    /* «Аналитика» → «Шпильки»: вместо заголовка раздела — одна строка: вкладки · откуда данные */
+    .sm-wide{max-width:1600px;margin:0 auto;padding:.75rem 1rem calc(1rem + env(safe-area-inset-bottom))}
+    .sm-wide [hidden]{display:none !important}
+    .sm-row{display:flex;flex-wrap:wrap;align-items:center;gap:.6rem 1rem;margin-bottom:.6rem}
+    .an-tabs{display:flex;gap:.4rem;flex-wrap:wrap}
+    .an-tabs a{text-decoration:none}
+    .sm-src{margin-left:auto;font-size:12.5px;color:var(--muted)}
+    .sm-src.err{color:var(--danger)}
+    .sm-frame{display:block;width:100%;height:max(560px,calc(100vh - 128px));border:1px solid var(--border);border-radius:var(--r);background:var(--bg)}
+    .sm-empty{padding:2rem;text-align:center;color:var(--muted)}
+    /* iPhone и др. без Fullscreen API: карта просит «во весь экран» — окно карты поверх всей страницы.
+       !important: высота карты для телефона (ниже, в @media) не должна перебивать «во весь экран» */
+    .sm-frame.sm-fs{position:fixed !important;top:0 !important;left:0 !important;width:100vw !important;height:100vh !important;height:100dvh !important;z-index:1000;margin:0;border:0;border-radius:0}
+    html.sm-fs-on,html.sm-fs-on body{overflow:hidden;overscroll-behavior:none}
+    .sm-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+    @media (pointer:coarse){ .an-tabs a{min-height:44px;display:inline-flex;align-items:center} }
+    @media (max-width:640px){
+      .sm-wide{padding:.6rem .5rem calc(1rem + env(safe-area-inset-bottom))}
+      .sm-src{margin-left:0;flex:1 1 100%}
+      .sm-frame{height:max(480px,calc(100vh - 210px))}
+    }
+  </style>
+</head>
+<body>
+
+<nav class="nav">
+  <a class="nav-brand" href="/">WeldTeam <span>/ цех BS</span></a>
+  <div class="nav-links">
+    <a class="nav-link" href="/">Главная</a>
+    <a class="nav-link" href="/maintenance">ТО</a>
+    <a class="nav-link" href="/defects">Дефекты</a>
+    <a class="nav-link active" href="/analytics">Аналитика</a>
+    <a class="nav-link" href="/workers">Сотрудники</a>
+    <a class="nav-link" href="/explorer">Обзор</a>
+    <a class="nav-link" href="/admin">Редактор</a>
+    <a class="nav-link" href="/history">Журнал</a>
+    <button class="btn-theme" id="themeToggle" type="button" aria-label="Переключить тему">☀</button>
+  </div>
+</nav>
+
+<div class="sm-wide">
+  <h1 class="sm-sr">Аналитика — карта дефектов шпилек</h1>
+  <div class="sm-row">
+    <nav class="an-tabs" role="tablist" aria-label="Раздел аналитики">
+      <a class="view-btn" href="/analytics" role="tab" aria-selected="false">Дефекты сварки</a>
+      <a class="view-btn active" href="/analytics/studs" role="tab" aria-selected="true" aria-current="page">Шпильки</a>
+    </nav>
+    <span class="sm-src" id="smSrc"></span>
+  </div>
+  <div id="smBox"><div class="card sm-empty">Загрузка…</div></div>
+</div>
+
+<script>
+(function () {
+  const $ = id => document.getElementById(id);
+  const fmt = s => (s || '').replace('T', ' ').slice(0, 16);
+  // Откуда данные карты: реестр цеха из папки данных на сервере + записи раздела «Шпильки»
+  function source(st) {
+    const parts = [];
+    const r = st.register;
+    if (r && r.error) {
+      $('smSrc').classList.add('err');
+      parts.push('Реестр в папке данных не читается: ' + r.error);
+    } else if (r) {
+      parts.push('Реестр: ' + r.rows + ' строк, файл от ' + fmt(r.updated));
+    } else {
+      parts.push('Реестра в папке данных нет');
+    }
+    parts.push('записи сайта: ' + st.site_rows);
+    $('smSrc').textContent = parts.join(' · ');
+  }
+  async function load() {
+    let st;
+    try { const r = await fetch('/api/stud-map/status'); st = await r.json(); } catch (e) {
+      $('smBox').innerHTML = '<div class="card sm-empty">Нет связи с сервером</div>';
+      return;
+    }
+    source(st);
+    if (!st.has_schemes) {
+      $('smBox').innerHTML = '<div class="card sm-empty">Схемы карты ещё не установлены на сервере: папка <b>data\\stud_map</b> (body, img, parts, body.json, views.json). См. docs/STUD_MAP.md.</div>';
+      return;
+    }
+    if (!st.has_data) {
+      $('smBox').innerHTML = '<div class="card sm-empty">Данных пока нет: нет ни реестра цеха в папке данных, ни записей в «Шпильки» → «Записать».</div>';
+      return;
+    }
+    const f = document.createElement('iframe');
+    f.className = 'sm-frame'; f.title = 'Карта дефектов шпилек';
+    f.allow = 'fullscreen'; f.allowFullscreen = true;   // кнопка «во весь экран» в карте
+    f.src = '/studs/map/app/?ctx=analytics';
+    $('smBox').replaceChildren(f);
+  }
+  load();
+})();
+</script>
+</body>
+</html>

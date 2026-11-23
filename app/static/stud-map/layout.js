@@ -14,10 +14,13 @@
  * запоминается (localStorage 'stud-map.mode', 'stud-map.recView'). Модель общая.
  * Без сборки и библиотек: обычный JS, подключён в index.html после app.*.js.
  *
+ * Где открыта (?ctx в адресе фрейма): record — «Шпильки» → «Записать»: только «Запись» (где какие
+ * шпильки), без дефектов, вместо А-листа — «Схемы» (чертёж цеха на 3D, тот же режим карты);
+ * analytics — «Аналитика» → «Шпильки»: только карта дефектов; без ctx — всё.
+ *
  * Во фрейме страницы «Шпильки» (/studs) — два состояния, их задаёт страница через window.SM:
- *   SM.setRecord(null)   — машины нет: обычная карта (по умолчанию «Запись» — где какие шпильки,
- *                          кнопка «Дефекты» ↔ «Запись», 3D / А-лист, любая модель); нажатие на
- *                          шпильку — своя карточка, её «Записать дефект» уходит странице;
+ *   SM.setRecord(null)   — машины нет: «Запись» любой модели (где какие шпильки, 3D / А-лист карты);
+ *                          нажатие на шпильку — своя карточка, её «Записать дефект» уходит странице;
  *   SM.setRecord('A13T') — машина по QR (html.sm-car): 3D «Записи» этой модели, модель и режим не
  *                          переключаются, нажатие на шпильку сразу уходит странице.
  * Страница ставит window.__smRecordStud({model, no, part}); SM.setDone([290, 291]) — записанные
@@ -56,6 +59,9 @@
     // во фрейме страницы «Шпильки»: машина по QR (carMode) — модель и режим задаёт страница (window.SM)
     const embedded = (() => { try { return window.parent !== window && !!window.frameElement; } catch (e) { return false; } })();
     root.classList.toggle('sm-embed', embedded);
+    const ctx = new URLSearchParams(location.search).get('ctx');
+    root.classList.toggle('sm-record', ctx === 'record');
+    root.classList.toggle('sm-analytics', ctx === 'analytics');
     let carMode = false;
 
     // ── данные ────────────────────────────────────────────────────────────────
@@ -110,10 +116,11 @@
       const others = views.filter((v) => v !== opt.exceptView);
       if (others.length) {
         const row = el('div', 'acts');
-        row.append(el('span', 'muted', opt.exceptView ? 'Есть и на А-листе:' : 'На А-листе:'));
+        row.append(el('span', 'muted', ctx === 'record' ? 'На схеме:' : opt.exceptView ? 'Есть и на А-листе:' : 'На А-листе:'));
         others.forEach((v) => {
           const b = el('button', 'btn', v.name); b.type = 'button';
-          b.addEventListener('click', () => openSheet(model, v, no));
+          // на «Записать» вместо А-листа — «Схемы» на этом листе
+          b.addEventListener('click', () => (ctx === 'record' ? window.SM.showView(v.name) : openSheet(model, v, no)));
           row.appendChild(b);
         });
         card.appendChild(row);
@@ -134,7 +141,7 @@
     const recCard = $('recCard');
     const hideRecCard = () => { recCard.hidden = true; recCard.replaceChildren(); };
     window.__smPick = (no, s) => {
-      if (S.mode !== 'rec' || S.recView !== '3d') return;
+      if (S.mode !== 'rec' || (S.recView !== '3d' && ctx !== 'record')) return;   // на «Записать» — и на «Схемах»
       const hook = typeof window.__smRecordStud === 'function' ? window.__smRecordStud : null;
       if (carMode && hook) { hook({ model: mapModel() || S.model, no, part: s && s.part }); return; }
       if (!S.data) return;
@@ -402,7 +409,8 @@
       }));
     };
     const apply = async () => {
-      const rec = S.mode === 'rec', sheet = rec && S.recView === 'sheet';
+      const rec = S.mode === 'rec', sheet = rec && S.recView === 'sheet' && ctx !== 'record';
+      const schemes = rec && S.recView === 'sheet' && ctx === 'record';
       window.__smRec = rec;
       root.classList.toggle('sm-rec', rec);
       if (rec && !S.data) { try { await load(); } catch (err) { msg('Не удалось загрузить схемы: ' + err.message); } }
@@ -416,8 +424,13 @@
         if (want !== S.model || !S.view) setModel(want); else setZoom(S.zoom);
       } else {
         if (rec && S.model) syncMapModel();
+        if (ctx === 'record' && rec) {                       // «3D» — кузов, «Схемы» — чертежи цеха на 3D
+          const want = $(schemes ? 'mode3d' : 'modeBody');
+          if (want && want.getAttribute('aria-pressed') !== 'true') want.click();
+        }
         redraw3d();
       }
+      notify();
     };
     const openSheet = async (model, view, no) => {
       S.mode = 'rec'; S.recView = 'sheet';
@@ -450,13 +463,42 @@
       wait();
     };
 
-    // выбор «Запись / Дефекты» и «3D / А-лист» без машины — как в прошлый раз; во фрейме страницы
-    // «Шпильки» по умолчанию «Запись» (где какие шпильки), отдельно открытая карта — «Дефекты»
+    // режим: «Записать» — всегда «Запись», «Аналитика» — всегда «Дефекты»; иначе — как в прошлый раз
+    // (без выбора: во фрейме — «Запись», отдельно открытая карта — «Дефекты»); «3D / А-лист» — как в прошлый раз
     const restoreMode = () => {
       const m = store.get('stud-map.mode');
-      S.mode = m === 'rec' || m === 'defects' ? m : (embedded ? 'rec' : 'defects');
+      S.mode = ctx === 'record' ? 'rec' : ctx === 'analytics' ? 'defects'
+        : m === 'rec' || m === 'defects' ? m : (embedded ? 'rec' : 'defects');
       S.recView = store.get('stud-map.recView') === 'sheet' ? 'sheet' : '3d';
     };
+
+    // «Схемы»: вкладки листов строит сборка (#views; на «Записать» они скрыты вместе с панелью)
+    const sheetTab = (name) => [...document.querySelectorAll('#views .tab')]
+      .find((t) => (t.querySelector('span') || t).textContent.trim() === name);
+    const currentSheet = () => {
+      const t = document.querySelector('#views .tab[aria-selected="true"] span');
+      return t ? t.textContent.trim() : null;
+    };
+    // странице — что поменялось на карте (модель, режим, лист); не чаще раза в 80 мс
+    const listeners = [];
+    let notifyTimer = 0;
+    const notify = () => {
+      clearTimeout(notifyTimer);
+      notifyTimer = setTimeout(() => listeners.forEach((cb) => { try { cb(); } catch (e) { /* страница ушла */ } }), 80);
+    };
+    if ($('views')) new MutationObserver(notify).observe($('views'), { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-selected'] });
+    // кнопка станции (FF, RF…) на «Схемах» сама переводит карту в 3D к этой станции — на «Записать»
+    // переключатель «3D / Схемы» и список номеров должны это увидеть
+    const modeSync = () => {
+      if (ctx !== 'record' || S.mode !== 'rec' || !$('mode3d')) return;
+      const v = $('mode3d').getAttribute('aria-pressed') === 'true' ? 'sheet' : '3d';
+      if (v !== S.recView) { S.recView = v; store.set('stud-map.recView', v); paint(); }
+      notify();
+    };
+    ['modeBody', 'mode3d'].forEach((id) => { if ($(id)) new MutationObserver(modeSync).observe($(id), { attributes: true, attributeFilter: ['aria-pressed'] }); });
+    // нажали станцию над картой — список номеров на странице переключится на неё
+    if ($('stBar')) new MutationObserver(notify).observe($('stBar'), { subtree: true, attributes: true, attributeFilter: ['aria-pressed'] });
+    if ($('vtitle')) new MutationObserver(notify).observe($('vtitle'), { childList: true, characterData: true, subtree: true });
 
     // для страницы «Шпильки»: model — модель карты ('A13T', 'P01'…) машины из QR; null — машины нет
     let want = null;
@@ -470,14 +512,67 @@
           apply();
         });
       },
+      // что сейчас на карте — для списка номеров под ней (страница «Записать»):
+      // {model, mode: '3d'|'sheet', view: имя листа «Схем» или null, views: [{name, count}], nums: [...]}
+      info() {
+        if (!S.data) return null;
+        const m = mapModel() || S.model;
+        if (!m) return null;
+        const vs = viewsOf(m), schemes = S.recView === 'sheet';
+        const cur = schemes ? currentSheet() : null;
+        const v = cur && vs.find((x) => x.name === cur);
+        const nums = [...new Set((v ? [v] : vs).flatMap((x) => x.studs.map((q) => q.no)))].sort((p, q) => p - q);
+        const st = document.querySelector('#stBar button[aria-pressed="true"]');
+        return { model: m, mode: schemes ? 'sheet' : '3d', view: v ? v.name : null, nums, station: st ? st.dataset.loc : null,
+          views: vs.map((x) => ({ name: x.name, count: new Set(x.studs.map((q) => q.no)).size })) };
+      },
+      onChange(cb) { listeners.push(cb); },
+      // камера к станции (как кнопки FF, RF… над картой); на «Схемах» карта сама перейдёт в 3D
+      station(loc) {
+        const btn = document.querySelector(`#stBar button[data-loc="${loc}"]`);
+        if (btn) btn.click();
+        return !!btn;
+      },
+      show3d() { if (S.recView !== '3d') { S.recView = '3d'; store.set('stud-map.recView', '3d'); apply(); } },
+      // «Схемы» на нужном листе
+      async showView(name) {
+        if (S.recView !== 'sheet') { S.recView = 'sheet'; store.set('stud-map.recView', 'sheet'); await apply(); }
+        for (let i = 0; i < 20 && !sheetTab(name); i++) await new Promise((r) => setTimeout(r, 100));
+        const t = sheetTab(name);
+        if (t && t.getAttribute('aria-selected') !== 'true') t.click();
+      },
+      // шпилька из списка под картой: на «Схемах» — сначала её лист; дальше как нажатие на шпильку в 3D
+      async pick(no) {
+        const m = mapModel() || S.model;
+        if (S.recView === 'sheet' && S.data && m) {
+          const vs = viewsOf(m), cur = currentSheet();
+          const on = vs.find((x) => x.name === cur && x.studs.some((q) => q.no === no)) || vs.find((x) => x.studs.some((q) => q.no === no));
+          if (on && on.name !== cur) await window.SM.showView(on.name);
+        }
+        if (window.__smPick) window.__smPick(no, {});
+      },
       // записанные по машине шпильки (номера на карте) — в «Записи» зелёные номерки с ✓
       setDone(nums) {
         window.__smDone = new Set((nums || []).map(Number).filter((n) => Number.isFinite(n)));
         if (window.__smRec && window.__smRedraw) window.__smRedraw();
       },
       ready: () => !!document.querySelector('#models .chip'),
+      // «во весь экран» по просьбе страницы (после QR машины на телефоне) — как кнопка карты.
+      // Без нажатия пользователя браузер разворачивать не даёт — тогда карта растягивает своё окно
+      // на весь экран страницы (как на iPhone, см. index.html: #stage.fs → iframe.sm-fs)
+      fullscreen() {
+        whenReady(() => {
+          if ($('stage').classList.contains('fs') || document.fullscreenElement || document.webkitFullscreenElement) return;
+          const b = $('fsBtn');
+          if (b) b.click();
+        });
+      },
     };
 
+    if (ctx === 'record') {                                 // вместо А-листа — «Схемы»
+      const b = $('viewSeg').querySelector('[data-v="sheet"]');
+      if (b) { b.textContent = 'Схемы'; b.title = 'Схемы цеха на 3D: чертёж с номерами шпилек'; }
+    }
     restoreMode();
     paint();
     if (S.mode === 'rec') whenReady(apply);

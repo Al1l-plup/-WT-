@@ -1,6 +1,9 @@
-"""Шпильки: 3D-карта дефектов шпилек — на странице «Шпильки» (/studs), во фрейме.
+"""3D-карта шпилек: одна сцена (app/static/stud-map/) на двух страницах.
 
-* /studs/map                  — прежний адрес отдельной вкладки «Визуализация» → /studs.
+* /studs                      — «Шпильки» → «Записать» (blueprint studs): QR машины → 3D её модели
+                                (?ctx=record — только шпильки с номерами, без дефектов) → шпилька → фото.
+* /analytics/studs            — «Аналитика» → «Шпильки»: карта дефектов и аналитика (?ctx=analytics).
+* /studs/map                  — прежний адрес вкладки «Визуализация» → /analytics/studs.
 * /studs/map/app/...          — сама карта: код из app/static/stud-map/ (в git), схемы из
                                 data/stud_map/ (НЕ в git — чертежи OEM). Всё — только для вошедших.
 * /studs/map/app/defects.json — данные карты, собираются на лету: Excel-реестр цеха из папки
@@ -12,21 +15,26 @@
 (или scripts/stud_map_update.py — проверит и положит). Пересборка — сама, когда файл поменялся.
 Доступ — как у раздела «Шпильки» (app/permissions.py: blueprint stud_map → studs).
 """
-import datetime as dt
 import json
 import os
-import threading
 
-from flask import Blueprint, Response, abort, current_app, jsonify, redirect, request, send_from_directory
+from flask import (
+    Blueprint,
+    Response,
+    abort,
+    current_app,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_from_directory,
+)
 
 from app import stud_map_data as smd
 from app import studs as st
 from app.db import get_db
 
 bp = Blueprint('stud_map', __name__)
-
-_cache = {}                 # путь реестра → ((mtime_ns, size), data, notes, error)
-_cache_lock = threading.Lock()
 
 _SITE_SQL = """
     SELECT d.id, d.created_at, d.vin_key, d.scheme_code, d.stud_no, s.shop_no,
@@ -36,7 +44,7 @@ _SITE_SQL = """
 """
 
 
-def _data_dir():
+def data_dir():
     """data/stud_map/ рядом с БД (в тестах — во временной папке)."""
     return os.path.join(os.path.dirname(current_app.config['DB_PATH']), 'stud_map')
 
@@ -48,37 +56,27 @@ def _code_dir():
 def _register():
     """(data, notes, error, mtime) реестра из папки данных; разбирается заново, только когда файл
     поменялся. Нет файла — (None, [], None, None); файл не реестр — error с причиной."""
-    path = os.path.join(_data_dir(), smd.REGISTER_FILE)
-    try:
-        stt = os.stat(path)
-    except OSError:
-        return None, [], None, None
-    key = (stt.st_mtime_ns, stt.st_size)
-    mtime = dt.datetime.fromtimestamp(stt.st_mtime).isoformat(timespec='seconds')
-    with _cache_lock:
-        hit = _cache.get(path)
-        if hit and hit[0] == key:
-            return (*hit[1:], mtime)
-        try:
-            data, notes = smd.build(path, source_name=smd.REGISTER_FILE)
-            res = (data, notes, None)
-        except smd.RegisterError as e:
-            current_app.logger.warning('Карта шпилек: реестр %s не прочитан: %s', path, e)
-            res = (None, [], str(e))
-        _cache[path] = (key, *res)
-    return (*res, mtime)
+    reg = smd.register_cached(data_dir())
+    if reg and reg[2]:
+        current_app.logger.warning('Карта шпилек: реестр не прочитан: %s', reg[2])
+    return reg or (None, [], None, None)
 
 
 def _site(register):
     """Строки карты из записей раздела «Шпильки» + что пропущено."""
     records = [dict(r) for r in get_db().execute(_SITE_SQL)]
     locs = smd.locations(register['rows']) if register else {}
-    return smd.site_rows(records, sources=st.SOURCES, locations=locs)
+    return smd.site_rows(records, sources=st.SOURCES, locations=locs, zones=smd.stud_zones(data_dir()))
 
 
 @bp.route('/studs/map')
+def old_page():
+    return redirect('/analytics/studs')
+
+
+@bp.route('/analytics/studs')
 def page():
-    return redirect('/studs')
+    return render_template('stud_map.html')
 
 
 @bp.route('/studs/map/app/')
@@ -103,7 +101,7 @@ def app_file(fname):
     """Файл карты: схемы — из data/stud_map/, всё остальное (JS, шрифты) — из static."""
     top = fname.split('/', 1)[0]
     if fname in smd.DATA_FILES or ('/' in fname and top in smd.DATA_DIRS):
-        resp = send_from_directory(_data_dir(), fname, max_age=0 if fname.endswith('.json') else 3600)
+        resp = send_from_directory(data_dir(), fname, max_age=0 if fname.endswith('.json') else 3600)
         if fname.endswith('.json'):
             resp.headers['Cache-Control'] = 'no-cache'
         return resp
@@ -121,7 +119,7 @@ def app_file(fname):
 
 @bp.route('/api/stud-map/status')
 def status():
-    d = _data_dir()
+    d = data_dir()
     register, notes, error, mtime = _register()
     site, skipped = _site(register)
     reg = None

@@ -8,9 +8,9 @@
  *
  * Журнал: ИТО/УЗК разбирают записи по фото — категория, источник, комментарий.
  *
- * 3D-карта шпилек (фрейм /studs/map/app/, app/static/stud-map/) — на той же вкладке:
- * без машины — обычная карта: «Запись» (где какие шпильки, с номерами) ↔ «Дефекты» (реестр цеха +
- * записи сайта); после QR — 3D модели этой машины. Шпильку выбирают в 3D или на А-листе (картинки
+ * 3D-схема шпилек (фрейм /studs/map/app/?ctx=record, app/static/stud-map/) — на той же вкладке,
+ * только шпильки с номерами, без дефектов (карта дефектов — «Аналитика» → «Шпильки»): без машины —
+ * любая модель; после QR — 3D модели этой машины. Шпильку выбирают в 3D или на А-листе (картинки
  * схем раздела): нажатие в 3D приходит сюда (window.__smRecordStud во фрейме) и открывает ту же
  * запись с фото. Номер на карте — номер цеха.
  */
@@ -26,6 +26,7 @@
   const STORE = 'studs-v1';
   const STORE_TTL = 15 * 60 * 1000;          // шаг оператора помнится 15 минут
   const TAB_STORE = 'studs-tab';
+  const NUMS_STORE = 'studs-map-nums';     // список шпилек под картой: '1' — раскрыт (по умолчанию свёрнут)
   const ZOOMS = [1, 1.6, 2.5, 4];
   const VIN_AT_START = /^[A-HJ-NPR-Z0-9]{17}/; // нижний QR = VIN; верхний начинается с VIN
   const AUTO_MODEL = false;                    // модель по началу VIN — выключено (модель — по верхнему QR)
@@ -72,8 +73,13 @@
 
   async function loadImage(file) {
     if (window.createImageBitmap) {
-      try { return await createImageBitmap(file); } catch { /* старый браузер — через <img> */ }
+      try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch { /* старый браузер — через <img> */ }
     }
+    return loadImg(file);
+  }
+
+  // <img> поворачивает снимок по EXIF во всех браузерах одинаково (naturalWidth — уже повёрнутый)
+  async function loadImg(file) {
     const url = URL.createObjectURL(file);
     try {
       const img = new Image();
@@ -82,45 +88,154 @@
       return img;
     } finally { setTimeout(() => URL.revokeObjectURL(url), 2000); }
   }
+  const imgW = img => img.naturalWidth || img.width;
+  const imgH = img => img.naturalHeight || img.height;
 
   function vinFromText(text) {
     const m = VIN_AT_START.exec(String(text || '').trim().toUpperCase());
     return m ? m[0] : null;
   }
 
-  // Кадр целиком в двух масштабах, затем по частям: на снимке всей карты два QR и много
-  // мелочи — по частям код находится надёжнее. Между попытками отдаём поток (прогресс).
   // Нужен ВЕРХНИЙ QR (VIN + модель, поля через «|»): нижний (только VIN) берём, лишь если
-  // верхнего на снимке не нашлось.
-  async function readQr(file, onStep) {
-    const img = await loadImage(file);
-    const W = img.width, H = img.height;
-    const plan = [[0, 0, W, H, 1200], [0, 0, W, H, 2000]];
+  // верхнего на снимке не нашлось. found — все прочитанные коды; → {vin, text, card} или null.
+  function pickCard(found) {
+    const top = found.find(t => vinFromText(t) && t.includes('|'));
+    if (top) return { vin: vinFromText(top), text: top, card: true };
+    const vinOnly = found.find(t => vinFromText(t));
+    return vinOnly ? { vin: vinFromText(vinOnly), text: vinOnly, card: false } : null;
+  }
+
+  // Встроенный распознаватель браузера (BarcodeDetector: Chrome на Android) — надёжнее jsQR на
+  // бликах, наклоне и снимке с экрана. Нет его (iPhone, компьютер) — false.
+  async function detectNative(img, found) {
+    if (!('BarcodeDetector' in window)) return false;
+    try {
+      const formats = await window.BarcodeDetector.getSupportedFormats();
+      if (!formats.includes('qr_code')) return false;
+      const codes = await new window.BarcodeDetector({ formats: ['qr_code'] }).detect(img);
+      codes.forEach(c => { if (c.rawValue) found.push(c.rawValue); });
+      return true;
+    } catch { return false; }
+  }
+
+  // Уменьшение снимка: smooth — ступенями по 2 раза со сглаживанием (одним шагом 12 Мп → 1200 px
+  // Safari берёт отдельные пиксели, мелкий шум и муар экрана сливаются в мусор); без smooth — одним
+  // шагом, как браузер умеет (на чётком снимке так QR находится быстрее).
+  function drawScaled(ctx, img, sx, sy, sw, sh, tw, th, smooth) {
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = smooth ? 'high' : 'low';
+    let src = img;
+    while (smooth && sw / tw > 2 && sh / th > 2) {
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(sw / 2));
+      c.height = Math.max(1, Math.round(sh / 2));
+      const x = c.getContext('2d');
+      x.imageSmoothingEnabled = true;
+      x.imageSmoothingQuality = 'high';
+      x.drawImage(src, sx, sy, sw, sh, 0, 0, c.width, c.height);
+      src = c; sx = 0; sy = 0; sw = c.width; sh = c.height;
+    }
+    ctx.drawImage(src, sx, sy, sw, sh, 0, 0, tw, th);
+  }
+
+  // Лёгкое размытие кадра (3×3, в сером): jsQR сбивается на «зерне» — шуме камеры 12 Мп и муаре
+  // экрана; после размытия на 1 пиксель тот же кадр читается. Своё, без ctx.filter (его нет в старом Safari).
+  function softened(d) {
+    const w = d.width, h = d.height, s = d.data, n = w * h;
+    const g = new Float32Array(n), t = new Float32Array(n), out = new Uint8ClampedArray(n * 4);
+    for (let i = 0, p = 0; p < n; i += 4, p++) g[p] = 0.299 * s[i] + 0.587 * s[i + 1] + 0.114 * s[i + 2];
+    for (let y = 0; y < h; y++) {
+      const r = y * w;
+      for (let x = 0; x < w; x++) t[r + x] = (g[r + (x ? x - 1 : 0)] + g[r + x] + g[r + (x < w - 1 ? x + 1 : x)]) / 3;
+    }
+    for (let y = 0; y < h; y++) {
+      const up = (y ? y - 1 : 0) * w, r = y * w, dn = (y < h - 1 ? y + 1 : y) * w;
+      for (let x = 0; x < w; x++) {
+        const v = (t[up + x] + t[r + x] + t[dn + x]) / 3, i = (r + x) * 4;
+        out[i] = out[i + 1] = out[i + 2] = v;
+        out[i + 3] = 255;
+      }
+    }
+    return out;
+  }
+
+  // Для подсказки, если не прочитано: что «увидел» телефон — миниатюра кадра, яркость и контраст.
+  function frameStats(cv, d, info) {
+    let n = 0, sum = 0, sq = 0;
+    for (let i = 0; i < d.data.length; i += 64) {
+      const v = 0.3 * d.data[i] + 0.59 * d.data[i + 1] + 0.11 * d.data[i + 2];
+      n++; sum += v; sq += v * v;
+    }
+    const mean = sum / n;
+    info.light = Math.round(mean);
+    info.contrast = Math.round(Math.sqrt(Math.max(0, sq / n - mean * mean)));
+    try {
+      const t = document.createElement('canvas'), k = 240 / Math.max(cv.width, cv.height);
+      t.width = Math.round(cv.width * k); t.height = Math.round(cv.height * k);
+      t.getContext('2d').drawImage(cv, 0, 0, t.width, t.height);
+      info.preview = t.toDataURL('image/jpeg', 0.7);
+    } catch { /* без миниатюры */ }
+  }
+
+  // jsQR: кадр целиком в нескольких масштабах, затем середина и части (на снимке всей карты два QR и
+  // много мелочи — по частям код находится надёжнее). Между попытками отдаём поток (прогресс).
+  async function scanJsQR(img, found, info, onStep, invert) {
+    const W = imgW(img), H = imgH(img);
+    // [x, y, ширина, высота участка, до скольких px уменьшить, со сглаживанием]
+    const plan = [[0, 0, W, H, 1200, false], [0, 0, W, H, 1200, true], [0, 0, W, H, 800, true],
+      [0, 0, W, H, 2000, false], [0, 0, W, H, 1600, true]];
+    for (const [f, smooth] of [[0.75, true], [0.55, false]]) {           // середина кадра — туда обычно целятся
+      plan.push([(1 - f) / 2 * W, (1 - f) / 2 * H, f * W, f * H, 1400, smooth]);
+    }
+    const SOFTEN_FIRST = plan.length;   // кадр целиком и середина — ещё и с лёгким размытием
     for (const [f, steps] of [[0.6, [0, 0.4]], [0.4, [0, 0.3, 0.6]]]) {
-      for (const fy of steps) for (const fx of steps) plan.push([fx * W, fy * H, f * W, f * H, 1400]);
+      for (const fy of steps) for (const fx of steps) plan.push([fx * W, fy * H, f * W, f * H, 1400, false]);
     }
     const cv = document.createElement('canvas');
     const ctx = cv.getContext('2d', { willReadFrequently: true });
-    let other = null, vinOnly = null;
-    try {
-      for (let i = 0; i < plan.length; i++) {
-        if (onStep) onStep(i + 1, plan.length);
-        await new Promise(r => setTimeout(r, 0));
-        const [sx, sy, sw, sh, max] = plan[i];
-        const k = Math.min(1, max / Math.max(sw, sh));
-        cv.width = Math.max(1, Math.round(sw * k));
-        cv.height = Math.max(1, Math.round(sh * k));
-        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
-        const d = ctx.getImageData(0, 0, cv.width, cv.height);
-        const r = window.jsQR(d.data, cv.width, cv.height, { inversionAttempts: 'dontInvert' });
-        if (r && r.data) {
-          const vin = vinFromText(r.data);
-          if (vin && r.data.includes('|')) return { vin, text: r.data, card: true };   // верхний QR
-          if (vin) vinOnly = vinOnly || r.data; else other = r.data;
-        }
+    for (let i = 0; i < plan.length; i++) {
+      info.tries++;
+      if (onStep) onStep(info.tries);
+      await new Promise(r => setTimeout(r, 0));
+      const [sx, sy, sw, sh, max, smooth] = plan[i];
+      const k = Math.min(1, max / Math.max(sw, sh));
+      cv.width = Math.max(1, Math.round(sw * k));
+      cv.height = Math.max(1, Math.round(sh * k));
+      drawScaled(ctx, img, sx, sy, sw, sh, cv.width, cv.height, smooth);
+      const d = ctx.getImageData(0, 0, cv.width, cv.height);
+      if (i === 0 && !info.preview) frameStats(cv, d, info);
+      const opts = { inversionAttempts: invert ? 'attemptBoth' : 'dontInvert' };
+      let r = window.jsQR(d.data, cv.width, cv.height, opts);
+      if (!(r && r.data) && i < SOFTEN_FIRST) r = window.jsQR(softened(d), cv.width, cv.height, opts);
+      if (r && r.data) {
+        found.push(r.data);
+        const c = pickCard(found);
+        if (c && c.card) return;               // верхний QR найден — дальше не ищем
       }
+    }
+  }
+
+  // Чтение QR контрольной карты: встроенный распознаватель → jsQR по снимку → ещё раз jsQR по
+  // снимку, загруженному через <img>, со светлым кодом на тёмном тоже (Safari на iPhone поворачивает
+  // снимок по EXIF не везде одинаково). info (размер снимка, попытки, способ) — для подсказки,
+  // если не прочитано. → {vin, text, card, info}
+  async function readQr(file, onStep) {
+    const found = [], info = { size: '', tries: 0, how: 'jsQR' };
+    const done = () => { const c = pickCard(found); return c && c.card; };
+    let img = await loadImage(file);
+    try {
+      info.size = imgW(img) + '×' + imgH(img);
+      if (await detectNative(img, found)) info.how = 'BarcodeDetector + jsQR';
+      if (!done()) await scanJsQR(img, found, info, onStep, false);
     } finally { if (img.close) img.close(); }
-    return vinOnly ? { vin: vinFromText(vinOnly), text: vinOnly, card: false } : { vin: null, text: other };
+    if (!done()) {
+      try {
+        img = await loadImg(file);
+        await scanJsQR(img, found, info, onStep, true);
+      } catch { /* <img> не открыл снимок — остаётся то, что нашлось */ }
+    }
+    const c = pickCard(found);
+    return c ? { ...c, info } : { vin: null, text: found[found.length - 1] || null, info };
   }
 
   // Фото шпильки: до 2000 px по длинной стороне (для разбора хватает, диск сервера бережём).
@@ -165,8 +280,7 @@
 
   let mapSt = null;              // /api/stud-map/status: есть ли схемы 3D, схема → модель карты
   let mapFrame = null;
-  let mapSent;                   // что последним передано карте: модель «Записи» или null (дефекты)
-  let mapDirty = false;          // появились/удалены записи — карте дефектов нужны свежие данные
+  let mapSent;                   // что последним передано карте: модель машины или null (машины нет)
 
   async function loadMapStatus() {
     try {
@@ -189,21 +303,39 @@
       mapSent = undefined;
       const w = mapWin();
       if (w) w.__smRecordStud = ({ no }) => onMapPick(no);   // без машины — из карточки «Записать дефект»
+      if (w && w.SM && w.SM.onChange) w.SM.onChange(renderNums);
       syncMap();
+      if (mapFsWanted) showMap();
     });
-    mapFrame.src = '/studs/map/app/';
+    mapFrame.src = '/studs/map/app/?ctx=record';
     $('smBox').replaceChildren(mapFrame);
   }
 
-  function reloadMapIfDirty() {
+  // Карта во весь экран (на iPhone — растянутое окно карты) закрывает карточку записи с фото — выйти.
+  function exitMapFullscreen() {
     const w = mapWin();
-    if (!mapDirty || !w) return;
-    mapDirty = false;
-    try { w.location.reload(); } catch { /* фрейм ещё грузится — данные и так свежие */ }
+    if (!w) return;
+    const d = w.document;
+    try {
+      if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+      else if (d.querySelector('#stage.fs, #lay.fs')) (d.getElementById('fsBtn') || {}).click?.();
+    } catch { /* карта ещё грузится */ }
+  }
+
+  // Машина выбрана (QR или модель выбрана руками) — на телефоне её 3D сразу во весь экран: осмотреть,
+  // нажать шпильку → карта сама выйдет из «во весь экран» и откроет запись с фото (onMapPick).
+  // Под ней страница уже прокручена к карте — после выхода оператор там же.
+  let mapFsWanted = false;                  // карта ещё грузится — развернуть, как загрузится
+  function showMap() {
+    if (!has3d() || window.innerWidth >= 700) return;
+    $('mapCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const w = mapWin();
+    if (w && w.SM && w.SM.fullscreen) { mapFsWanted = false; w.SM.fullscreen(); } else mapFsWanted = true;
   }
 
   // Нажали шпильку в 3D: номер на карте — номер цеха (label) в схеме этой машины
   function onMapPick(no) {
+    exitMapFullscreen();
     if (!S.vinKey || !schemeByCode[S.scheme]) {     // машины ещё нет — сначала QR
       say($('qrStatus'), 'info', `Шпилька №${esc(no)}: сначала сфотографируйте <b>верхний QR</b> машины — откроется её 3D, там и запишите.`);
       $('carCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -216,26 +348,26 @@
   }
 
   // Без машины — карта дефектов; машина с моделью — 3D этой модели для записи (или А-лист).
+  // «3D / Схемы» и список номеров — у самой карты (внутри фрейма и под ним); А-лист раздела
+  // (картинки схем из базы) — только если 3D-карты этой модели нет.
   function syncMap() {
     const sc = S.vinKey && schemeByCode[S.scheme];
-    const three = !!sc && has3d() && S.recView !== 'sheet';
+    const three = !!sc && has3d();
     const card = $('mapCard');
     if (sc) card.hidden = !has3d();
     else card.hidden = !!S.vinKey || !mapSt;          // машина без модели — сначала выбрать модель
-    $('mapTitle').textContent = sc ? '3D · ' + sc.title : '3D-карта шпилек';
-    $('viewMode').hidden = !sc;
-    $('viewMode').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === (three ? '3d' : 'sheet'))));
-    $('mapHint').textContent = sc
-      ? 'Нажмите на шпильку, которой нет на машине. Повернуть — пальцем, приблизить — двумя пальцами.'
-      : '«Запись» — где какие шпильки, «Дефекты» — карта дефектов. Записать дефект — после QR машины.';
-    $('mapHint').hidden = !(three || (!sc && mapFrame));
+    $('mapTitle').textContent = sc ? '3D · ' + sc.title : '3D-схема шпилек';
+    $('viewMode').hidden = true;
+    // подсказка — только с машиной (без машины карта говорит сама за себя)
+    $('mapHint').textContent = 'Нажмите на шпильку, которой нет на машине (в 3D, на «Схемах» или номер в списке ниже). Повернуть — пальцем, приблизить — двумя пальцами.';
+    $('mapHint').hidden = !three;
     $('smBox').hidden = !!sc && !three;
+    renderNums();
     const note = !mapFrame && mapSt && !mapSt.has_schemes
       ? 'Схемы 3D-карты не установлены на сервере (папка data\stud_map) — см. docs/STUD_MAP.md.' : '';
     $('mapNote').textContent = note;
     $('mapNote').hidden = !note;
     if (!mapFrame) return;
-    mapFrame.classList.toggle('rec', three);
     const want = sc ? mapModelOf(S.scheme) : null;
     const w = mapWin();
     if (want !== mapSent && w && w.SM) {
@@ -251,6 +383,57 @@
     const w = mapWin();
     if (!w || !w.SM || !w.SM.setDone) return;
     w.SM.setDone(S.vinKey ? carRecords.map(r => r.stud_label) : []);
+    renderNums();
+  }
+
+  // Под картой — номера шпилек того, что на ней сейчас: лист «Схем» или вся модель в 3D (кнопки
+  // листов — переключают «Схемы»). Нажатие на номер — как нажатие на шпильку на карте.
+  // Записанные по машине — зелёные с ✓, выбранная — выделена.
+  // Станции: короткое имя — как на кнопках карты (FF, RF…); станция шпильки — из каталога
+  // (своя, из реестра цеха или по месту на 3D — app/stud_map_data.py: guess_station).
+  const ST_SHORT = { 'FRONT FLOOR': 'FF', 'REAR FLOOR': 'RF', 'WHEEL HOUSE': 'WH', 'FR WHEEL HOUSE': 'FWH', 'ENGINE COMP': 'EC', 'BODY SIDE': 'BS' };
+  let mapStation = null, mapStationModel = null;   // выбранная станция в списке номеров (null — все)
+  let mapStationOnMap = null;                       // станция, нажатая над картой (FF, RF…) — последняя увиденная
+
+  function stationsOf(model) {                       // {номер на карте: станция} для модели карты
+    const scheme = Object.keys((mapSt && mapSt.scheme_model) || {}).find(k => mapSt.scheme_model[k] === model);
+    const out = {};
+    (C ? C.studs : []).forEach(s => { if (s.scheme_code === scheme && s.station) out[String(s.label)] = s.station; });
+    return out;
+  }
+
+  function renderNums() {
+    const w = mapWin(), box = $('mapNums');
+    const info = w && w.SM && w.SM.info ? w.SM.info() : null;
+    if (!info || $('mapCard').hidden || $('smBox').hidden) { box.hidden = true; return; }
+    box.hidden = false;
+    const all = info.views.reduce((n, v) => n + v.count, 0);
+    $('mapViews').innerHTML = `<button type="button" data-v3d aria-pressed="${info.mode === '3d'}">3D · вся модель<span class="cnt">${all}</span></button>` +
+      info.views.map(v => `<button type="button" data-sheet="${esc(v.name)}" aria-pressed="${info.view === v.name}">${esc(v.name)}<span class="cnt">${v.count}</span></button>`).join('');
+    // фильтр по станции: на «Записать» — номера только этой станции (в 3D камера едет к ней)
+    if (mapStationModel !== info.model) { mapStation = null; mapStationModel = info.model; }
+    if (info.station !== mapStationOnMap) { mapStationOnMap = info.station; if (info.station) mapStation = info.station; }
+    const st = stationsOf(info.model), counts = {};
+    info.nums.forEach(n => { const k = st[String(n)]; if (k) counts[k] = (counts[k] || 0) + 1; });
+    if (mapStation && !counts[mapStation]) mapStation = null;
+    $('mapStations').innerHTML = `<button type="button" data-st="" aria-pressed="${!mapStation}">Все станции<span class="cnt">${info.nums.length}</span></button>` +
+      Object.keys(ST_SHORT).filter(k => counts[k]).map(k =>
+        `<button type="button" data-st="${esc(k)}" title="${esc(k)}" aria-pressed="${mapStation === k}">${ST_SHORT[k]}<span class="cnt">${counts[k]}</span></button>`).join('');
+    const nums = mapStation ? info.nums.filter(n => st[String(n)] === mapStation) : info.nums;
+    $('mapNumTitle').textContent = '· ' + (info.view ? info.view : 'вся модель') + (mapStation ? ' · ' + mapStation : '') + ' · ' + nums.length;
+    const done = new Set(S.vinKey ? carRecords.map(r => String(r.stud_label)) : []);
+    const sel = S.sel && studByNo[S.sel] ? String(studByNo[S.sel].label) : null;
+    $('mapNumGrid').innerHTML = nums.map(n => {
+      const k = String(n);
+      return `<button type="button" data-no="${n}" class="${done.has(k) ? 'done' : ''}" aria-pressed="${k === sel}">${n}${done.has(k) ? ' ✓' : ''}</button>`;
+    }).join('');
+  }
+
+  // Список под картой (листы, станции, номера) — свёрнут под кнопкой «Список шпилек»; раскрыт или нет — запоминается
+  function setNumsOpen(open, remember) {
+    $('mapNumsBody').hidden = !open;
+    $('mapNumsBtn').setAttribute('aria-expanded', String(open));
+    if (remember) { try { localStorage.setItem(NUMS_STORE, open ? '1' : '0'); } catch { /* ок */ } }
   }
 
   // ── запись: машина ─────────────────────────────────────────────────────────
@@ -281,16 +464,22 @@
     const st = $('qrStatus');
     say(st, 'info', 'Читаю QR…');
     try {
-      const r = await readQr(file, (i, n) => say(st, 'info', `Читаю QR… ${i}/${n}`));
+      const r = await readQr(file, i => say(st, 'info', `Читаю QR… ${i}`));
       if (!r.vin) {
+        const i = r.info || {};
         say(st, 'warn', 'QR не прочитан. Снимите ближе — чтобы <b>верхний QR</b> занимал почти весь кадр, без бликов. Или введите VIN вручную.' +
-          (r.text ? `<br><span class="text-sm">Прочитан другой код: ${esc(r.text.slice(0, 60))}</span>` : ''));
+          (r.text ? `<br><span class="text-sm">Прочитан другой код: ${esc(r.text.slice(0, 60))}</span>` : '') +
+          // для разбора, почему не читается: размер снимка, сколько участков проверено, чем, что «увидел» телефон
+          `<br><span class="text-sm text-muted">снимок ${esc(i.size)} · проверено участков: ${i.tries} · ${esc(i.how)}` +
+          (i.light != null ? ` · яркость ${i.light} · контраст ${i.contrast}` : '') + '</span>' +
+          (i.preview ? `<br><img src="${i.preview}" alt="Что увидел телефон" style="max-width:160px;max-height:200px;margin-top:6px;border-radius:6px;border:1px solid var(--border)">` : ''));
         return;
       }
       say(st, '', '');
       await takeCar({ qr: r.text });
       const sc = schemeByCode[S.scheme];
       toast('VIN ' + S.vinKey + (sc ? ' · ' + sc.title : ''));
+      showMap();
     } catch (e) {
       say(st, 'danger', esc(e.message && !/^\d+$/.test(e.message) ? e.message : 'Не удалось прочитать фото — попробуйте ещё раз'));
     }
@@ -316,7 +505,7 @@
     $('schemeBtns').innerHTML = C.schemes.map(s =>
       `<button class="btn btn-ghost" type="button" data-scheme="${esc(s.code)}">${esc(s.title)}<br><small class="text-muted">${esc(s.code)}</small></button>`).join('');
     // А-лист (картинки схем раздела) — по выбору или если 3D этой модели нет
-    const sheet = !!sc && (!has3d() || S.recView === 'sheet');
+    const sheet = !!sc && !has3d();
     $('schemeCard').hidden = !sheet;
     if (sheet) { renderViews(); renderMap(true); }
     renderCarRecords();
@@ -345,6 +534,7 @@
     S.sel = null;
     save();
     renderCar();
+    showMap();
   }
 
   // ── запись: схема ──────────────────────────────────────────────────────────
@@ -459,6 +649,7 @@
     S.cam = 0;
     save();
     refreshMarks();
+    renderNums();
     say($('sendStatus'), '', '');
     pendingPhoto = null;
     openSheet();
@@ -514,7 +705,6 @@
       if (res.status !== 'success') { say($('sendStatus'), 'danger', esc(res.message || 'Не записано')); return; }
       pendingPhoto = null;
       if (res.record && !carRecords.some(r => r.id === res.record.id)) carRecords.unshift(res.record);
-      if (!res.duplicate) mapDirty = true;
       toast((res.duplicate ? '' : '✓ ') + res.message);
       S.sel = null;
       save();
@@ -559,7 +749,6 @@
     if (r.status !== 'success') { toast(r.message || 'Не удалено', true); return false; }
     carRecords = carRecords.filter(x => x.id !== id);
     logRows = logRows.filter(x => x.id !== id);
-    mapDirty = true;
     toast('Запись удалена');
     if (after) after();
     return true;
@@ -784,8 +973,26 @@
       carRecords = [];
       say($('qrStatus'), '', '');
       renderCar();
-      reloadMapIfDirty();
       window.scrollTo({ top: 0 });
+    });
+    setNumsOpen((() => { try { return localStorage.getItem(NUMS_STORE) === '1'; } catch { return false; } })(), false);
+    $('mapNumsBtn').addEventListener('click', () => setNumsOpen($('mapNumsBody').hidden, true));
+    $('mapViews').addEventListener('click', e => {
+      const w = mapWin(), b = e.target.closest('button');
+      if (!b || !w || !w.SM) return;
+      if (b.hasAttribute('data-v3d')) w.SM.show3d(); else w.SM.showView(b.dataset.sheet);
+    });
+    $('mapStations').addEventListener('click', e => {
+      const b = e.target.closest('button[data-st]');
+      if (!b) return;
+      mapStation = b.dataset.st || null;
+      const w = mapWin(), info = w && w.SM && w.SM.info ? w.SM.info() : null;
+      if (mapStation && info && info.mode === '3d' && w.SM.station) w.SM.station(mapStation);   // камера к станции
+      renderNums();
+    });
+    $('mapNumGrid').addEventListener('click', e => {
+      const w = mapWin(), b = e.target.closest('button[data-no]');
+      if (b && w && w.SM && w.SM.pick) w.SM.pick(+b.dataset.no);
     });
     $('viewMode').addEventListener('click', e => {
       const b = e.target.closest('button[data-v]');
@@ -834,6 +1041,7 @@
       S.sel = null; S.cam = 0; save();
       document.querySelectorAll('#map .mk.sel').forEach(b => b.classList.remove('sel'));
       closeSheet();
+      renderNums();
     });
     $('sendStatus').addEventListener('click', e => { if (e.target.id === 'retryBtn') send(); });
     $('carRecords').addEventListener('click', e => {

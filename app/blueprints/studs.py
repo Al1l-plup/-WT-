@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 
 from flask import Blueprint, current_app, jsonify, render_template, request, send_file, session
 
+from app import stud_map_data as smd
 from app import studs as st
 from app.db import get_db
 from app.defect_flow import _now
@@ -109,6 +110,8 @@ def catalog():
     studs = [dict(r) for r in db.execute(
         f'SELECT stud_no, {_LABEL_SQL.format(t="stud")} AS label, scheme_code, view_key, x, y, part, colour, station '
         'FROM stud WHERE active=1 ORDER BY stud_no')]
+    for s in studs:                          # станция в карточке шпильки — та же, что попадёт в запись
+        s['station'] = _station(s['scheme_code'], s['label'], s['station'])
     parts = [{'key': k, 'part': p, 'colour': c, **_image_info('parts', k)}
              for k, (p, c) in sorted(_part_keys(db).items())]
     can_manage = st.can_manage_schemes(dept, is_admin)
@@ -256,8 +259,19 @@ def _record(db, rid):
     return _row_out(r) if r else None
 
 
+def _station(scheme_code, label, own):
+    """Станция записи: своя у шпильки (stud.station), иначе — из реестра цеха или по месту шпильки
+    на 3D-карте (app/stud_map_data.py: guess_station). Нет данных — None."""
+    if own:
+        return own
+    return smd.guess_station(os.path.join(os.path.dirname(current_app.config['DB_PATH']), 'stud_map'),
+                             scheme_code, label)
+
+
 def _row_out(r):
     d = dict(r)
+    if not d.get('station'):                 # запись без станции (сделана до того, как станцию стали выводить) — выводим её
+        d['station'] = _station(d['scheme_code'], d['stud_label'], None)
     d['has_photo'] = bool(d['has_photo'])
     d['category_label'] = st.CATEGORIES.get(d['category'] or '', d['category'] or '')
     d['source_label'] = st.SOURCES.get(d['source'] or '', d['source'] or '')
@@ -354,7 +368,8 @@ def record_create():
         now = _now()
         cur = db.execute('INSERT INTO stud_defect (created_at, created_by, vin, vin_key, scheme_code, stud_no, station, '
                          'photo, card_qr) VALUES (?,?,?,?,?,?,?,?,?)',
-                         (now, uid, raw_vin, key, scheme, stud_no, stud['station'], fname, card_qr))
+                         (now, uid, raw_vin, key, scheme, stud_no, _station(scheme, stud['label'], stud['station']),
+                          fname, card_qr))
         db.execute('INSERT OR IGNORE INTO stud_vin_prefix (prefix, scheme_code, created_at, created_by) VALUES (?,?,?,?)',
                    (st.vin_prefix(key), scheme, now, uid))
         if token:   # незнакомая модель из QR: выбор оператора запоминается — дальше схема откроется сама

@@ -12,8 +12,10 @@
 нового года W01 вставала перед W46). Карта показывает её коротко — «W46».
 """
 import datetime as dt
+import json
 import os
 import re
+import threading
 import warnings
 from collections import Counter
 
@@ -318,7 +320,7 @@ def _mark_mass(rows):
         x['mass'] = bool(x['body_no']) and tot[(x['model'], x['body_no'], x['date'])] >= MASS_MIN
 
 
-def site_rows(records, sources=None, locations=None):
+def site_rows(records, sources=None, locations=None, zones=None):
     """Записи раздела «Шпильки» → строки карты. Возвращает (rows, skipped).
 
     records — словари с полями id, created_at, vin_key, scheme_code, stud_no, shop_no,
@@ -326,7 +328,8 @@ def site_rows(records, sources=None, locations=None):
     Номер на карте — номер цеха; запись со схемой без карты или с неуточнённым номером
     («6024?» — на карте его нет) пропускается и попадает в skipped.
     Кузов — последние 6 знаков VIN (номера кузова цеха у записи сайта нет).
-    Станция — у шпильки в схеме, иначе — та, что чаще у этой шпильки в реестре (locations)."""
+    Станция — у записи / шпильки в схеме, иначе — та, что чаще у этой шпильки в реестре (locations),
+    иначе — зона на 3D-кузове (zones, см. guess_station)."""
     rows, skipped = [], Counter()
     for r in records:
         m = SCHEME_MODEL.get(r['scheme_code'])
@@ -338,7 +341,7 @@ def site_rows(records, sources=None, locations=None):
             skipped['номер шпильки уточняется'] += 1
             continue
         d = dt.date.fromisoformat(str(r['created_at'])[:10])
-        loc = r['station'] or (locations or {}).get((m, int(no))) or 'Не указано'
+        loc = r['station'] or (locations or {}).get((m, int(no))) or (zones or {}).get((m, int(no))) or 'Не указано'
         rows.append({
             'n': None, 'site_id': r['id'], 'body_no': '…' + str(r['vin_key'])[-6:], 'model': m, 'brand': BRAND[m],
             'date': d.isoformat(), 'week': _week_key(d), 'category': SITE_CAT.get(r['category'] or '', UNKNOWN_CAT),
@@ -356,6 +359,95 @@ def locations(rows):
         if x.get('stud_no') is not None and x.get('location') not in (None, 'Не указано'):
             seen.setdefault((x['model'], x['stud_no']), Counter())[x['location']] += 1
     return {k: c.most_common(1)[0][0] for k, c in seen.items()}
+
+
+# ── станция шпильки ──────────────────────────────────────────────────────────
+# В схемах раздела станции у шпилек нет (stud.station пустая), поэтому станцию выводим:
+# 1) stud.station, если её когда-нибудь заполнят; 2) самая частая станция этой шпильки в реестре
+# цеха; 3) зона кузова на 3D-карте, где стоит шпилька (body.json, координаты). Зоны — те же, что у
+# карты (константа зон станций в app.*.js); на шпильках из реестра они совпадают в ~95% случаев.
+ZONES = {
+    'ENGINE COMP': [(1.3, .42, -.56, 2.15, 1, .56)],
+    'FRONT FLOOR': [(-.4, .22, -.86, 1.3, .5, .86)],
+    'REAR FLOOR': [(-2.25, .18, -.86, -.4, .46, .86)],
+    'WHEEL HOUSE': [(-1.8, .28, .52, -.8, .84, .88), (-1.8, .28, -.88, -.8, .84, -.52)],
+    'FR WHEEL HOUSE': [(.95, .28, .52, 1.95, .84, .88), (.95, .28, -.88, 1.95, .84, -.52)],
+    'BODY SIDE': [(-2, .34, -.92, 1.3, 1.3, -.8)],
+}
+
+
+def zone_of(pt):
+    """Станция по точке шпильки на 3D-кузове (x, y, z) или None — вне зон."""
+    x, y, z = pt[:3]
+    for name, boxes in ZONES.items():
+        for x1, y1, z1, x2, y2, z2 in boxes:
+            if min(x1, x2) <= x <= max(x1, x2) and min(y1, y2) <= y <= max(y1, y2) and min(z1, z2) <= z <= max(z1, z2):
+                return name
+    return None
+
+
+_cache = {}                     # (что, путь) → ((mtime_ns, size), значение)
+_cache_lock = threading.RLock()     # register_locations читает register_cached под тем же замком
+
+
+def _cached(kind, path, load):
+    """load(path), пересчитывается, только когда файл поменялся. Нет файла — None."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    key = (st.st_mtime_ns, st.st_size)
+    with _cache_lock:
+        hit = _cache.get((kind, path))
+        if hit and hit[0] == key:
+            return hit[1]
+        value = load(path)
+        _cache[(kind, path)] = (key, value)
+        return value
+
+
+def register_cached(data_dir):
+    """Реестр из папки данных → (data, notes, error, mtime) или None, если файла нет."""
+    path = os.path.join(data_dir, REGISTER_FILE)
+
+    def load(p):
+        mtime = dt.datetime.fromtimestamp(os.stat(p).st_mtime).isoformat(timespec='seconds')
+        try:
+            data, notes = build(p, source_name=REGISTER_FILE)
+            return data, notes, None, mtime
+        except RegisterError as e:
+            return None, [], str(e), mtime
+    return _cached('register', path, load)
+
+
+def stud_zones(data_dir):
+    """{(модель карты, № шпильки): станция по 3D} из body.json папки данных."""
+    def load(p):
+        with open(p, encoding='utf-8') as f:
+            body = json.load(f).get('body', {})
+        return {(m, s['no']): zone_of(s['pts'][0]) for m, studs in body.items() for s in studs if s.get('pts')}
+    try:
+        return _cached('zones', os.path.join(data_dir, 'body.json'), load) or {}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+
+
+def guess_station(data_dir, scheme_code, shop_no):
+    """Станция шпильки, если у неё нет своей: реестр цеха → зона на 3D. Нет данных — None."""
+    m = SCHEME_MODEL.get(scheme_code)
+    no = str(shop_no or '')
+    if not m or not no.isdigit():
+        return None
+    loc = register_locations(data_dir).get((m, int(no)))
+    return loc or stud_zones(data_dir).get((m, int(no)))
+
+
+def register_locations(data_dir):
+    """{(модель карты, № шпильки): самая частая станция в реестре} — считается раз на версию файла."""
+    def load(p):
+        reg = register_cached(data_dir)
+        return locations(reg[0]['rows']) if reg and reg[0] else {}
+    return _cached('locations', os.path.join(data_dir, REGISTER_FILE), load) or {}
 
 
 def combine(register, site):

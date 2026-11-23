@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#161b22">
-  <meta name="description" content="WeldTeam MES — шпильки: запись по QR машины, 3D-карта дефектов и разбор">
+  <meta name="description" content="WeldTeam MES — шпильки: запись по QR машины на 3D-схеме и разбор">
   <title>Шпильки · WeldTeam MES</title>
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/theme.js"></script>
@@ -23,10 +23,10 @@
     .sp-seg{display:inline-flex;padding:3px;gap:2px;border:1px solid var(--border);border-radius:10px;background:var(--card2)}
     .sp-seg button{min-height:40px;min-width:64px;padding:0 14px;border:0;border-radius:7px;background:none;color:var(--text);font:inherit;font-weight:600;cursor:pointer}
     .sp-seg button[aria-pressed=true]{background:var(--accent);color:#fff}
-    .sm-frame{display:block;width:100%;height:max(560px,calc(100vh - 128px));border:1px solid var(--border);border-radius:var(--r-sm);background:var(--bg)}
-    .sm-frame.rec{height:max(420px,min(72vh,760px))}
+    .sm-frame{display:block;width:100%;height:max(420px,min(72vh,760px));border:1px solid var(--border);border-radius:var(--r-sm);background:var(--bg)}
     /* iPhone и др. без Fullscreen API: карта просит «во весь экран» — окно карты поверх всей страницы */
-    .sm-frame.sm-fs{position:fixed;top:0;left:0;width:100vw;height:100vh;height:100dvh;z-index:1000;margin:0;border:0;border-radius:0}
+    /* !important: высота карты для телефона (ниже, в @media) не должна перебивать «во весь экран» */
+    .sm-frame.sm-fs{position:fixed !important;top:0 !important;left:0 !important;width:100vw !important;height:100vh !important;height:100dvh !important;z-index:1000;margin:0;border:0;border-radius:0}
     html.sm-fs-on,html.sm-fs-on body{overflow:hidden;overscroll-behavior:none}
     .sp-big{font-size:17px;padding:14px 18px;min-height:52px}
     .linkish{background:none;border:0;color:var(--accent);font:inherit;font-size:13px;cursor:pointer;padding:6px 2px;text-decoration:underline;text-underline-offset:3px}
@@ -84,18 +84,30 @@
     #revDlg dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:12px 0;font-size:13px}
     #revDlg dt{color:var(--muted)}
     #revDlg textarea{width:100%;min-height:60px}
-    #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:300;background:#1a7f37;color:#fff;padding:10px 16px;border-radius:8px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,.4);max-width:92vw;display:none}
+    /* z-index выше карты «во весь экран» (1000): «VIN … · модель» после QR видно поверх неё */
+    #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:1100;background:#1a7f37;color:#fff;padding:10px 16px;border-radius:8px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,.4);max-width:92vw;display:none}
     #toast.err{background:#cf222e}
     .sp-imgs li{display:flex;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);list-style:none;font-size:13px}
+    /* номера шпилек под картой: нажатие — как на шпильку на карте; записанные — зелёные с ✓ */
+    .sp-nums{margin-top:10px}
+    /* список свёрнут под кнопкой (выбор запоминается): карта — главное, номера — по нажатию */
+    .sp-numtoggle{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:44px;padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--card2);color:var(--text);font-size:13px;font-weight:600;text-align:left;cursor:pointer}
+    .sp-numtoggle .chev{flex:none;transition:transform .15s}
+    .sp-numtoggle[aria-expanded=true] .chev{transform:rotate(180deg)}
+    .sp-numtoggle .muted{color:var(--muted);font-weight:500}
+    #mapNumsBody{margin-top:10px}
+    .sp-numgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px;max-height:280px;overflow:auto;-webkit-overflow-scrolling:touch}
+    .sp-numgrid button{min-height:40px;border:1px solid var(--border);border-radius:8px;background:var(--card2);color:var(--text);font:600 14px ui-monospace,Consolas,monospace;cursor:pointer}
+    .sp-numgrid button[aria-pressed=true]{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 25%,var(--card2))}
+    .sp-numgrid button.done{border-color:#2da44e;color:#2da44e}
     /* телефон: всё, на что нажимают, — от 44px */
     @media (pointer:coarse){
-      .sp-tabs button,.linkish{min-height:44px}
+      .sp-tabs button,.linkish,.sp-numgrid button,.sp-chips button{min-height:44px}
     }
     @media (max-width:640px){
       .sp-tabs button{flex:1}
       .sp-seg button{min-height:44px}
-      .sm-frame{height:max(480px,calc(100vh - 210px))}
-      .sm-frame.rec{height:max(380px,64vh)}
+      .sm-frame{height:max(380px,64vh)}
       .sp-filters .fgroup{flex:1 1 45%}
       .sp-mapwrap{max-height:62vh}
     }
@@ -122,13 +134,12 @@
 <div class="page sp">
   <div class="page-head">
     <h1>Шпильки</h1>
-    <p>Верхний QR контрольной карты → 3D машины → шпилька → фото. Без машины — 3D-карта: где какие шпильки и дефекты.</p>
   </div>
 
   <div id="loadAlert"></div>
 
   <div class="sp-tabs" role="tablist">
-    <button type="button" role="tab" id="tabRecBtn" aria-controls="tabRec" aria-selected="true">Запись и карта</button>
+    <button type="button" role="tab" id="tabRecBtn" aria-controls="tabRec" aria-selected="true">Записать</button>
     <button type="button" role="tab" id="tabLogBtn" aria-controls="tabLog" aria-selected="false">Журнал <span class="badge bw" id="newCount" hidden></span></button>
   </div>
 
@@ -164,7 +175,7 @@
 
     <div class="card" id="mapCard" hidden>
       <div class="sp-maphead">
-        <div class="card-title accent" id="mapTitle">3D-карта шпилек</div>
+        <div class="card-title accent" id="mapTitle">3D-схема шпилек</div>
         <div class="sp-seg" id="viewMode" role="group" aria-label="Где выбирать шпильку" hidden>
           <button type="button" data-v="3d" aria-pressed="true">3D</button>
           <button type="button" data-v="sheet" aria-pressed="false">А-лист</button>
@@ -172,6 +183,17 @@
       </div>
       <p class="note" id="mapHint" hidden style="margin:0 0 8px">Нажмите на шпильку, которой нет на машине. Повернуть — пальцем, приблизить — двумя пальцами.</p>
       <div id="smBox"></div>
+      <div class="sp-nums" id="mapNums" hidden>
+        <button type="button" class="sp-numtoggle" id="mapNumsBtn" aria-expanded="false" aria-controls="mapNumsBody">
+          <span>Список шпилек <span class="muted" id="mapNumTitle"></span></span>
+          <svg class="chev" viewBox="0 0 10 10" width="12" height="12" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div id="mapNumsBody" hidden>
+          <div class="sp-chips" id="mapViews" role="group" aria-label="Что показать на карте: вся модель или лист «Схем»"></div>
+          <div class="sp-chips" id="mapStations" role="group" aria-label="Станция: показать номера только её шпилек"></div>
+          <div class="sp-numgrid" id="mapNumGrid" role="group" aria-label="Номера шпилек"></div>
+        </div>
+      </div>
       <p class="note" id="mapNote" hidden></p>
     </div>
 
@@ -275,6 +297,6 @@
 
 <script src="/static/vendor/jsQR.js"></script>
 <script src="/static/page-state.js?v=1"></script>
-<script src="/static/studs.js?v=15"></script>
+<script src="/static/studs.js?v=23"></script>
 </body>
 </html>

@@ -106,10 +106,20 @@ def test_anonymous_gets_nothing(anon_client):
     assert anon_client.get('/api/stud-map/status').status_code == 401
 
 
-def test_old_map_address_goes_to_studs(client):
-    """Отдельной вкладки «Визуализация» больше нет: старый адрес ведёт на «Шпильки»."""
+def test_old_map_address_goes_to_analytics(client):
+    """Отдельной вкладки «Визуализация» больше нет: карта дефектов — «Аналитика» → «Шпильки»."""
     r = client.get('/studs/map')
-    assert r.status_code == 302 and r.headers['Location'].endswith('/studs')
+    assert r.status_code == 302 and r.headers['Location'].endswith('/analytics/studs')
+
+
+def test_analytics_studs_page(client):
+    """«Аналитика» → «Шпильки»: карта дефектов и аналитика (фрейм с ?ctx=analytics); вкладка — со
+    страницы «Аналитика»."""
+    page = client.get('/analytics/studs').get_data(as_text=True)
+    assert "f.src = '/studs/map/app/?ctx=analytics'" in page and 'aria-current="page">Шпильки<' in page
+    assert '<a class="nav-link active" href="/analytics">' in page
+    assert '.sm-frame.sm-fs{position:fixed !important' in page          # «во весь экран» на iPhone
+    assert 'href="/analytics/studs"' in client.get('/analytics').get_data(as_text=True)
 
 
 def test_page_and_code(client):
@@ -134,22 +144,50 @@ def test_studs_page_record_and_map_together(client):
     """«Записать» и карта — одна вкладка: машина по QR, ниже карта (3D для записи / карта дефектов),
     рядом — А-лист раздела; вторая вкладка — «Журнал»."""
     page = client.get('/studs').get_data(as_text=True)
-    assert '>Запись и карта<' in page and 'id="tabLogBtn"' in page
+    assert '>Записать<' in page and 'id="tabLogBtn"' in page
+    # без пояснений под заголовком и над картой без машины (карта дефектов — в меню «Аналитика»)
+    assert 'Верхний QR контрольной карты →' not in page and 'Где какие шпильки стоят' not in page
     assert 'tabMapBtn' not in page and 'href="/studs/map"' not in page
     assert page.index('id="carCard"') < page.index('id="mapCard"') < page.index('id="schemeCard"')
     assert 'id="smBox"' in page and 'data-v="3d"' in page and 'data-v="sheet"' in page
     assert '.sm-frame.sm-fs{position:fixed' in page                  # «во весь экран» на iPhone
     assert 'Загрузить реестр' not in page and 'smUpload' not in page
     src = re.search(r'<script src="/static/studs\.js\?v=(\d+)"></script>', page)
-    assert src and int(src.group(1)) >= 15
+    assert src and int(src.group(1)) >= 21
     js = (ROOT / 'app' / 'static' / 'studs.js').read_text(encoding='utf-8')
     # нажатие в 3D → та же запись с фото; номер карты — номер цеха (label); модель — по схеме
-    assert "mapFrame.src = '/studs/map/app/'" in js and "fetch('/api/stud-map/status')" in js
+    # на «Записать» — только шпильки, без дефектов (?ctx=record)
+    assert "mapFrame.src = '/studs/map/app/?ctx=record'" in js and "fetch('/api/stud-map/status')" in js
+    assert 'exitMapFullscreen();' in js                                  # карточка с фото не под картой
+    # после QR (или выбора модели) на телефоне 3D машины сразу во весь экран; карта ещё грузится — как загрузится.
+    # «VIN … · модель» — поверх карты во весь экран (z-index выше 1000)
+    assert 'if (!has3d() || window.innerWidth >= 700) return;' in js
+    assert 'if (w && w.SM && w.SM.fullscreen) { mapFsWanted = false; w.SM.fullscreen(); } else mapFsWanted = true;' in js
+    assert 'if (mapFsWanted) showMap();' in js and 'z-index:1100;' in page
+    assert int(src.group(1)) >= 22
+    # под картой — номера шпилек того, что на ней (лист «Схем» или вся модель); нажатие — как на карте
+    assert 'id="mapNums"' in page and 'id="mapViews"' in page and 'id="mapNumGrid"' in page
+    # список (листы, станции, номера) свёрнут под кнопкой «Список шпилек»; раскрыт или нет — запоминается
+    assert 'id="mapNumsBtn" aria-expanded="false" aria-controls="mapNumsBody"' in page and '<div id="mapNumsBody" hidden>' in page
+    assert page.index('id="mapNumsBody"') < page.index('id="mapViews"') < page.index('id="mapStations"') < page.index('id="mapNumGrid"')
+    assert "localStorage.setItem(NUMS_STORE, open ? '1' : '0')" in js and "$('mapHint').hidden = !three;" in js
+    assert 'Где какие шпильки стоят' not in js and int(src.group(1)) >= 23
+    assert 'w.SM.onChange(renderNums)' in js and 'w.SM.pick(+b.dataset.no)' in js and 'w.SM.showView(b.dataset.sheet)' in js
+    assert 'const sheet = !!sc && !has3d();' in js                     # А-лист раздела — только без 3D
+    # фильтр списка по станции (FF, RF…): в 3D камера едет к станции; станция, нажатая над картой, — в списке
+    assert 'id="mapStations"' in page and 'w.SM.station(mapStation)' in js and 'if (info.station !== mapStationOnMap)' in js
     assert 'w.__smRecordStud = ({ no }) => onMapPick(no)' in js and 'w.SM.setRecord(want)' in js
     assert 'String(x.label) === String(no)' in js
     assert 'сначала сфотографируйте <b>верхний QR</b> машины' in js       # без машины — сначала QR
     # записанные по машине шпильки отмечаются и в 3D (номер карты — номер цеха)
     assert 'w.SM.setDone(S.vinKey ? carRecords.map(r => r.stud_label) : [])' in js
+    # QR: встроенный распознаватель браузера, затем jsQR (второй проход — через <img>, со светлым кодом
+    # на тёмном); не прочитано — в подсказке размер снимка и сколько проверено
+    assert "'BarcodeDetector' in window" in js and "invert ? 'attemptBoth' : 'dontInvert'" in js
+    assert 'img = await loadImg(file);' in js and 'проверено участков' in js
+    # снимок 12 Мп: уменьшение ступенями со сглаживанием и лёгкое размытие кадра — jsQR не сбивается на шуме
+    assert 'function softened(d)' in js and 'window.jsQR(softened(d), cv.width, cv.height, opts)' in js
+    assert "ctx.imageSmoothingQuality = smooth ? 'high' : 'low'" in js and 'info.preview' in js
 
 
 def test_data_comes_from_server_folder_not_git(app, client):
@@ -420,10 +458,34 @@ def test_layout_mode(client):
     assert re.search(r'<script src="layout\.js\?v=\d+" defer></script>', html)
     assert '.sm-rec .panel' in html                                   # аналитика в «Записи» скрыта
     assert 'html.sm-car #recBtn' in html and 'html.sm-embed #recBtn' not in html   # кнопка скрыта только с машиной
+    # «Записать» — без «Дефектов», «Аналитика» — без «Записи»; станции на телефоне — своей строкой
+    assert 'html.sm-record #recBtn, html.sm-record #layBack, html.sm-analytics #recBtn, html.sm-analytics #viewSeg' in html
+    assert 'html.sm-car #recBtn, html.sm-car:not(.sm-record) #viewSeg' in html   # «3D / Схемы» — и с машиной
+    assert 'html.sm-embed .viewbar > .stbar { order: 4; flex: 1 1 100%; min-width: 0; }' in html
+    # телефон (фрейм ≤600px): «3D / Схемы» — в меню «⋯», станции — в списке/блоке ниже, заголовок не нужен;
+    # на компьютере над картой всё по-прежнему
+    phone = html[html.index('html.sm-embed .viewbar > .stbar'):html.index('</style>')]
+    assert 'html.sm-record #viewSeg, html.sm-record #stBar, html.sm-analytics #stBar,' in phone
+    assert 'html.sm-analytics .s-hdr { display: none !important; }' in phone
+    hide = html.index('html.sm-record #viewSeg, html.sm-record #stBar')   # только внутри @media для телефона
+    assert html.rindex('@media (max-width: 600px) {', 0, hide) > html.index('html.sm-record .stage { height: 100vh;')
+    assert '}' not in html[html.rindex('@media (max-width: 600px) {', 0, hide) + 27:hide].replace('{ order: 4; flex: 1 1 100%; min-width: 0; }', '') \
+        .replace('{ max-width: calc(100% - 156px); }', '')
+    # «Записать» сразу рисуется как «Запись» (до карты дефектов дело не доходит), дефекты скрыты всегда
+    assert "if (ctx === 'record') { document.documentElement.classList.add('sm-record', 'sm-rec'); window.__smRec = true;" in html
+    assert 'html.sm-record .panel, html.sm-record #lgBox, html.sm-record .zones' in html
     js = client.get('/studs/map/app/layout.js').get_data(as_text=True)
     assert "fetch('views.json'" in js and 'window.__smRec = rec' in js and 'window.__smPick' in js
     assert 'window.SM = {' in js and 'setRecord(model)' in js and "classList.toggle('sm-embed', embedded)" in js
     assert "root.classList.toggle('sm-car', carMode)" in js
+    assert "new URLSearchParams(location.search).get('ctx')" in js
+    assert "S.mode = ctx === 'record' ? 'rec' : ctx === 'analytics' ? 'defects'" in js
+    # на «Записать» вместо А-листа — «Схемы» (режим карты mode3d), список номеров — из window.SM
+    assert "b.textContent = 'Схемы'" in js and "const want = $(schemes ? 'mode3d' : 'modeBody');" in js
+    assert 'info() {' in js and 'async showView(name)' in js and 'async pick(no)' in js and 'onChange(cb)' in js
+    # кнопки станций — и на «Схемах» (на «Записать» и в «Аналитике»); переключатель видит, что карта ушла в 3D
+    assert 'id="stBar" role="group" aria-label="Камера к станции" data-for="body 3d"' in html
+    assert 'station(loc) {' in js and 'const modeSync = () => {' in js
     assert 'if (carMode && hook) { hook({ model: mapModel() || S.model, no, part: s && s.part }); return; }' in js
     assert "(embedded ? 'rec' : 'defects')" in js                   # во фрейме сначала — где какие шпильки
     src = re.search(r'<script src="(app\.[0-9a-f]+\.js)" defer>', html).group(1)
@@ -438,6 +500,9 @@ def test_layout_mode(client):
     # записанные по машине шпильки в «Записи» — зелёный номерок с ✓
     assert 'n:window.__smDone&&window.__smDone.has(xe.no)?"\\u2713":""' in bundle and '"#1A7F37"' in bundle
     assert 'setDone(nums)' in js and 'window.__smDone = new Set(' in js
+    # «во весь экран» по просьбе страницы — как кнопка карты (без жеста браузер не даст — карта растянет окно)
+    assert 'fullscreen() {' in js and "const b = $('fsBtn');" in js
+    assert int(re.search(r'layout\.js\?v=(\d+)', html).group(1)) >= 12
 
 
 @pytest.mark.skipif(shutil.which('node') is None, reason='node недоступен')
@@ -445,3 +510,51 @@ def test_layout_mode(client):
 def test_scripts_have_no_syntax_errors(path):
     r = subprocess.run(['node', '--check', os.path.join(*path)], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
+
+
+# ── станция шпильки ──────────────────────────────────────────────────────────
+
+def test_zone_of():
+    assert smd.zone_of((0.5, 0.3, 0)) == 'FRONT FLOOR' and smd.zone_of((-1.0, 0.3, 0)) == 'REAR FLOOR'
+    assert smd.zone_of((-1.3, 0.5, 0.7)) == 'WHEEL HOUSE' and smd.zone_of((1.7, 0.6, 0)) == 'ENGINE COMP'
+    assert smd.zone_of((9, 9, 9)) is None
+
+
+def _shop_no(app, stud_no=4021):
+    with _db(app) as con:
+        return con.execute('SELECT shop_no FROM stud WHERE stud_no=?', (stud_no,)).fetchone()['shop_no']
+
+
+def _put_body(app, model, no, pt):
+    d = _data_dir(app)
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, 'body.json'), 'w', encoding='utf-8') as f:
+        json.dump({'body': {model: [{'no': no, 'part': 'X', 'pts': [list(pt)]}]}}, f)
+
+
+def test_station_from_register_then_3d(app, client):
+    """У шпилек в схемах станции нет — запись получает её из реестра цеха, а нет в реестре — по месту
+    шпильки на 3D-кузове. В «Журнале» и в карточке шпильки — та же станция."""
+    shop_no = int(_shop_no(app))
+    _put_body(app, 'A13T', shop_no, (0.5, 0.3, 0))                      # на 3D — передний пол
+    rec = _post_record(client)['record']
+    assert rec['station'] == 'FRONT FLOOR'
+    _put_register(app, _register_xlsx([_row(1, model='A13T', stud=shop_no, loc='REAR FLOOR')]))
+    with _db(app) as con:                                                 # реестр главнее 3D
+        con.execute('DELETE FROM stud_defect')
+    rec = _post_record(client)['record']
+    with _db(app) as con:
+        assert con.execute('SELECT station FROM stud_defect WHERE id=?', (rec['id'],)).fetchone()[0] == 'REAR FLOOR'
+    log = client.get('/api/studs/records?status=all').get_json()['records']
+    assert [r['station'] for r in log] == ['REAR FLOOR']
+    stud = next(s for s in client.get('/api/studs/catalog').get_json()['studs'] if s['stud_no'] == 4021)
+    assert stud['station'] == 'REAR FLOOR'
+
+
+def test_old_record_without_station_gets_it_in_journal(app, client):
+    rec = _post_record(client)['record']
+    with _db(app) as con:
+        con.execute('UPDATE stud_defect SET station=NULL WHERE id=?', (rec['id'],))
+    assert client.get('/api/studs/records?status=all').get_json()['records'][0]['station'] is None
+    _put_body(app, 'A13T', int(_shop_no(app)), (-1.0, 0.3, 0))
+    assert client.get('/api/studs/records?status=all').get_json()['records'][0]['station'] == 'REAR FLOOR'

@@ -23,6 +23,13 @@
   document.documentElement.setAttribute('data-theme', t);
   window.__smBgs = { dark: '#0d1117', light: '#EFEBE4' };
   window.__smBg = window.__smBgs[t];
+  /* Где открыта карта (?ctx, см. layout.js) — ставим до отрисовки: «Шпильки» → «Записать» сразу
+     рисуется как «Запись» (шпильки с номерами, без дефектов, легенды и аналитики), а не сначала как
+     карта дефектов, которую потом переключают. */
+  var ctx = null;
+  try { ctx = new URLSearchParams(location.search).get('ctx'); } catch (e) { /* старый браузер */ }
+  if (ctx === 'record') { document.documentElement.classList.add('sm-record', 'sm-rec'); window.__smRec = true; document.title = '3D-схема шпилек'; }
+  if (ctx === 'analytics') document.documentElement.classList.add('sm-analytics');
 })();
 </script>
 <style>
@@ -504,10 +511,28 @@ h2 { font: 800 12.5px/1.2 var(--font-display); margin: 0 0 8px; text-transform: 
 /* ── Карта во фрейме страницы «Шпильки»: машина по QR (html.sm-car ставит layout.js) ──
    Модель — из QR, шпилька записывается со страницы: кнопка «Дефекты/Запись», переключатель
    3D/А-лист (А-лист — свой у страницы) и выбор модели здесь не нужны. Без машины — всё как обычно. */
-html.sm-car #recBtn, html.sm-car #viewSeg { display: none !important; }
+html.sm-car #recBtn, html.sm-car:not(.sm-record) #viewSeg { display: none !important; }   /* на «Записать» — «3D / Схемы» и с машиной */
 html.sm-car .vtitle { pointer-events: none; padding-right: 12px; }
 html.sm-car .vtitle::after { display: none; }
 @media (max-width: 600px) { html.sm-car .viewbar .vtitle { max-width: calc(100% - 156px); } }   /* кнопки «Дефекты» нет — модели места больше */
+/* «Шпильки» → «Записать» — только шпильки (без «Дефектов»); «Аналитика» → «Шпильки» — только дефекты */
+html.sm-record #recBtn, html.sm-record #layBack, html.sm-analytics #recBtn, html.sm-analytics #viewSeg { display: none !important; }
+/* на «Записать» дефектов нет вовсе — даже если режим карты почему-то не переключился: аналитика,
+   легенда дефектов, плашки «без №», 2D дефектов и числа у станций скрыты всегда */
+html.sm-record .panel, html.sm-record #lgBox, html.sm-record .zones, html.sm-record #mode2d,
+html.sm-record .vm-show, html.sm-record .stbar button span { display: none !important; }
+html.sm-record .stage { height: 100vh; border-bottom: 0; }
+@media (max-width: 600px) {
+  html.sm-record .viewbar .vtitle, html.sm-analytics .viewbar .vtitle { max-width: calc(100% - 156px); }
+  /* кнопки станций (FF, RF…) — своей строкой во всю ширину, иначе не помещаются и обрезаются */
+  html.sm-embed .viewbar > .stbar { order: 4; flex: 1 1 100%; min-width: 0; }
+  /* телефон: над картой — только модель и кнопки. «3D / Схемы» — в меню «⋯» (Режим); станции
+     выбирают ниже: на «Записать» — в списке номеров под картой, в «Аналитике» — в блоке «Станции».
+     Заголовок «Карта дефектов шпилек» в «Аналитике» не нужен — он уже во вкладке страницы.
+     На компьютере (фрейм шире 600px) всё остаётся как было. */
+  html.sm-record #viewSeg, html.sm-record #stBar, html.sm-analytics #stBar,
+  html.sm-analytics .s-hdr { display: none !important; }
+}
 </style>
 </head>
 <body>
@@ -520,7 +545,7 @@ html.sm-car .vtitle::after { display: none; }
       <div class="vtitle" id="vtitle">—</div>
       <button class="vmode" id="recBtn" type="button" aria-label="Запись" title="Запись: все шпильки с номерами, без дефектов"><span class="vmode-t">Запись</span></button>
       <span class="seg2" id="viewSeg" role="group" aria-label="Вид записи" hidden><button type="button" data-v="3d" aria-pressed="true" title="Общая 3D-карта: все шпильки с номерами">3D</button><button type="button" data-v="sheet" aria-pressed="false" title="А-листы цеха: чертежи с номерами">А-лист</button></span>
-      <div class="stbar" id="stBar" role="group" aria-label="Камера к станции" data-for="body"></div>
+      <div class="stbar" id="stBar" role="group" aria-label="Камера к станции" data-for="body 3d"></div>
       <button class="vmbtn" id="camReset" type="button" data-for="body 3d" title="Сбросить вид: камера в исходное положение, выбор шпильки снят">
         <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path d="M4.2 8.2A6.2 6.2 0 1 1 4 11.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M3.6 3.8v4.6h4.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span class="sr">Сбросить вид</span>
@@ -689,7 +714,7 @@ html.sm-car .vtitle::after { display: none; }
 </div>
 
 <script src="app.ea26d9b9.js" defer></script>
-<script src="layout.js?v=5" defer></script>
+<script src="layout.js?v=12" defer></script>
 <script>
 /* Плашка модели (слева вверху) — выпадающий список. Пункты берём из скрытого блока #models
    (его строит app.*.js), выбор — click() по той же кнопке: логика карты не меняется.
