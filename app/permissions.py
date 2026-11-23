@@ -58,6 +58,7 @@ _BP_AREA = {
     'defects': 'defects',
     'studs': 'studs',          # «Шпильки»: оператор сборки записывает, ИТО/УЗК разбирают
     'analytics': 'analytics',
+    'stud_map': 'studs',       # Шпильки → «Визуализация» (3D-карта); загрузка реестра — WeldTeam
     'workers': 'workers',
     'explorer': 'explorer',
     'admin': 'editor',

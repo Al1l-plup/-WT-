@@ -17,6 +17,8 @@
     .sp-tabs{display:flex;gap:6px;margin-bottom:1rem}
     .sp-tabs button{flex:0 0 auto;padding:8px 16px;border-radius:20px;border:1px solid var(--border);background:var(--card);color:var(--muted);font:inherit;font-weight:600;cursor:pointer}
     .sp-tabs button[aria-selected=true]{background:var(--accent);border-color:var(--accent);color:#fff}
+    /* «Визуализация» — отдельная страница /studs/map (карта дефектов), поэтому ссылка, а не кнопка */
+    .sp-tabs a{flex:0 0 auto;padding:8px 16px;border-radius:20px;border:1px solid var(--border);background:var(--card);color:var(--muted);font:inherit;font-weight:600;text-decoration:none;white-space:nowrap}
     .sp-big{font-size:17px;padding:14px 18px;min-height:52px}
     .linkish{background:none;border:0;color:var(--accent);font:inherit;font-size:13px;cursor:pointer;padding:6px 2px;text-decoration:underline;text-underline-offset:3px}
     .sp-links{margin-top:8px;color:var(--muted);font-size:13px}
@@ -78,6 +80,7 @@
     .sp-imgs li{display:flex;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);list-style:none;font-size:13px}
     @media (max-width:640px){
       .sp-tabs button{flex:1}
+      .sp-tabs a{flex:1;padding:8px 10px;min-height:44px;display:flex;align-items:center;justify-content:center}
       .sp-filters .fgroup{flex:1 1 45%}
       .sp-mapwrap{max-height:62vh}
     }
@@ -112,6 +115,7 @@
   <div class="sp-tabs" role="tablist">
     <button type="button" role="tab" id="tabRecBtn" aria-controls="tabRec" aria-selected="true">Записать</button>
     <button type="button" role="tab" id="tabLogBtn" aria-controls="tabLog" aria-selected="false">Журнал <span class="badge bw" id="newCount" hidden></span></button>
+    <a role="tab" id="tabMapBtn" href="/studs/map" aria-selected="false">Визуализация</a>
   </div>
 
   <!-- ── Запись (оператор) ── -->

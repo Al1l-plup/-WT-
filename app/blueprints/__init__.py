@@ -16,6 +16,7 @@ from app.blueprints import (
     maintenance,
     pages,
     reconciliation,
+    stud_map,
     studs,
     workers,
 )
@@ -28,6 +29,7 @@ _BLUEPRINTS = (
     defects.bp,
     studs.bp,
     analytics.bp,
+    stud_map.bp,
     workers.bp,
     explorer.bp,
     admin.bp,
