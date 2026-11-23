@@ -46,7 +46,7 @@
 
   // qr — сырой текст QR карты (уходит с записью), token — модель из него (пусто: нижний QR или VIN руками),
   // noScheme — модель знакома, но схемы шпилек для неё нет
-  function blank() { return { vin: '', vinKey: '', qr: '', token: '', noScheme: false, scheme: '', view: '', sel: null, cam: 0, t: 0, recView: '3d' }; }
+  function blank() { return { vin: '', vinKey: '', qr: '', token: '', noScheme: false, scheme: '', view: '', sel: null, cat: '', cam: 0, t: 0, recView: '3d' }; }
   function save() { S.t = Date.now(); try { localStorage.setItem(STORE, JSON.stringify(S)); } catch { /* приватный режим */ } }
   function restore() {
     try {
@@ -646,6 +646,7 @@
 
   function selectStud(no) {
     S.sel = no;
+    S.cat = '';                      // вид дефекта — заново для каждой шпильки
     S.cam = 0;
     save();
     refreshMarks();
@@ -665,8 +666,24 @@
     const pic = partPicUrl(partKey(s));
     $('selPic').hidden = !pic;
     if (pic) $('selPic').src = pic; else $('selPic').removeAttribute('src');
+    renderCats();
     $('sheet').hidden = false;
     if (note) say($('sendStatus'), 'warn', note);
+  }
+
+  // Вид дефекта — кнопками до фото: без него фото не сделать; выбрал → фото → запись сразу уходит.
+  // Порядок — как чаще встречается в цеху; подписи — из справочника сервера (C.categories).
+  const CAT_ORDER = ['missing', 'broken', 'torn', 'bent', 'shifted', 'stick'];
+  function renderCats() {
+    const cats = (C && C.categories) || {};
+    const codes = [...CAT_ORDER.filter(k => cats[k]), ...Object.keys(cats).filter(k => !CAT_ORDER.includes(k))];
+    if (S.cat && !cats[S.cat]) S.cat = '';
+    $('catBtns').innerHTML = codes.map(k =>
+      `<button type="button" data-cat="${esc(k)}" aria-pressed="${S.cat === k}">${esc(cats[k])}</button>`).join('');
+    $('catBtns').classList.remove('need');
+    $('catHead').textContent = S.cat ? 'Вид дефекта' : 'Вид дефекта — выберите, потом фото';
+    $('photoBtn').disabled = !S.cat || sending;
+    $('photoGalleryBtn').disabled = !S.cat || sending;
   }
 
   function closeSheet() { $('sheet').hidden = true; }
@@ -674,6 +691,7 @@
   // ── запись: фото и отправка ────────────────────────────────────────────────
 
   function startPhoto(inputId) {
+    if (!S.cat) { $('catBtns').classList.add('need'); return; }
     S.cam = 1;                       // если Chrome выгрузят во время съёмки — увидим после перезапуска
     save();
     const inp = $(inputId);
@@ -690,6 +708,7 @@
 
   async function send() {
     if (sending || !pendingPhoto || !S.sel) return;
+    if (!S.cat) { $('catBtns').classList.add('need'); say($('sendStatus'), 'warn', 'Выберите вид дефекта — фото уйдёт сразу'); return; }
     sending = true;
     const btn = $('photoBtn');
     btn.disabled = true;
@@ -699,14 +718,16 @@
       fd.append('vin', S.vin);
       fd.append('scheme_code', S.scheme);
       fd.append('stud_no', String(S.sel));
+      fd.append('category', S.cat);
       if (S.qr) fd.append('card_qr', S.qr);   // сырой текст QR: сервер сверит VIN и запомнит новую модель
       fd.append('photo', await shrinkPhoto(pendingPhoto));
       const res = await fetch('/api/studs/records', { method: 'POST', body: fd }).then(readJson);
       if (res.status !== 'success') { say($('sendStatus'), 'danger', esc(res.message || 'Не записано')); return; }
       pendingPhoto = null;
       if (res.record && !carRecords.some(r => r.id === res.record.id)) carRecords.unshift(res.record);
-      toast((res.duplicate ? '' : '✓ ') + res.message);
+      toast((res.duplicate ? '' : '✓ ') + res.message + (res.duplicate || !res.record ? '' : ' · ' + (res.record.category_label || '')));
       S.sel = null;
+      S.cat = '';
       save();
       closeSheet();
       refreshMarks();
@@ -716,7 +737,7 @@
       say($('sendStatus'), 'danger', 'Нет связи с сервером — запись не сохранена. <button class="btn btn-sm btn-primary" type="button" id="retryBtn">Отправить ещё раз</button>');
     } finally {
       sending = false;
-      btn.disabled = false;
+      btn.disabled = !S.cat;
     }
   }
 
@@ -794,7 +815,7 @@
       <td data-label="Станция">${esc(r.station || '—')}</td>
       <td data-label="Оператор">${esc(r.operator || '—')}</td>
       <td data-label="Фото">${r.has_photo ? `<img class="sp-thumb" loading="lazy" src="/api/studs/records/${r.id}/photo" alt="Фото шпильки ${esc(r.stud_label)}">` : '—'}</td>
-      <td data-label="Категория">${r.category ? esc(r.category_label) : '<span class="badge bw">не разобрано</span>'}</td>
+      <td data-label="Категория">${r.category ? esc(r.category_label) : '—'}${r.reviewed_at ? '' : ' <span class="badge bw">не разобрано</span>'}</td>
       <td data-label="Источник">${esc(r.source_label || '—')}</td></tr>`).join('');
   }
 
@@ -1031,6 +1052,14 @@
       }).observe($('mapWrap'));
     }
 
+    $('catBtns').addEventListener('click', e => {
+      const b = e.target.closest('button[data-cat]');
+      if (!b) return;
+      S.cat = b.dataset.cat;
+      save();
+      renderCats();
+      if (pendingPhoto) send();        // фото уже было (обрыв связи) — уходит с выбранным видом
+    });
     $('photoBtn').addEventListener('click', () => startPhoto('filePhotoCam'));
     $('photoGalleryBtn').addEventListener('click', () => startPhoto('filePhotoGal'));
     ['filePhotoCam', 'filePhotoGal'].forEach(id => $(id).addEventListener('change', e => {
@@ -1038,7 +1067,7 @@
       if (f) onPhotoFile(f); else { S.cam = 0; save(); }
     }));
     $('selCancelBtn').addEventListener('click', () => {
-      S.sel = null; S.cam = 0; save();
+      S.sel = null; S.cat = ''; S.cam = 0; save();
       document.querySelectorAll('#map .mk.sel').forEach(b => b.classList.remove('sel'));
       closeSheet();
       renderNums();

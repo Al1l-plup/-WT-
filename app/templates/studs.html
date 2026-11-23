@@ -68,6 +68,14 @@
     .sp-sheet{position:sticky;bottom:0;z-index:50;background:var(--card);border:1px solid var(--accent);border-radius:var(--r) var(--r) 0 0;padding:12px 14px calc(12px + env(safe-area-inset-bottom));box-shadow:0 -6px 20px rgba(0,0,0,.35);margin:0 -2px}
     .sp-sheet h3{font-size:17px;margin-bottom:2px}
     .sp-sheet .meta{color:var(--muted);font-size:13px;margin-bottom:10px}
+    /* вид дефекта — до фото: выбрал → фото → запись сразу уходит */
+    .sp-cathead{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
+    .sp-cats{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;margin-bottom:10px}
+    .sp-cats button{min-height:44px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--card2);color:var(--text);font:inherit;font-size:14px;text-align:left;cursor:pointer}
+    .sp-cats button[aria-pressed=true]{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 30%,var(--card2));font-weight:600}
+    .sp-cats.need button{border-color:color-mix(in srgb,var(--warning,#d29922) 70%,var(--border))}
+    #photoBtn:disabled{opacity:.45;cursor:not-allowed}
+    .linkish:disabled{opacity:.45;cursor:not-allowed;text-decoration:none}
     .sp-status{margin-top:8px;font-size:13px}
     .sp-car li{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);list-style:none;font-size:13px}
     .sp-car li:last-child{border-bottom:0}
@@ -220,7 +228,9 @@
         <div><h3>Шпилька <span id="selNo"></span></h3>
           <div class="meta" id="selMeta"></div></div>
       </div>
-      <button class="btn btn-primary btn-full sp-big" type="button" id="photoBtn">📷 Сфотографировать шпильку</button>
+      <div class="sp-cathead" id="catHead">Вид дефекта</div>
+      <div class="sp-cats" id="catBtns" role="group" aria-labelledby="catHead"></div>
+      <button class="btn btn-primary btn-full sp-big" type="button" id="photoBtn" disabled>📷 Сфотографировать шпильку</button>
       <div class="sp-links">
         <button class="linkish" type="button" id="photoGalleryBtn">выбрать из галереи</button> ·
         <button class="linkish" type="button" id="selCancelBtn">отмена</button>
@@ -239,7 +249,7 @@
     <div class="card">
       <div class="sp-filters">
         <div class="fgroup"><label class="lbl" for="fStatus">Показать</label>
-          <select id="fStatus"><option value="new">Без категории</option><option value="all">Все</option></select></div>
+          <select id="fStatus"><option value="new">Не разобрано</option><option value="all">Все</option></select></div>
         <div class="fgroup"><label class="lbl" for="fScheme">Модель</label><select id="fScheme"><option value="">Все модели</option></select></div>
         <div class="fgroup"><label class="lbl" for="fQ">VIN или № шпильки</label><input type="search" id="fQ" placeholder="например 7086" autocomplete="off"></div>
         <div class="fgroup"><label class="lbl" for="fFrom">С даты</label><input type="date" id="fFrom"></div>
@@ -297,6 +307,6 @@
 
 <script src="/static/vendor/jsQR.js"></script>
 <script src="/static/page-state.js?v=1"></script>
-<script src="/static/studs.js?v=23"></script>
+<script src="/static/studs.js?v=24"></script>
 </body>
 </html>

@@ -30,8 +30,10 @@ def _db(app):
     return con
 
 
-def _post_record(c, vin=VIN, scheme='A13T', stud_no=4021, photo=JPEG, name='p.jpg', card_qr=None):
+def _post_record(c, vin=VIN, scheme='A13T', stud_no=4021, photo=JPEG, name='p.jpg', card_qr=None, category='missing'):
     data = {'vin': vin, 'scheme_code': scheme, 'stud_no': str(stud_no)}
+    if category is not None:
+        data['category'] = category
     if card_qr is not None:
         data['card_qr'] = card_qr
     if photo is not None:
@@ -266,6 +268,18 @@ def test_records_filters(client):
     _post_record(client, scheme='P01G', stud_no=1049)                # 7035? — повтор в Excel цеха
     assert {r['stud_label'] for r in q('q=7035')} == {'7035', '7035?'}
     assert {r['stud_label'] for r in q('q=7035%3F')} == {'7035', '7035?'}
+
+
+def test_defect_type_required_and_chosen_before_photo(client):
+    """Вид дефекта оператор выбирает до фото: без него (или с чужим кодом) запись не принимается;
+    с ним — сразу в записи и в «Журнале», но «не разобрано», пока ИТО/УЗК не проверили по фото."""
+    for bad in (None, '', 'zzz'):
+        r = _post_record(client, category=bad)
+        assert r.status_code == 400 and 'вид дефекта' in r.get_json()['message']
+    rec = _post_record(client, category='bent').get_json()['record']
+    assert rec['category'] == 'bent' and rec['category_label'] == 'Погнута' and rec['reviewed_at'] is None
+    new = client.get('/api/studs/records?status=new').get_json()['records']
+    assert [x['id'] for x in new] == [rec['id']]                    # в очереди разбора — с видом дефекта
 
 
 def test_review_by_uzk_and_forbidden_for_production(client, register_client):

@@ -86,9 +86,9 @@ def _db(app):
     return con
 
 
-def _post_record(c, stud_no=4021, scheme='A13T', vin=VIN):
+def _post_record(c, stud_no=4021, scheme='A13T', vin=VIN, category='missing'):
     return c.post('/api/studs/records', data={'vin': vin, 'scheme_code': scheme, 'stud_no': str(stud_no),
-                                              'photo': (io.BytesIO(JPEG), 'p.jpg')},
+                                              'category': category, 'photo': (io.BytesIO(JPEG), 'p.jpg')},
                   content_type='multipart/form-data').get_json()
 
 
@@ -175,6 +175,11 @@ def test_studs_page_record_and_map_together(client):
     assert page.index('id="mapNumsBody"') < page.index('id="mapViews"') < page.index('id="mapStations"') < page.index('id="mapNumGrid"')
     assert "localStorage.setItem(NUMS_STORE, open ? '1' : '0')" in js and "$('mapHint').hidden = !three;" in js
     assert 'Где какие шпильки стоят' not in js and int(src.group(1)) >= 23
+    # карточка шпильки: сначала вид дефекта (кнопки), фото до выбора выключено; выбрал → фото → запись сразу
+    assert page.index('id="catBtns"') < page.index('id="photoBtn" disabled') and int(src.group(1)) >= 24
+    assert "if (!S.cat) { $('catBtns').classList.add('need'); return; }" in js and "fd.append('category', S.cat);" in js
+    assert "$('photoBtn').disabled = !S.cat || sending;" in js and "S.cat = '';                      // вид дефекта" in js
+    assert '<option value="new">Не разобрано</option>' in page                 # «Журнал»: очередь разбора ИТО/УЗК
     assert 'w.SM.onChange(renderNums)' in js and 'w.SM.pick(+b.dataset.no)' in js and 'w.SM.showView(b.dataset.sheet)' in js
     assert 'const sheet = !!sc && !has3d();' in js                     # А-лист раздела — только без 3D
     # фильтр списка по станции (FF, RF…): в 3D камера едет к станции; станция, нажатая над картой, — в списке
@@ -276,7 +281,7 @@ def test_site_records_on_map(app, client):
     x = site[0]
     today = dt.date.fromisoformat(rec['created_at'][:10])
     assert (x['model'], x['stud_no'], x['studs'], x['mass']) == ('A13T', int(shop_no), 1, False)
-    assert x['category'] == 'Не указано' and x['body_no'] == '…' + VIN[-6:]
+    assert x['category'] == 'Отсутствует' and x['body_no'] == '…' + VIN[-6:]   # вид дефекта — от оператора, сразу
     assert x['week'] == '{}-W{:02d}'.format(*today.isocalendar()[:2]) and x['location'] == 'REAR FLOOR'
     r = client.patch(f'/api/studs/records/{rec["id"]}', json={'category': 'shifted', 'source': 'body'})
     assert r.get_json()['status'] == 'success'

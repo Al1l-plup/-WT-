@@ -280,12 +280,13 @@ def _row_out(r):
 
 @bp.route('/api/studs/records')
 def records():
-    """Журнал. Фильтры: status=new (без категории) | all, scheme, vin (рабочий ключ),
+    """Журнал. Фильтры: status=new (не разобрано ИТО/УЗК: вид дефекта ставит оператор при записи,
+    разбор его проверяет по фото) | all, scheme, vin (рабочий ключ),
     q — номер шпильки (номер цеха; «7035» находит и «7035?») или часть VIN,
     date_from/date_to (YYYY-MM-DD). Новые сверху."""
     where, args = [], []
     if request.args.get('status') == 'new':
-        where.append("COALESCE(d.category,'') = ''")
+        where.append('d.reviewed_at IS NULL')
     if request.args.get('scheme'):
         where.append('d.scheme_code = ?')
         args.append(request.args['scheme'])
@@ -318,8 +319,10 @@ def records():
 
 @bp.route('/api/studs/records', methods=['POST'])
 def record_create():
-    """Новая запись: VIN (как прочитан), схема, номер шпильки, фото шпильки (обязательно),
-    card_qr — сырой текст QR карты (если машину записали по QR).
+    """Новая запись: VIN (как прочитан), схема, номер шпильки, вид дефекта (category — код из
+    st.CATEGORIES, обязательно: оператор выбирает его до фото), фото шпильки (обязательно),
+    card_qr — сырой текст QR карты (если машину записали по QR). Разбор ИТО/УЗК (PATCH) вид
+    дефекта может поправить; до разбора запись — «не разобрано» (reviewed_at пуст).
 
     Новое начало VIN и новая модель из QR запоминаются за выбранной схемой. Та же шпилька
     той же машины в течение DUPLICATE_WINDOW_MINUTES — не дубль, а уже существующая запись."""
@@ -341,6 +344,9 @@ def record_create():
         stud_no = int(form.get('stud_no') or 0)
     except ValueError:
         return _err('Номер шпильки — число')
+    category = (form.get('category') or '').strip()
+    if category not in st.CATEGORIES:
+        return _err('Выберите вид дефекта')
     db = get_db()
     stud = db.execute(f'SELECT stud_no, {_LABEL_SQL.format(t="stud")} AS label, scheme_code, station '
                       'FROM stud WHERE stud_no=? AND active=1', (stud_no,)).fetchone()
@@ -367,9 +373,9 @@ def record_create():
         f.save(path)
         now = _now()
         cur = db.execute('INSERT INTO stud_defect (created_at, created_by, vin, vin_key, scheme_code, stud_no, station, '
-                         'photo, card_qr) VALUES (?,?,?,?,?,?,?,?,?)',
+                         'category, photo, card_qr) VALUES (?,?,?,?,?,?,?,?,?,?)',
                          (now, uid, raw_vin, key, scheme, stud_no, _station(scheme, stud['label'], stud['station']),
-                          fname, card_qr))
+                          category, fname, card_qr))
         db.execute('INSERT OR IGNORE INTO stud_vin_prefix (prefix, scheme_code, created_at, created_by) VALUES (?,?,?,?)',
                    (st.vin_prefix(key), scheme, now, uid))
         if token:   # незнакомая модель из QR: выбор оператора запоминается — дальше схема откроется сама
