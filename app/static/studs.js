@@ -7,6 +7,12 @@
  * если Android выгрузит Chrome во время съёмки, оператор продолжит с того же места.
  *
  * Журнал: ИТО/УЗК разбирают записи по фото — категория, источник, комментарий.
+ *
+ * 3D-карта шпилек (фрейм /studs/map/app/, app/static/stud-map/) — на той же вкладке:
+ * без машины — обычная карта: «Запись» (где какие шпильки, с номерами) ↔ «Дефекты» (реестр цеха +
+ * записи сайта); после QR — 3D модели этой машины. Шпильку выбирают в 3D или на А-листе (картинки
+ * схем раздела): нажатие в 3D приходит сюда (window.__smRecordStud во фрейме) и открывает ту же
+ * запись с фото. Номер на карте — номер цеха.
  */
 (function () {
   'use strict';
@@ -39,7 +45,7 @@
 
   // qr — сырой текст QR карты (уходит с записью), token — модель из него (пусто: нижний QR или VIN руками),
   // noScheme — модель знакома, но схемы шпилек для неё нет
-  function blank() { return { vin: '', vinKey: '', qr: '', token: '', noScheme: false, scheme: '', view: '', sel: null, cam: 0, t: 0 }; }
+  function blank() { return { vin: '', vinKey: '', qr: '', token: '', noScheme: false, scheme: '', view: '', sel: null, cam: 0, t: 0, recView: '3d' }; }
   function save() { S.t = Date.now(); try { localStorage.setItem(STORE, JSON.stringify(S)); } catch { /* приватный режим */ } }
   function restore() {
     try {
@@ -155,6 +161,89 @@
     return p && p.has_image ? `/api/studs/parts/${encodeURIComponent(key)}/image?v=${p.img_v}` : '';
   }
 
+  // ── 3D-карта шпилек (фрейм) ────────────────────────────────────────────────
+
+  let mapSt = null;              // /api/stud-map/status: есть ли схемы 3D, схема → модель карты
+  let mapFrame = null;
+  let mapSent;                   // что последним передано карте: модель «Записи» или null (дефекты)
+  let mapDirty = false;          // появились/удалены записи — карте дефектов нужны свежие данные
+
+  async function loadMapStatus() {
+    try {
+      const r = await fetch('/api/stud-map/status');
+      mapSt = r.ok ? await r.json() : null;
+    } catch { mapSt = null; }
+  }
+  const mapModelOf = code => (mapSt && mapSt.scheme_model && mapSt.scheme_model[code]) || '';
+  const has3d = () => !!(mapFrame && S.scheme && mapModelOf(S.scheme));
+  function mapWin() { try { return mapFrame && mapFrame.contentWindow; } catch { return null; } }
+
+  function initMap() {
+    if (!mapSt || !mapSt.has_schemes) return;
+    mapFrame = document.createElement('iframe');
+    mapFrame.className = 'sm-frame';
+    mapFrame.title = 'Карта шпилек';
+    mapFrame.allow = 'fullscreen';          // кнопка «во весь экран» в карте
+    mapFrame.allowFullscreen = true;
+    mapFrame.addEventListener('load', () => {
+      mapSent = undefined;
+      const w = mapWin();
+      if (w) w.__smRecordStud = ({ no }) => onMapPick(no);   // без машины — из карточки «Записать дефект»
+      syncMap();
+    });
+    mapFrame.src = '/studs/map/app/';
+    $('smBox').replaceChildren(mapFrame);
+  }
+
+  function reloadMapIfDirty() {
+    const w = mapWin();
+    if (!mapDirty || !w) return;
+    mapDirty = false;
+    try { w.location.reload(); } catch { /* фрейм ещё грузится — данные и так свежие */ }
+  }
+
+  // Нажали шпильку в 3D: номер на карте — номер цеха (label) в схеме этой машины
+  function onMapPick(no) {
+    if (!S.vinKey || !schemeByCode[S.scheme]) {     // машины ещё нет — сначала QR
+      say($('qrStatus'), 'info', `Шпилька №${esc(no)}: сначала сфотографируйте <b>верхний QR</b> машины — откроется её 3D, там и запишите.`);
+      $('carCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    const s = C.studs.find(x => x.scheme_code === S.scheme && String(x.label) === String(no));
+    if (!s) { toast(`Шпильки №${no} нет в схеме ${S.scheme} на сайте — сообщите WeldTeam`, true); return; }
+    S.view = s.view_key;                    // на А-листе откроется её вид
+    selectStud(s.stud_no);
+  }
+
+  // Без машины — карта дефектов; машина с моделью — 3D этой модели для записи (или А-лист).
+  function syncMap() {
+    const sc = S.vinKey && schemeByCode[S.scheme];
+    const three = !!sc && has3d() && S.recView !== 'sheet';
+    const card = $('mapCard');
+    if (sc) card.hidden = !has3d();
+    else card.hidden = !!S.vinKey || !mapSt;          // машина без модели — сначала выбрать модель
+    $('mapTitle').textContent = sc ? '3D · ' + sc.title : '3D-карта шпилек';
+    $('viewMode').hidden = !sc;
+    $('viewMode').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === (three ? '3d' : 'sheet'))));
+    $('mapHint').textContent = sc
+      ? 'Нажмите на шпильку, которой нет на машине. Повернуть — пальцем, приблизить — двумя пальцами.'
+      : '«Запись» — где какие шпильки, «Дефекты» — карта дефектов. Записать дефект — после QR машины.';
+    $('mapHint').hidden = !(three || (!sc && mapFrame));
+    $('smBox').hidden = !!sc && !three;
+    const note = !mapFrame && mapSt && !mapSt.has_schemes
+      ? 'Схемы 3D-карты не установлены на сервере (папка data\stud_map) — см. docs/STUD_MAP.md.' : '';
+    $('mapNote').textContent = note;
+    $('mapNote').hidden = !note;
+    if (!mapFrame) return;
+    mapFrame.classList.toggle('rec', three);
+    const want = sc ? mapModelOf(S.scheme) : null;
+    const w = mapWin();
+    if (want !== mapSent && w && w.SM) {
+      mapSent = want;
+      w.SM.setRecord(want);
+    }
+  }
+
   // ── запись: машина ─────────────────────────────────────────────────────────
 
   // Машина: { qr } — весь текст QR карты (VIN и модель разбирает сервер) или { vin } — VIN руками.
@@ -206,6 +295,7 @@
       $('schemeCard').hidden = true;
       $('carRecordsCard').hidden = true;
       closeSheet();
+      syncMap();
       return;
     }
     $('vinText').textContent = S.vinKey;   // на экране — стандартный вид; на сервер уходит как введено
@@ -216,10 +306,13 @@
     if (!sc) $('schemePickNote').innerHTML = pickNote();
     $('schemeBtns').innerHTML = C.schemes.map(s =>
       `<button class="btn btn-ghost" type="button" data-scheme="${esc(s.code)}">${esc(s.title)}<br><small class="text-muted">${esc(s.code)}</small></button>`).join('');
-    $('schemeCard').hidden = !sc;
-    if (sc) { renderViews(); renderMap(true); }
+    // А-лист (картинки схем раздела) — по выбору или если 3D этой модели нет
+    const sheet = !!sc && (!has3d() || S.recView === 'sheet');
+    $('schemeCard').hidden = !sheet;
+    if (sheet) { renderViews(); renderMap(true); }
     renderCarRecords();
     if (S.sel && sc) openSheet(); else closeSheet();
+    syncMap();
   }
 
   // почему модель не определилась сама — и что сделать в следующий раз
@@ -411,6 +504,7 @@
       if (res.status !== 'success') { say($('sendStatus'), 'danger', esc(res.message || 'Не записано')); return; }
       pendingPhoto = null;
       if (res.record && !carRecords.some(r => r.id === res.record.id)) carRecords.unshift(res.record);
+      if (!res.duplicate) mapDirty = true;
       toast((res.duplicate ? '' : '✓ ') + res.message);
       S.sel = null;
       save();
@@ -455,6 +549,7 @@
     if (r.status !== 'success') { toast(r.message || 'Не удалено', true); return false; }
     carRecords = carRecords.filter(x => x.id !== id);
     logRows = logRows.filter(x => x.id !== id);
+    mapDirty = true;
     toast('Запись удалена');
     if (after) after();
     return true;
@@ -679,7 +774,15 @@
       carRecords = [];
       say($('qrStatus'), '', '');
       renderCar();
+      reloadMapIfDirty();
       window.scrollTo({ top: 0 });
+    });
+    $('viewMode').addEventListener('click', e => {
+      const b = e.target.closest('button[data-v]');
+      if (!b || b.dataset.v === S.recView) return;
+      S.recView = b.dataset.v;
+      save();
+      renderCar();
     });
 
     $('viewChips').addEventListener('click', e => {
@@ -774,6 +877,8 @@
     }
     renderImgList();
     renderTokenList();
+    await loadMapStatus();
+    initMap();
 
     const prev = restore();
     if (prev && prev.vinKey) {

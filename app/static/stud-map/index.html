@@ -189,7 +189,7 @@ h2 { font: 800 12.5px/1.2 var(--font-display); margin: 0 0 8px; text-transform: 
 .card .title { font: 800 18px var(--font-display); }
 .card .pn { font: 600 12px var(--font-mono); color: var(--muted); }
 .hist { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
-.hist div { display: grid; grid-template-columns: 44px 36px 1fr auto; gap: 6px; align-items: center; }
+.hist div { display: grid; grid-template-columns: 44px 46px 1fr auto; gap: 6px; align-items: center; }
 .hist .off { opacity: .4; }
 .tag { font-size: 11px; border-radius: 4px; padding: 1px 5px; background: #F6E3E1; color: var(--c-missing); white-space: nowrap; }
 /* легенда — поверх 3D, слева внизу; сворачивается кнопкой, выбор запоминается */
@@ -481,6 +481,33 @@ h2 { font: 800 12.5px/1.2 var(--font-display); margin: 0 0 8px; text-transform: 
 :root[data-theme="dark"] .studlist:hover, :root[data-theme="dark"] .studlist:focus-within { scrollbar-color: rgba(255,255,255,.3) transparent; }
 :root[data-theme="dark"] .studlist::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); }
 :root[data-theme="dark"] .studlist:hover::-webkit-scrollbar-thumb { background: rgba(255,255,255,.3); }
+
+/* сенсорный экран (телефон, планшет): всё, на что нажимают, — не ниже 44px (правило проекта).
+   Точки на схеме и плашки станций внешне не меняются — им расширена невидимая зона нажатия. */
+@media (pointer: coarse) {
+  .chip, .tab, .btn, .studbtn, .vm-tog, .lgbtn, .morebtn, .tlegend .li, .opac-t, label.row, .mmenu button { min-height: 44px; }
+  .tab { align-items: center; }
+  .vmbtn { width: 44px; height: 44px; }
+  .stbar { height: 52px; }                      /* 44px кнопки + отступ 3px и рамка 1px сверху и снизу */
+  .vmenu .opac input { height: 44px; }
+  .pin::before, .zbadge::before { content: ''; position: absolute; inset: -11px; border-radius: 999px; }
+  .zbadge::before { inset: -11px -4px; }
+  .vmode, .lay-find input { height: 44px; }
+  .seg2 { height: 52px; }
+  .lay-nums button { height: 44px; }
+  .reccard .x, .lay-info .x { width: 44px; height: 44px; }
+}
+@media (pointer: coarse) and (max-width: 600px) {
+  .vtitle { max-width: calc(100% - 156px); }   /* справа три кнопки по 44px */
+}
+
+/* ── Карта во фрейме страницы «Шпильки»: машина по QR (html.sm-car ставит layout.js) ──
+   Модель — из QR, шпилька записывается со страницы: кнопка «Дефекты/Запись», переключатель
+   3D/А-лист (А-лист — свой у страницы) и выбор модели здесь не нужны. Без машины — всё как обычно. */
+html.sm-car #recBtn, html.sm-car #viewSeg { display: none !important; }
+html.sm-car .vtitle { pointer-events: none; padding-right: 12px; }
+html.sm-car .vtitle::after { display: none; }
+@media (max-width: 600px) { html.sm-car .viewbar .vtitle { max-width: calc(100% - 156px); } }   /* кнопки «Дефекты» нет — модели места больше */
 </style>
 </head>
 <body>
@@ -661,8 +688,8 @@ h2 { font: 800 12.5px/1.2 var(--font-display); margin: 0 0 8px; text-transform: 
   </div>
 </div>
 
-<script src="app.05cf5e73.js" defer></script>
-<script src="layout.js?v=2" defer></script>
+<script src="app.59cb502a.js" defer></script>
+<script src="layout.js?v=4" defer></script>
 <script>
 /* Плашка модели (слева вверху) — выпадающий список. Пункты берём из скрытого блока #models
    (его строит app.*.js), выбор — click() по той же кнопке: логика карты не меняется.

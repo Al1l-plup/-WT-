@@ -13,6 +13,14 @@
  * Кнопка справа от модели: «Запись» ↔ «Дефекты»; переключатель [3D | А-лист]. Выбор
  * запоминается (localStorage 'stud-map.mode', 'stud-map.recView'). Модель общая.
  * Без сборки и библиотек: обычный JS, подключён в index.html после app.*.js.
+ *
+ * Во фрейме страницы «Шпильки» (/studs) — два состояния, их задаёт страница через window.SM:
+ *   SM.setRecord(null)   — машины нет: обычная карта (по умолчанию «Запись» — где какие шпильки,
+ *                          кнопка «Дефекты» ↔ «Запись», 3D / А-лист, любая модель); нажатие на
+ *                          шпильку — своя карточка, её «Записать дефект» уходит странице;
+ *   SM.setRecord('A13T') — машина по QR (html.sm-car): 3D «Записи» этой модели, модель и режим не
+ *                          переключаются, нажатие на шпильку сразу уходит странице.
+ * Страница ставит window.__smRecordStud({model, no, part}).
  */
 (() => {
   'use strict';
@@ -44,6 +52,10 @@
     const root = document.documentElement;
     const canvas = $('layCanvas'), wrap = $('layWrap'), img = $('layImg'), svg = $('laySvg');
     const S = { data: null, model: null, view: null, zoom: 1, sel: null, hiRes: false, mode: 'defects', recView: '3d' };
+    // во фрейме страницы «Шпильки»: машина по QR (carMode) — модель и режим задаёт страница (window.SM)
+    const embedded = (() => { try { return window.parent !== window && !!window.frameElement; } catch (e) { return false; } })();
+    root.classList.toggle('sm-embed', embedded);
+    let carMode = false;
 
     // ── данные ────────────────────────────────────────────────────────────────
     const load = async () => {
@@ -121,7 +133,10 @@
     const recCard = $('recCard');
     const hideRecCard = () => { recCard.hidden = true; recCard.replaceChildren(); };
     window.__smPick = (no, s) => {
-      if (S.mode !== 'rec' || S.recView !== '3d' || !S.data) return;
+      if (S.mode !== 'rec' || S.recView !== '3d') return;
+      const hook = typeof window.__smRecordStud === 'function' ? window.__smRecordStud : null;
+      if (carMode && hook) { hook({ model: mapModel() || S.model, no, part: s && s.part }); return; }
+      if (!S.data) return;
       const m = mapModel() || S.model;
       recCard.replaceChildren(studCard(m, no, { part: s && s.part, onClose: hideRecCard }));
       recCard.hidden = false;
@@ -427,14 +442,38 @@
       }
     }));
 
-    S.recView = store.get('stud-map.recView') === 'sheet' ? 'sheet' : '3d';
-    S.mode = store.get('stud-map.mode') === 'rec' ? 'rec' : 'defects';
-    paint();
-    if (S.mode === 'rec') {
-      // 3D строится после загрузки данных карты — ждём кнопки моделей, потом включаем «Запись»
+    // 3D строится после загрузки данных карты — ждём кнопки моделей, потом включаем режим
+    const whenReady = (fn) => {
       const t0 = Date.now();
-      const wait = () => (document.querySelector('#models .chip') || Date.now() - t0 > 15000 ? apply() : setTimeout(wait, 150));
+      const wait = () => (document.querySelector('#models .chip') || Date.now() - t0 > 15000 ? fn() : setTimeout(wait, 150));
       wait();
-    }
+    };
+
+    // выбор «Запись / Дефекты» и «3D / А-лист» без машины — как в прошлый раз; во фрейме страницы
+    // «Шпильки» по умолчанию «Запись» (где какие шпильки), отдельно открытая карта — «Дефекты»
+    const restoreMode = () => {
+      const m = store.get('stud-map.mode');
+      S.mode = m === 'rec' || m === 'defects' ? m : (embedded ? 'rec' : 'defects');
+      S.recView = store.get('stud-map.recView') === 'sheet' ? 'sheet' : '3d';
+    };
+
+    // для страницы «Шпильки»: model — модель карты ('A13T', 'P01'…) машины из QR; null — машины нет
+    let want = null;
+    window.SM = {
+      setRecord(model) {
+        want = model || null;
+        whenReady(() => {
+          carMode = !!want;
+          root.classList.toggle('sm-car', carMode);
+          if (want) { S.model = want; S.mode = 'rec'; S.recView = '3d'; } else restoreMode();
+          apply();
+        });
+      },
+      ready: () => !!document.querySelector('#models .chip'),
+    };
+
+    restoreMode();
+    paint();
+    if (S.mode === 'rec') whenReady(apply);
   });
 })();
