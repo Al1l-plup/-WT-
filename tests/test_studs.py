@@ -418,4 +418,5 @@ def test_studs_js_syntax_and_vin_parsing():
     assert "`${s.part}_${s.colour}`" in src and 'renderLegend(v)' in src
     # машина — по ВСЕМУ тексту верхнего QR (VIN и модель разбирает сервер), сырой QR уходит с записью
     assert 'takeCar({ qr: r.text })' in src and "fd.append('card_qr', S.qr)" in src
-    assert "r.data.includes('|')" in src                    # из двух QR на снимке берём верхний
+    # из двух QR на снимке берём верхний (в нём «|» — комплектация, ОТТС, модель); нет его — нижний (только VIN)
+    assert "found.find(t => vinFromText(t) && t.includes('|'))" in src and 'function pickCard(found)' in src
